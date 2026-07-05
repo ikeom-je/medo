@@ -10,7 +10,7 @@
 uv workspace によるPythonモノレポ構成。
 
 ```
-ag-arch-agent/
+medo/
 ├── .claude/             # Agent用ドキュメント(要約とポインタ。正本はdocs/)
 │   ├── steering/        #   常時参照する規約: product / tech / structure / testing / workflow / git
 │   ├── specs/           #   フェーズ単位のAgent向けspec要約(例: phase1/{spec,tasks}.md)

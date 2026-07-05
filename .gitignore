@@ -1,0 +1,23 @@
+# secrets
+.env
+.env.*
+service-account*.json
+*.pem
+
+# local settings
+.claude/settings.local.json
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# build artifacts
+skills/dist/
+dist/
+
+# misc
+.worktrees/

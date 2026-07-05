@@ -15,19 +15,16 @@
 | `fix/<説明>` | バグ修正 |
 
 - ドキュメントのみの変更・単一コミットの小変更は main 直接コミット可
-- 実装タスク(コード変更)は feature ブランチを推奨。完了時に main へマージ
-- 並行作業やワークスペースを汚したくない場合は git worktree を使う(`git worktree add .worktrees/<name> -b <branch>`。`.worktrees/` は .gitignore 対象)
+- 実装タスク(コード変更)は **必ず git worktree 上の feature/fix ブランチで作業する**(`git worktree add .worktrees/<name> -b <branch>`。`.worktrees/` は .gitignore 対象)。同一リポジトリを複数マシン・複数セッションで並行開発するため、作業ディレクトリの競合を防ぐ目的
+- 完了したら worktree 上で `uv run pytest` 等の検証を通してから main へマージし、`git worktree remove .worktrees/<name>` で片付ける
 - GitHub リモート追加後は main への直接 push を止め、PR 経由に移行する
 
 ---
 
 ## 2. コミットの作者情報
 
-```
-Masaya Ikeo <ikeomje@gmail.com>
-```
-
-- 新しいリポジトリ/環境では `git config user.email "ikeomje@gmail.com"` の再設定が必要
+- 作者名・メールアドレスはリポジトリにハードコードしない(公開リポジトリのため)。ローカルの `git config user.name` / `user.email` の設定値をそのまま使う
+- 新しいリポジトリ/環境ではユーザー本人が `git config user.email <自分のメール>` を設定する
 - AIエージェントがコミットする場合は Co-Authored-By トレーラーを付ける(ハーネスの規約に従う)
 
 ---
@@ -76,7 +73,11 @@ docs(steering): tech.md にLLM使い分け表を追加
 - ビルド成果物: `.venv/`、`__pycache__/`、`skills/dist/`、`dist/`
 - 個人・顧客の固有名詞を含むヒアリング実データ(要件ストアは MEDO_HOME 側にあり、リポジトリには入れない)
 
-事故が起きた場合は履歴ごと書き換える: 該当コミットを amend/rebase で除去 → `git reflog expire --expire=now --all && git gc --prune=now` → `git log -p --all` で全文検査して残存ゼロを確認する(このリポジトリで実施済みの手順)。
+事故が起きた場合(コードレビューで発覚 / 既にGitHubにpush済みのいずれでも)は、削除コミットで済ませず**履歴ごと遡って完全に除去する**方針を取る:
+1. `git filter-repo` 等でシークレット・PIIを含む全コミットの内容を書き換える(単純なamend/rebaseでは不十分な場合はこちらを使う)
+2. `git reflog expire --expire=now --all && git gc --prune=now` でローカルの残骸を削除
+3. `git log -p --all` で全文検査して残存ゼロを確認する
+4. **既にリモート(GitHub)にpush済みの場合は、書き換え後の履歴を force push して置き換える**(このリポジトリで実施済みの手順)
 
 ---
 
@@ -94,5 +95,5 @@ docs(steering): tech.md にLLM使い分け表を追加
 
 ## 6. 緊急時
 
-- 取り消しは `git revert <hash>`(履歴保持)を第一選択
-- main への force push は、履歴からの機密除去(Section 4)以外では行わない
+- 通常の取り消しは `git revert <hash>`(履歴保持)を第一選択
+- main への force push は、履歴からの機密・PII除去(Section 4)以外では行わない。機密・PII除去が目的の場合はGitHub上への影響(既存clone・fork・共同作業者)を認識した上で force push する
