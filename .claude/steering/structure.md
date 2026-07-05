@@ -11,8 +11,11 @@ uv workspace によるPythonモノレポ構成。
 
 ```
 ag-arch-agent/
-├── .claude/             # Claude Code steering & 設定
-├── docs/
+├── .claude/             # Agent用ドキュメント(要約とポインタ。正本はdocs/)
+│   ├── steering/        #   常時参照する規約: product / tech / structure / testing / workflow / git
+│   ├── specs/           #   フェーズ単位のAgent向けspec要約(例: phase1/{spec,tasks}.md)
+│   └── settings.local.json  # ローカル設定(.gitignored)
+├── docs/                # 人間用ドキュメント(正本)
 │   └── superpowers/
 │       ├── specs/       # 設計ドキュメント(PRFAQ含む)
 │       └── plans/       # 実装計画
@@ -146,4 +149,6 @@ document=偶数セグメント、collection=奇数セグメント。LocalJsonSto
 | 新しいCLIサブコマンド | `cli/src/medo_cli/main.py`(肥大化したら `commands/<name>.py` に分割) |
 | 新しいETLソース | `etl/src/medo_etl/<source>.py` + services.yaml 更新 |
 | 新しいSkill | `skills/src/<name>.md`(frontmatter必須) → `build.py` が自動で両形式に変換 |
-| 設計変更 | `docs/superpowers/specs/` に新規または追記 → steering に要約を反映 |
+| 設計変更 | 正本 `docs/superpowers/specs/` を更新 → `.claude/steering/` と `.claude/specs/` の要約を同期 |
+| 人間向け説明・手順 | `docs/`(例: `docs/setup.md`) |
+| Agent向け規約・要約 | `.claude/steering/` または `.claude/specs/<phase>/` |
