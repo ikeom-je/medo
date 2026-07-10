@@ -86,6 +86,7 @@ uv run ruff check .
 uv run medo --help
 uv run medo requirements get --project <id> --format json
 uv run medo catalog search "<キーワード>"
+uv run medo status --project <id>   # 現在地(要件・生成物・next_step)
 
 # ETL(手動、GCP認証必須)
 MEDO_BACKEND=local uv run medo etl run --since 2026-06-01 --services vertex-ai --dry-run

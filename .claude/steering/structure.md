@@ -42,7 +42,8 @@ core/
 │   ├── storage.py       # Storage Protocol + LocalJsonStorage + FirestoreStorage
 │   ├── requirements.py  # RequirementsDoc + RequirementsStore(自動バージョン採番・diff)
 │   ├── catalog.py       # CatalogEntry + CatalogStore(出典必須・30日stale判定・検索)
-│   └── artifacts.py     # Artifact + ArtifactStore(要件バージョン紐づけ・陳腐化検出)
+│   ├── artifacts.py     # Artifact + ArtifactStore(要件バージョン紐づけ・陳腐化検出)
+│   └── status.py        # project_status(): 現在地と次ステップ(next_step)の決定論導出
 └── tests/
 ```
 

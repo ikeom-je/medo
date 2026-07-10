@@ -12,9 +12,9 @@
 | コンポーネント | 内容 |
 |---|---|
 | `medo_core` | RequirementsDoc/Store(自動バージョン採番・diff)、CatalogEntry/Store(出典必須・30日stale判定・検索)、Artifact/Store(要件バージョン紐づけ・陳腐化検出)、Storage(LocalJSON+Firestore) |
-| `medo` CLI | `requirements save/get/diff`、`catalog search/get`、`artifacts save/list`、`etl run/skus` |
+| `medo` CLI | `requirements save/get/diff`、`catalog search/get`、`artifacts save/list`、`status`(現在地とnext_stepの決定論導出)、`etl run/skus` |
 | `medo_etl` | リリースノートBQ公開データセット+Billing Catalog API → Gemini Flash構造化(注入可能) → 検証通過分のみupsert。手動実行 |
-| Skill 2本 | `medo-hearing`(アイデア→要件抽出)、`medo-propose-architecture`(根拠付き複数案)。共通md→Claude/agy形式にビルド |
+| Skill 2本 | `medo-hearing`(アイデア→要件抽出)、`medo-propose-architecture`(根拠付き複数案)。共通md→Claude/agy形式にビルド。開始時(プロジェクトID既知の場合のみ)・終了時に `medo status` で現在地を報告する契約 |
 
 ## スコープ外(フェーズ2以降)
 
