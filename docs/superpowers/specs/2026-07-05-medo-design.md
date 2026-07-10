@@ -96,6 +96,16 @@ Claude Codeやagy(Antigravity/Gemini)といった普段のAIツールからSkill
 4. アーキ案を見て要件の過不足に気づいたら要件を更新(v2)→ `medo requirements diff` が「どの生成物がv1依存で古いか」を返し、再生成を促す
 5. ヒアリング・要件はFirestoreに蓄積され、次案件で類似案件参照として効く(将来)
 
+### 現在地の可視化(medo status)
+
+利用者が「今どの作業ステージにいるか・次に何をすべきか」を把握しながら進められるよう、`medo status --project <id>` が保存状態から**決定論的に**現在地レポートを返す(LLMを挟まない):
+
+- 要件: 最新バージョン、confidence別件数、open_questions件数
+- 生成物: **typeごとの最新バージョンのみ**をtype昇順で返す(type・バージョン・依存要件バージョン・陳腐化staleフラグ。旧バージョンは `medo artifacts list` で参照)
+- `next_step`: 保存状態から機械的に導出する(優先順)。要件なし→`hearing` / typeごとの最新生成物に陳腐化あり→`regenerate-stale-artifacts` / アーキ案なし→`propose-architecture` / それ以外→`up-to-date`(フェーズ2で make-slides 等に拡張)。最新のみを判定対象にするのは、再生成後に旧バージョンのstaleへ引きずられて `up-to-date` に到達できない事態を防ぐため
+
+各Skillは作業の開始時と終了時に `medo status` を実行し、現在地と次ステップをユーザーに報告する(共通契約。開始時はプロジェクトIDが決まっている場合のみ — 新規ヒアリングではIDが未確定のことがある)。プロセス全体像と使い方は `docs/usage.md`(人間用)に置く。
+
 ### Claude vs Gemini のスライド比較
 
 `make-slides` は同一Skill・同一要件・同一カタログ根拠で、Claude Code(Claude)とagy(Gemini)の双方から実行できる。生成物メタデータに `generated_by: claude|gemini` を記録し、両者の出力を並べて比較・選択できる。Skill本文は共通のmarkdownとして1箇所で管理し、Claude Skill形式とagy/Gemini形式へは薄いアダプタ(配置とフロントマターの変換)で配布する。
@@ -181,7 +191,7 @@ last_verified: "2026-07-01"
 | `compare-aws` | 同一要件でAWS版アーキ案・コストを生成し比較レポート化 | 2 |
 | `decision-roadmap` | 最終推奨のロードマップ化。open_questionsを不確定パラメタとして修正コントロール | 2 |
 
-各Skillには「CLIが失敗したら推測で補完せず失敗を報告する」「stale項目は注記必須」の共通契約を記載する。
+各Skillには「CLIが失敗したら推測で補完せず失敗を報告する」「stale項目は注記必須」「開始時(プロジェクトIDが決まっている場合のみ)・終了時に `medo status` を実行し、現在地と次ステップをユーザーに報告する」の共通契約を記載する。
 
 ---
 
