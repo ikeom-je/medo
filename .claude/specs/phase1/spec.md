@@ -1,6 +1,6 @@
 # フェーズ1 spec(Agent用要約)
 
-> 正本: `docs/superpowers/specs/2026-07-05-medo-design.md`(設計・PRFAQ)。
+> 正本: `docs/superpowers/specs/medo-design.md`(設計・PRFAQ)。
 > このファイルはAgentが作業時に参照する要約。設計変更時は正本を先に更新し、本ファイルを同期する。
 
 ## ゴール

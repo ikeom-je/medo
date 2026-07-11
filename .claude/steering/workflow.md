@@ -38,26 +38,29 @@ Medo の開発では実行主体を役割で分担する。**Claudeが統制者(
 ### 相互レビュープロトコル(要約)
 
 中間生成物(スペック・実装計画・実装diff)は最小単位で相互レビューする。
-**正本: `docs/superpowers/specs/2026-07-07-cross-review-design.md`**(詳細な手段・裁定ルールはそちらを参照)。
+**正本: `docs/superpowers/specs/cross-review-design.md`**(詳細な手段・裁定ルールはそちらを参照)。
 
 - 原則: **作ったモデル ≠ レビューするモデル**。Claude作の生成物(スペック・計画・diff)は Codex + agy の両方が、agy/Codex作のdiffは Claude がレビューする。Claudeが最終裁定者で、指摘も無検証で採用しない
 - **上限2ラウンド**(指摘往復のみに適用)。早期終了は重大指摘ゼロ+コードは pytest/ruff パス。テスト・リントパスは裁定でも免除されない絶対条件
-- **記録**: コミット本文に `review: <レビュアー(+区切り)> <n>R / 重大<n>件解消 / 未解決<n>` を1行残す
+- **記録**: コミット本文に `review: <レビュアー(+区切り)> <n>R / 重大<n>件解消 / 未解決<n>` を1行残す。PRを経由する変更(git.mdセクション1)は同じ記録をPR本文にも転記する
 
 ## 4. 機能開発ワークフロー(スペック駆動)
 
 ```
 アイデア/要望
   → superpowers:brainstorming(設計の対話・承認)
-  → 設計ドキュメント作成: docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
-  → superpowers:writing-plans(実装計画: docs/superpowers/plans/)
+  → 設計ドキュメント作成: docs/superpowers/specs/<topic>-design.md
+  → superpowers:writing-plans(実装計画: docs/superpowers/plans/<topic>.md)
   → 実行: superpowers:subagent-driven-development または executing-plans
   → 検証(testing.md)→ コミット(git.md)
 ```
 
+- ファイル名に日付プレフィックスは付けない(git履歴が作成日・変更履歴を持つため冗長)。本文内にも日付ヘッダーは書かない
+
 - 設計承認前に実装を始めない
 - 実装計画のTask単位で「失敗テスト→実装→パス→コミット」を回す(計画にステップとコードが明記されている)
 - 計画から外れる判断が必要になったら、勝手に進めず計画・specを更新してから実装する
+- 実装計画のTask単位はGitHub Issueに対応させ、Issue→worktree→PR→dev/mainマージで進める(詳細: git.mdセクション1、正本: `docs/superpowers/specs/issue-driven-workflow-design.md`)
 
 ## 5. 設計判断で迷ったら
 

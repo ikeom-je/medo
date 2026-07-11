@@ -1,6 +1,6 @@
 # フェーズ1 タスク一覧(Agent用)
 
-> 正本: `docs/superpowers/plans/2026-07-05-medo-phase1.md`(各Taskの手順・コード・コマンドはすべて計画に記載)。
+> 正本: `docs/superpowers/plans/medo-phase1.md`(各Taskの手順・コード・コマンドはすべて計画に記載)。
 > 進捗は計画側のチェックボックス(`- [ ]`)を正とする。本ファイルは全体像の把握用。
 
 | # | Task | 依存 | 状態 |
