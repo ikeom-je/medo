@@ -1,8 +1,8 @@
 # プロダクト概要 — Medo(目処)
 
 > このファイルは Medo の「サービスと目的」の唯一の参照先。
-> 詳細スペック(PRFAQ含む)は `docs/superpowers/specs/2026-07-05-medo-design.md`、
-> フェーズ1実装計画は `docs/superpowers/plans/2026-07-05-medo-phase1.md` を参照。
+> 詳細スペック(PRFAQ含む)は `docs/superpowers/specs/medo-design.md`、
+> フェーズ1実装計画は `docs/superpowers/plans/medo-phase1.md` を参照。
 
 ---
 

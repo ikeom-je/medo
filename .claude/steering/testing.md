@@ -1,6 +1,6 @@
 # テストルール
 
-Medo のテスト方針。フェーズ1実装計画(`docs/superpowers/plans/2026-07-05-medo-phase1.md`)の各Taskは TDD(失敗テスト→実装→パス確認)で進める。
+Medo のテスト方針。フェーズ1実装計画(`docs/superpowers/plans/medo-phase1.md`)の各Taskは TDD(失敗テスト→実装→パス確認)で進める。
 
 ---
 
