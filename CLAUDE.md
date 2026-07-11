@@ -19,7 +19,7 @@
 ## Specs / Plans
 
 - 現行フェーズのAgent用要約: `.claude/specs/phase1/spec.md`(タスク一覧: `.claude/specs/phase1/tasks.md`)
-- 正本(人間用): 設計 `docs/superpowers/specs/2026-07-05-medo-design.md` / 実装計画 `docs/superpowers/plans/2026-07-05-medo-phase1.md`
+- 正本(人間用): 設計 `docs/superpowers/specs/medo-design.md` / 実装計画 `docs/superpowers/plans/medo-phase1.md`
 - ドキュメントは二層整理: **docs/ = 人間用(正本)、.claude/ = Agent用(要約+ポインタ)**。設計変更は正本を先に更新し要約を同期する
 
 ## 絶対に守ること

@@ -37,7 +37,7 @@
 
 | 対象 | 場所 |
 |---|---|
-| 設計ドキュメント(PRFAQ含む) | [docs/superpowers/specs/2026-07-05-medo-design.md](docs/superpowers/specs/2026-07-05-medo-design.md) |
+| 設計ドキュメント(PRFAQ含む) | [docs/superpowers/specs/medo-design.md](docs/superpowers/specs/medo-design.md) |
 | フェーズ1実装計画 | [docs/superpowers/plans/2026-07-05-medo-phase1.md](docs/superpowers/plans/2026-07-05-medo-phase1.md) |
 | Agent向けエントリポイント | [CLAUDE.md](CLAUDE.md)(Claude Code) / [AGENTS.md](AGENTS.md)(agy等) |
 | Agent向け規約(steering) | `.claude/steering/` |
