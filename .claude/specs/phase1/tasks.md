@@ -5,7 +5,7 @@
 
 | # | Task | 依存 | 状態 |
 |---|---|---|---|
-| 1 | uv workspace モノレポ土台(core/cli/etl) | — | 未着手 |
+| 1 | uv workspace モノレポ土台(core/cli/etl) | — | 完了 |
 | 2 | Storage(Protocol + LocalJSON + Firestore) | 1 | 未着手 |
 | 3 | 要件ドキュメント(RequirementsDoc + Store) | 2 | 未着手 |
 | 4 | カタログ(CatalogEntry + Store) | 2 | 未着手 |
