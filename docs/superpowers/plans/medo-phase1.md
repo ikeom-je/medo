@@ -260,7 +260,7 @@ git commit -m "feat: uv workspaceモノレポ土台(core/cli/etl)"
   - `FirestoreStorage(client)`(本番用の薄いラッパー)
   - `get_storage() -> Storage`(env `MEDO_BACKEND=local|firestore`、localの既定rootは `~/.medo`、env `MEDO_HOME` で上書き)
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `core/tests/test_storage.py`:
 
@@ -317,12 +317,12 @@ def test_firestore_get_missing_returns_none():
     assert FirestoreStorage(client).get("catalog/none") is None
 ```
 
-- [ ] **Step 2: テストが失敗することを確認**
+- [x] **Step 2: テストが失敗することを確認**
 
 Run: `uv run pytest core/tests/test_storage.py -v`
 Expected: FAIL(ModuleNotFoundError: medo_core.storage)
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `core/src/medo_core/storage.py`:
 
@@ -406,12 +406,12 @@ def get_storage() -> Storage:
     return LocalJsonStorage(root)
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `uv run pytest core/tests/test_storage.py -v`
 Expected: PASS(5 passed)
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add core/src/medo_core/storage.py core/src/medo_core/config.py core/tests/test_storage.py
