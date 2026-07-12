@@ -1,5 +1,10 @@
 # フェーズ1 spec(Agent用要約)
 
+> ⚠️ **スコープ再定義に伴い本要約は改訂待ち**。正本 `docs/superpowers/specs/medo-design.md` が
+> What/Why主軸(hearing / propose-options / grow-prfaq、facts / fermi 追加)に改訂済みで、
+> 本ファイルと実装計画は旧スコープのまま。**齟齬がある場合は正本を優先**し、
+> 実装計画の改訂(writing-plans)とあわせて本ファイルを同期する。
+
 > 正本: `docs/superpowers/specs/medo-design.md`(設計・PRFAQ)。
 > このファイルはAgentが作業時に参照する要約。設計変更時は正本を先に更新し、本ファイルを同期する。
 

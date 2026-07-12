@@ -8,14 +8,15 @@
 
 ```
 [ホスト]   Claude Code / agy (Skill+CLI)        簡易Webアプリ(フェーズ2, Gemini)
-              │ シェル実行                            │
-[CLI/コア] medo CLI ── medo_core(要件/カタログ/生成物/ストレージ)
+              │ シェル実行(市場・国策・業界動向の検索もホストLLMが担う)
+[CLI/コア] medo CLI ── medo_core(要件/ファクト/フェルミ/カタログ/生成物/ストレージ)
               │
 [知識層]   Firestore(本番) or ローカルJSON(開発・テスト) + GCS(フェーズ2)
               ↑
-[ETL]      手動実行(フェーズ1) → Cloud Scheduler + Cloud Run Job(フェーズ3):
+[ETL]      GCPカタログのみ手動実行(フェーズ1) → Scheduler+Cloud Run Job(フェーズ3):
            リリースノートBQ公開データセット + Billing Catalog API
            → Gemini Flashで構造化 → 検証通過分のみコミット
+           (市場ファクトはETLしない: 案件毎にホストLLM検索→CLIが出典検証して保存)
 ```
 
 ---
@@ -53,9 +54,10 @@
 
 | 場面 | モデル | 理由 |
 |---|---|---|
-| ヒアリング・アーキ案・スライド生成 | ホストLLM(Claude Code=Claude / agy=Gemini) | Skillが手順を規定。生成物に `generated_by: claude|gemini` を記録し比較可能 |
+| ヒアリング・打ち手提案(ミニPRFAQ)・PRFAQ育成・スライド生成 | ホストLLM(Claude Code=Claude / agy=Gemini) | Skillが手順を規定。生成物に `generated_by: claude|gemini` を記録し比較可能 |
+| 市場・国策・業界動向の検索 | ホストLLMの検索能力 | 取得結果は `medo facts save` でCLIが出典検証して保存(出典なしは拒否)。数値は出典に忠実に転記し加工しない(換算・集計はfermi) |
 | ETL構造化・knowledge-digest | Gemini Flash(`gemini-flash-latest`) | 安価・大量処理。出力は必ずpydantic検証、出典必須 |
-| 数値・launch_stage・鮮度 | **LLMを使わない** | コード(CLI/core)がそのまま返す |
+| 保存後の数値・フェルミ計算・launch_stage・鮮度 | **LLMを使わない** | コード(CLI/core)が保存・計算・返却する(fermiはast制限の四則演算+累乗のみ) |
 
 ---
 
@@ -85,8 +87,10 @@ uv run ruff check .
 # CLI実行
 uv run medo --help
 uv run medo requirements get --project <id> --format json
+uv run medo facts list --project <id>            # 市場・国策・業界動向・個社ファクト(出典・stale付き)
+uv run medo fermi calc --project <id> --file <model.yaml>  # フェルミ推定(コードが計算)
 uv run medo catalog search "<キーワード>"
-uv run medo status --project <id>   # 現在地(要件・生成物・next_step)
+uv run medo status --project <id>   # 現在地(要件・ファクト・生成物・next_step)
 
 # ETL(手動、GCP認証必須)
 MEDO_BACKEND=local uv run medo etl run --since 2026-06-01 --services vertex-ai --dry-run

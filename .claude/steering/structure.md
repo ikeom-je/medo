@@ -40,14 +40,16 @@ core/
 ├── src/medo_core/
 │   ├── config.py        # get_storage(): env MEDO_BACKEND/MEDO_HOME でバックエンド選択
 │   ├── storage.py       # Storage Protocol + LocalJsonStorage + FirestoreStorage
-│   ├── requirements.py  # RequirementsDoc + RequirementsStore(自動バージョン採番・diff)
+│   ├── requirements.py  # RequirementsDoc(背景・方針/理念・課題・要件)+ Store(自動バージョン採番・diff)
+│   ├── facts.py         # Fact + FactStore(kind: market/policy/trend/company。出典必須・180日stale判定)
+│   ├── fermi.py         # フェルミ推定の決定論計算(ファクト参照+明示的仮定×式。ast制限の四則演算+累乗。モデル込み保存で再計算可能)
 │   ├── catalog.py       # CatalogEntry + CatalogStore(出典必須・30日stale判定・検索)
-│   ├── artifacts.py     # Artifact + ArtifactStore(要件バージョン紐づけ・陳腐化検出)
+│   ├── artifacts.py     # Artifact + ArtifactStore(要件バージョン・引用ファクト紐づけ・陳腐化検出)
 │   └── status.py        # project_status(): 現在地と次ステップ(next_step)の決定論導出
 └── tests/
 ```
 
-**責務**: 要件・カタログ・生成物のスキーマと永続化。LLM呼び出しを含まない(唯一の例外は将来の `knowledge/` = digest専任)。
+**責務**: 要件・ファクト・フェルミ計算・カタログ・生成物のスキーマと永続化・決定論計算。LLM呼び出しを含まない(唯一の例外は将来の `knowledge/` = digest専任)。
 
 ---
 
@@ -57,7 +59,7 @@ core/
 cli/
 ├── pyproject.toml       # console_script: medo
 ├── src/medo_cli/
-│   └── main.py          # typer app: requirements / catalog / artifacts / etl
+│   └── main.py          # typer app: requirements / facts / fermi / catalog / artifacts / status / etl
 └── tests/
 ```
 
@@ -86,8 +88,9 @@ etl/
 ```
 skills/
 ├── src/                 # 共通md(frontmatter付き)。1ファイル=1 Skill
-│   ├── hearing.md
-│   └── propose-architecture.md
+│   ├── hearing.md            # 業界・ビジネス状況・課題・経営思想/方針の構造化
+│   ├── propose-options.md    # 市場ファクト+フェルミ+カタログ根拠→打ち手候補のミニPRFAQ候補セット化
+│   └── grow-prfaq.md         # 合意案を完全版PRFAQへ育成(カタログ根拠)
 ├── build.py             # dist/claude/<name>/SKILL.md と dist/agy/<name>.md を生成
 ├── tests/
 └── dist/                # ビルド出力(.gitignored)
@@ -104,8 +107,9 @@ document=偶数セグメント、collection=奇数セグメント。LocalJsonSto
 
 | パス | 内容 |
 |---|---|
-| `projects/{id}/requirements/v{n}` | 要件ドキュメント(旧版保持) |
-| `projects/{id}/artifacts/{type}-v{n}` | 生成物(type別バージョン採番) |
+| `projects/{id}/requirements/v{n}` | 要件ドキュメント(背景・方針/理念・課題・要件。旧版保持) |
+| `projects/{id}/facts/{fact_id}` | 市場・国策・業界動向・個社ファクト(出典必須) |
+| `projects/{id}/artifacts/{type}-v{n}` | 生成物(type別バージョン採番。mini-prfaq/prfaq/fermi/comparison/architecture/slides/mock) |
 | `catalog/{service}__{feature}` | カタログエントリ(論理ID `{service}/{feature}` を平坦化) |
 | `sku_snapshots/{service}` | SKUスナップショット(1サービス1ドキュメント) |
 
