@@ -880,6 +880,8 @@ Expected: FAIL(ModuleNotFoundError: medo_core.artifacts)
 ```python
 """生成物。必ず要件バージョンと引用カタログエントリに紐づく(なぜこの提案かを追跡可能)。"""
 
+from __future__ import annotations
+
 from typing import Literal
 
 from pydantic import BaseModel, Field
