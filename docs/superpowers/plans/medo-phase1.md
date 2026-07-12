@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** ヒアリング→要件保存→根拠付きアーキ案生成が Claude Code と agy の両ホストで通る縦切りMVP(core + 最小ETL + `medo` CLI + Skill 2本)を作る。
+**Goal:** 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(GCPカタログ根拠付き)が Claude Code と agy の両ホストで通る What/Why縦切りMVP(core + 最小ETL + `medo` CLI + Skill 3本)を作る。
 
 **Architecture:** ホスト非依存の `medo_core`(要件・カタログ・生成物・ストレージ)を中心に、`medo` CLI が決定論的な事実と計算を提供し、Skill(ホストLLMが実行する手順書)が生成的な部分を担う。ETLはリリースノートBQ公開データセットとBilling Catalog APIからカタログを更新し、Gemini Flashは構造化専任。
 
@@ -20,6 +20,11 @@
 - ストレージパスは Firestore 互換(document = 偶数セグメント、collection = 奇数セグメント)
 - コミットメッセージ末尾に Co-Authored-By: Claude Fable 5 <noreply@anthropic.com> を付ける(セッションのgit規約)
 - 日本語UI文言・ドキュメント。コード識別子は英語
+- Task 6b以降の着手は PR #11(Task 6 CLI)の dev マージ後
+- 契約変更を含むTask(6b: 要件スキーマ、6c/6e: CLI新コマンド、6d: 生成物スキーマ)は git.md の重要度判定により人間レビューを経てマージする
+- 実装・テストコード作成はCodex、最終検証(pytest/ruff実行)とコミットはClaude(workflow.md Section 3)
+- ファクトは出典必須(market/policy/trend はURL、company は由来表記)。鮮度は180日
+- フェルミ計算は ast 制限の四則演算+累乗のみ。LLM・`eval` 不使用
 
 ## ファイル構成(フェーズ1で作るもの)
 
@@ -34,19 +39,23 @@ medo/
 │   │   ├── storage.py           # Storage Protocol + LocalJsonStorage + FirestoreStorage
 │   │   ├── requirements.py      # RequirementsDoc + RequirementsStore(バージョン管理・diff)
 │   │   ├── catalog.py           # CatalogEntry + CatalogStore(鮮度判定・検索)
-│   │   ├── artifacts.py         # Artifact + ArtifactStore(要件バージョン紐づけ・陳腐化検出)
-│   │   └── status.py            # project_status(): 現在地とnext_stepの決定論導出(Task 6b)
+│   │   ├── facts.py             # Fact + FactStore(kind別出典検証・180日stale)(Task 6c)
+│   │   ├── artifacts.py         # Artifact + ArtifactStore(mini-prfaq/prfaq/fermi、引用ファクト)(Task 6d拡張)
+│   │   ├── fermi.py             # フェルミ推定の決定論計算(Task 6e)
+│   │   └── status.py            # project_status(): 現在地とnext_stepの決定論導出(Task 6f)
 │   └── tests/
 │       ├── test_storage.py
 │       ├── test_requirements.py
 │       ├── test_catalog.py
+│       ├── test_facts.py
 │       ├── test_artifacts.py
+│       ├── test_fermi.py
 │       └── test_status.py
 ├── cli/
 │   ├── pyproject.toml           # medo-cli パッケージ(console_script: medo)
 │   ├── src/medo_cli/
 │   │   ├── __init__.py
-│   │   └── main.py              # typer app: requirements / catalog / artifacts / status / etl
+│   │   └── main.py              # typer app: requirements / facts / fermi / catalog / artifacts / status / etl
 │   └── tests/test_cli.py
 ├── etl/
 │   ├── pyproject.toml           # medo-etl パッケージ
@@ -64,8 +73,9 @@ medo/
 │       └── test_pipeline.py
 └── skills/
     ├── src/
-    │   ├── hearing.md           # Skill本文(共通md、frontmatter付き)
-    │   └── propose-architecture.md
+    │   ├── hearing.md           # 業界・課題・経営思想/方針の構造化(共通md、frontmatter付き)
+    │   ├── propose-options.md   # 市場ファクト+フェルミ+カタログ根拠→打ち手ミニPRFAQ候補セット
+    │   └── grow-prfaq.md        # 合意案を完全版PRFAQへ育成
     ├── build.py                 # dist/claude/<name>/SKILL.md と dist/agy/<name>.md を生成
     └── tests/test_build.py
 
@@ -1253,130 +1263,1069 @@ git commit -m "feat(cli): medoコマンド(requirements/catalog/artifacts)"
 
 ---
 
-### Task 6b: medo status(現在地の可視化)+ docs/usage.md
+### Task 6b: 要件スキーマ拡張(background / principles / challenges)
+
+**Files:**
+- Modify: `core/src/medo_core/requirements.py`
+- Modify: `cli/src/medo_cli/main.py`(requirements get のdigest表示)
+- Test: `core/tests/test_requirements.py`(追記)、`cli/tests/test_cli.py`(追記)
+
+**Interfaces:**
+- Consumes: 既存 `RequirementsDoc` / `RequirementsStore`(Task 3)
+- Produces:
+  - `ConfidenceItem(text: str, confidence: Literal["confirmed","assumed","open"]="open")`
+  - `FunctionalRequirement(ConfidenceItem)`(後方互換のため名前を維持)
+  - `RequirementsDoc` に追加: `background: str=""` / `principles: list[ConfidenceItem]=[]` / `challenges: list[ConfidenceItem]=[]`(全てデフォルト付きのadditive change。既存保存データはそのまま検証を通る)
+- **契約変更**: 要件スキーマの拡張のため、PRは人間レビューを経てマージする
+
+- [ ] **Step 1: 失敗するテストを書く**
+
+`core/tests/test_requirements.py` に追記:
+
+```python
+def test_business_context_fields_roundtrip(store: RequirementsStore):
+    from medo_core.requirements import ConfidenceItem
+
+    doc = _doc(
+        background="インバウンド客の増加と人手不足が同時進行",
+        principles=[ConfidenceItem(text="地域の食文化を海外客に開く", confidence="confirmed")],
+        challenges=[ConfidenceItem(text="外国語の電話予約に対応できず機会損失")],
+    )
+    store.save("yoyaku", doc)
+    got = store.get("yoyaku")
+    assert got.background == "インバウンド客の増加と人手不足が同時進行"
+    assert got.principles[0].confidence == "confirmed"
+    assert got.challenges[0].confidence == "open"  # 既定はopen
+
+
+def test_backward_compat_docs_without_new_fields(store: RequirementsStore):
+    raw = _doc().model_dump(mode="json")
+    for key in ("background", "principles", "challenges"):
+        raw.pop(key, None)
+    doc = RequirementsDoc.model_validate(raw)
+    assert doc.background == "" and doc.principles == [] and doc.challenges == []
+```
+
+- [ ] **Step 2: テストが失敗することを確認**
+
+Run: `uv run pytest core/tests/test_requirements.py -v`
+Expected: FAIL(ImportError: ConfidenceItem / ValidationError)
+
+- [ ] **Step 3: 実装**
+
+`core/src/medo_core/requirements.py` の `FunctionalRequirement` と `RequirementsDoc` を次に変更:
+
+```python
+class ConfidenceItem(BaseModel):
+    text: str
+    confidence: Confidence = "open"
+
+
+class FunctionalRequirement(ConfidenceItem):
+    """機能要件。後方互換のため名前を維持(実体はConfidenceItem)。"""
+
+
+class RequirementsDoc(BaseModel):
+    project: str
+    version: int = 1
+    industry: str = ""
+    background: str = ""  # 業界・ビジネス状況の要約
+    goal: str = ""
+    principles: list[ConfidenceItem] = Field(default_factory=list)  # 経営思想・理念・方針
+    challenges: list[ConfidenceItem] = Field(default_factory=list)  # 課題(What/Whyの起点)
+    functional: list[FunctionalRequirement] = Field(default_factory=list)
+    non_functional: dict[str, str] = Field(default_factory=dict)
+    open_questions: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+```
+
+`cli/src/medo_cli/main.py` の `requirements_get` のdigest分岐(`else:`)を次に変更:
+
+```python
+    else:
+        typer.echo(f"{doc.project} v{doc.version}: {doc.goal}")
+        if doc.background:
+            typer.echo(f"  背景: {doc.background}")
+        for p in doc.principles:
+            typer.echo(f"  理念 [{p.confidence}] {p.text}")
+        for c in doc.challenges:
+            typer.echo(f"  課題 [{c.confidence}] {c.text}")
+        for f in doc.functional:
+            typer.echo(f"  - [{f.confidence}] {f.text}")
+        for q in doc.open_questions:
+            typer.echo(f"  ? {q}")
+```
+
+`cli/tests/test_cli.py` の `REQ_YAML` に以下を追加し(goal行の直後)、digestテストを追記:
+
+```yaml
+background: インバウンド客の増加と人手不足が同時進行
+principles:
+  - text: 地域の食文化を海外客に開く
+    confidence: confirmed
+challenges:
+  - text: 外国語の電話予約に対応できず機会損失
+    confidence: confirmed
+```
+
+```python
+def test_requirements_get_digest_shows_business_context(medo_home: Path):
+    _save_requirements(medo_home)
+    result = runner.invoke(app, ["requirements", "get", "--project", "yoyaku", "--format", "digest"])
+    assert result.exit_code == 0
+    assert "課題 [confirmed] 外国語の電話予約に対応できず機会損失" in result.output
+    assert "理念 [confirmed] 地域の食文化を海外客に開く" in result.output
+```
+
+- [ ] **Step 4: テストが通ることを確認**
+
+Run: `uv run pytest core/tests/test_requirements.py cli/tests/test_cli.py -v && uv run ruff check .`
+Expected: 全件PASS、リント警告なし
+
+- [ ] **Step 5: コミット**
+
+```bash
+git add core/src/medo_core/requirements.py core/tests/test_requirements.py cli/src/medo_cli/main.py cli/tests/test_cli.py
+git commit -m "feat(core): 要件スキーマにビジネス文脈(背景・理念・課題)を追加"
+```
+
+---
+
+### Task 6c: 市場ファクト(Fact + FactStore + CLI facts)
+
+**Files:**
+- Create: `core/src/medo_core/facts.py`
+- Modify: `cli/src/medo_cli/main.py`(facts サブコマンド追加)
+- Test: `core/tests/test_facts.py`、`cli/tests/test_cli.py`(追記)
+
+**Interfaces:**
+- Consumes: `Storage`(Task 2)
+- Produces:
+  - `Fact(fact_id="", kind: Literal["market","policy","trend","company"], statement, value: float|None=None, unit="", source, retrieved, note="")` — source必須。market/policy/trendはURL形式を検証、companyは由来表記
+  - `Fact.is_stale(today=None, threshold_days=180) -> bool`
+  - `FactStore(storage)`: `save(project_id, fact) -> str`(fact_id空なら `fact-<n>` を自動採番)/ `get(project_id, fact_id) -> Fact|None` / `list(project_id) -> list[Fact]`
+  - CLI: `medo facts save --project <id> --kind <k> --statement <s> --source <src> [--value f] [--unit u] [--retrieved YYYY-MM-DD] [--note n]` → `saved: fact-<n>` / `medo facts list --project <id> [--format json|digest]`(stale付き)
+- **契約変更**: CLI新コマンドのため、PRは人間レビューを経てマージする
+
+- [ ] **Step 1: 失敗するテストを書く**
+
+`core/tests/test_facts.py`:
+
+```python
+from datetime import date
+
+import pytest
+from medo_core.facts import Fact, FactStore
+from medo_core.storage import LocalJsonStorage
+from pydantic import ValidationError
+
+
+def _fact(**kw) -> Fact:
+    base = dict(
+        kind="market",
+        statement="訪日外国人旅行者数 3,687万人(2024年)",
+        value=36870000.0,
+        unit="人",
+        source="https://www.jnto.go.jp/statistics/",
+        retrieved="2026-07-01",
+    )
+    base.update(kw)
+    return Fact(**base)
+
+
+def test_market_fact_requires_url_source():
+    with pytest.raises(ValidationError):
+        _fact(source="ヒアリングで聞いた")
+
+
+def test_company_fact_accepts_hearing_source():
+    f = _fact(kind="company", statement="現在の月間予約数は約1,200件", source="ヒアリング(2026-07-01 顧客X)")
+    assert f.kind == "company"
+
+
+def test_empty_source_rejected():
+    with pytest.raises(ValidationError):
+        _fact(kind="company", source="   ")
+
+
+def test_invalid_retrieved_date_rejected():
+    with pytest.raises(ValidationError):
+        _fact(retrieved="not-a-date")
+
+
+def test_stale_when_older_than_180_days():
+    assert _fact(retrieved="2026-01-01").is_stale(today=date(2026, 7, 12)) is True
+    assert _fact(retrieved="2026-02-01").is_stale(today=date(2026, 7, 12)) is False
+
+
+def test_save_assigns_incrementing_fact_ids(tmp_path):
+    store = FactStore(LocalJsonStorage(tmp_path))
+    assert store.save("yoyaku", _fact()) == "fact-1"
+    assert store.save("yoyaku", _fact(statement="外食単価")) == "fact-2"
+    got = store.get("yoyaku", "fact-1")
+    assert got is not None and got.value == 36870000.0
+    assert len(store.list("yoyaku")) == 2
+    assert store.list("nashi") == []
+```
+
+- [ ] **Step 2: テストが失敗することを確認**
+
+Run: `uv run pytest core/tests/test_facts.py -v`
+Expected: FAIL(ModuleNotFoundError: medo_core.facts)
+
+- [ ] **Step 3: 実装**
+
+`core/src/medo_core/facts.py`:
+
+```python
+"""市場・国策・業界動向・個社ファクト。出典必須(仮定はファクトにしない=fermi側のassumeのみ)。"""
+
+from __future__ import annotations
+
+import re
+from datetime import date
+from typing import Literal
+from urllib.parse import urlparse
+
+from pydantic import BaseModel, model_validator
+
+from medo_core.storage import Storage
+
+FACT_STALE_THRESHOLD_DAYS = 180
+
+FactKind = Literal["market", "policy", "trend", "company"]
+_URL_KINDS = {"market", "policy", "trend"}
+
+
+class Fact(BaseModel):
+    fact_id: str = ""
+    kind: FactKind
+    statement: str
+    value: float | None = None
+    unit: str = ""
+    source: str
+    retrieved: str  # ISO日付 YYYY-MM-DD
+    note: str = ""
+
+    @model_validator(mode="after")
+    def _validate(self) -> "Fact":
+        if not self.source.strip():
+            raise ValueError("source は必須です(出典のないファクトは保存できません)")
+        if self.kind in _URL_KINDS:
+            parsed = urlparse(self.source)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError(f"kind={self.kind} の source はURLである必要があります")
+        try:
+            date.fromisoformat(self.retrieved)
+        except ValueError as e:
+            raise ValueError(f"retrieved はISO日付(YYYY-MM-DD)である必要があります: {e}") from e
+        return self
+
+    def is_stale(
+        self, today: date | None = None, threshold_days: int = FACT_STALE_THRESHOLD_DAYS
+    ) -> bool:
+        today = today or date.today()
+        return (today - date.fromisoformat(self.retrieved)).days > threshold_days
+
+
+class FactStore:
+    def __init__(self, storage: Storage):
+        self._storage = storage
+
+    def _prefix(self, project_id: str) -> str:
+        return f"projects/{project_id}/facts"
+
+    def save(self, project_id: str, fact: Fact) -> str:
+        if not fact.fact_id:
+            nums = []
+            for path in self._storage.list(self._prefix(project_id)):
+                m = re.fullmatch(r"fact-(\d+)", path.rsplit("/", 1)[1])
+                if m:
+                    nums.append(int(m.group(1)))
+            fact = fact.model_copy(update={"fact_id": f"fact-{max(nums, default=0) + 1}"})
+        self._storage.put(f"{self._prefix(project_id)}/{fact.fact_id}", fact.model_dump(mode="json"))
+        return fact.fact_id
+
+    def get(self, project_id: str, fact_id: str) -> Fact | None:
+        raw = self._storage.get(f"{self._prefix(project_id)}/{fact_id}")
+        return Fact.model_validate(raw) if raw else None
+
+    def list(self, project_id: str) -> list[Fact]:
+        return [
+            Fact.model_validate(self._storage.get(p))
+            for p in self._storage.list(self._prefix(project_id))
+        ]
+```
+
+`cli/src/medo_cli/main.py` に追記(import に `from datetime import date`・`from medo_core.facts import Fact, FactStore` を追加。`from typing import Literal` が未importの場合はそれも追加):
+
+```python
+facts_app = typer.Typer(no_args_is_help=True)
+app.add_typer(facts_app, name="facts", help="市場・国策・業界動向・個社ファクト(出典必須)")
+
+
+@facts_app.command("save")
+def facts_save(
+    project: str = typer.Option(...),
+    kind: str = typer.Option(..., help="market | policy | trend | company"),
+    statement: str = typer.Option(...),
+    source: str = typer.Option(..., help="market/policy/trendはURL、companyは由来表記"),
+    value: float | None = typer.Option(None),
+    unit: str = typer.Option(""),
+    retrieved: str | None = typer.Option(None, help="取得日 YYYY-MM-DD(省略時は今日)"),
+    note: str = typer.Option(""),
+):
+    try:
+        fact = Fact(
+            kind=kind,
+            statement=statement,
+            value=value,
+            unit=unit,
+            source=source,
+            retrieved=retrieved or date.today().isoformat(),
+            note=note,
+        )
+    except Exception as e:
+        _fail(f"ファクトのスキーマ不正: {e}")
+    fact_id = FactStore(get_storage()).save(project, fact)
+    typer.echo(f"saved: {fact_id}")
+
+
+@facts_app.command("list")
+def facts_list(
+    project: str = typer.Option(...),
+    format: Literal["json", "digest"] = typer.Option("digest"),
+):
+    facts = FactStore(get_storage()).list(project)
+    if format == "json":
+        payload = [{"fact": f.model_dump(mode="json"), "stale": f.is_stale()} for f in facts]
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    if not facts:
+        typer.echo("(ファクトなし)")
+        return
+    for f in facts:
+        stale = " [STALE]" if f.is_stale() else ""
+        typer.echo(f"{f.fact_id} [{f.kind}]{stale} {f.statement} (出典: {f.source}, {f.retrieved})")
+```
+
+`cli/tests/test_cli.py` に追記:
+
+```python
+def test_facts_save_and_list_with_stale_flag(medo_home: Path):
+    result = runner.invoke(
+        app,
+        [
+            "facts", "save", "--project", "yoyaku", "--kind", "market",
+            "--statement", "訪日外国人旅行者数 3,687万人", "--value", "36870000",
+            "--unit", "人", "--source", "https://www.jnto.go.jp/statistics/",
+            "--retrieved", "2020-01-01",
+        ],
+    )
+    assert result.exit_code == 0 and "fact-1" in result.output
+
+    result = runner.invoke(app, ["facts", "list", "--project", "yoyaku", "--format", "json"])
+    items = json.loads(result.output)
+    assert items[0]["fact"]["fact_id"] == "fact-1"
+    assert items[0]["stale"] is True
+
+
+def test_facts_save_rejects_non_url_source_for_market(medo_home: Path):
+    result = runner.invoke(
+        app,
+        [
+            "facts", "save", "--project", "yoyaku", "--kind", "market",
+            "--statement", "x", "--source", "ヒアリングで聞いた",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "error:" in result.output
+```
+
+- [ ] **Step 4: テストが通ることを確認**
+
+Run: `uv run pytest core/tests/test_facts.py cli/tests/test_cli.py -v && uv run ruff check .`
+Expected: 全件PASS、リント警告なし
+
+- [ ] **Step 5: コミット**
+
+```bash
+git add core/src/medo_core/facts.py core/tests/test_facts.py cli/src/medo_cli/main.py cli/tests/test_cli.py
+git commit -m "feat(core): 出典必須の市場ファクトストア(kind別検証・180日stale)"
+```
+
+---
+
+### Task 6d: 生成物スキーマ拡張(mini-prfaq / prfaq / fermi、引用ファクト)
+
+**Files:**
+- Modify: `core/src/medo_core/artifacts.py`
+- Modify: `cli/src/medo_cli/main.py`(artifacts save のフラグ追加、artifacts get 新設)
+- Test: `core/tests/test_artifacts.py`(追記)、`cli/tests/test_cli.py`(追記)
+
+**Interfaces:**
+- Consumes: `Storage`(Task 2)
+- Produces:
+  - `ArtifactType` に `"mini-prfaq" | "prfaq" | "fermi"` を追加
+  - `OptionMeta(name: str, approach_type: str="")` / `GrownFrom(artifact: str, option: str)`
+  - `Artifact` に追加: `cited_facts: list[str]=[]` / `options: list[OptionMeta]=[]`(mini-prfaq用)/ `grown_from: GrownFrom|None=None`(prfaqは必須。バリデーションで強制)
+  - `generated_by`: 生成的な生成物(mini-prfaq / prfaq / architecture / slides / mock / comparison)には `claude|gemini` 必須、`fermi` はコード生成のため `None` 固定(バリデーションで強制)
+  - CLI: `medo artifacts save` に `--cites-facts a,b` / `--options "name:approach_type,..."` / `--grown-from "mini-prfaq-vN:打ち手名"` を追加。`medo artifacts get --project <id> --id <artifact_id>`(JSON出力)を新設
+- **契約変更**: 生成物スキーマ・CLIの変更のため、PRは人間レビューを経てマージする
+
+- [ ] **Step 1: 失敗するテストを書く**
+
+`core/tests/test_artifacts.py` に追記:
+
+```python
+def test_mini_prfaq_holds_option_set_metadata(store: ArtifactStore):
+    from medo_core.artifacts import OptionMeta
+
+    artifact = _artifact(
+        type="mini-prfaq",
+        options=[
+            OptionMeta(name="多言語AI音声予約", approach_type="業務改革"),
+            OptionMeta(name="予約代行アウトソース", approach_type="既存解決"),
+        ],
+        cited_facts=["fact-1"],
+    )
+    assert store.save("yoyaku", artifact) == "mini-prfaq-v1"
+    got = store.get("yoyaku", "mini-prfaq-v1")
+    assert [o.name for o in got.options] == ["多言語AI音声予約", "予約代行アウトソース"]
+    assert got.cited_facts == ["fact-1"]
+
+
+def test_prfaq_requires_grown_from(store: ArtifactStore):
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _artifact(type="prfaq")
+
+    from medo_core.artifacts import GrownFrom
+
+    artifact = _artifact(type="prfaq", grown_from=GrownFrom(artifact="mini-prfaq-v1", option="多言語AI音声予約"))
+    assert store.save("yoyaku", artifact) == "prfaq-v1"
+
+
+def test_fermi_artifact_requires_generated_by_none(store: ArtifactStore):
+    artifact = _artifact(type="fermi", generated_by=None)
+    assert store.save("yoyaku", artifact) == "fermi-v1"
+
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _artifact(type="fermi", generated_by="claude")
+
+
+def test_generative_artifact_requires_generated_by(store: ArtifactStore):
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _artifact(type="architecture", generated_by=None)
+```
+
+あわせて `cli/tests/test_cli.py` の既存テスト `test_artifacts_list_empty_and_after_save` の `artifacts save` 呼び出しに `"--generated-by", "claude",` を追加する(generated_by必須化のため)。
+
+- [ ] **Step 2: テストが失敗することを確認**
+
+Run: `uv run pytest core/tests/test_artifacts.py -v`
+Expected: FAIL(ValidationError: type / ImportError: OptionMeta)
+
+- [ ] **Step 3: 実装**
+
+`core/src/medo_core/artifacts.py` を次に変更(`model_validator` をpydanticからimport):
+
+```python
+ArtifactType = Literal[
+    "architecture", "slides", "mock", "comparison", "mini-prfaq", "prfaq", "fermi"
+]
+
+
+class OptionMeta(BaseModel):
+    name: str
+    approach_type: str = ""
+
+
+class GrownFrom(BaseModel):
+    artifact: str  # 例: "mini-prfaq-v2"
+    option: str    # 選択した打ち手名
+
+
+class Artifact(BaseModel):
+    project: str
+    type: ArtifactType
+    version: int = 1
+    requirements_version: int
+    cited_catalog_entries: list[str] = Field(default_factory=list)
+    cited_facts: list[str] = Field(default_factory=list)
+    options: list[OptionMeta] = Field(default_factory=list)  # mini-prfaq: 打ち手候補メタ
+    grown_from: GrownFrom | None = None  # prfaq: 育成元
+    generated_by: Literal["claude", "gemini"] | None = None  # fermiはコード生成のためNone
+    content: str
+
+    @model_validator(mode="after")
+    def _validate_type_rules(self) -> "Artifact":
+        if self.type == "prfaq" and self.grown_from is None:
+            raise ValueError("prfaq には grown_from(育成元のミニPRFAQ候補セットと打ち手)が必須です")
+        if self.type == "fermi":
+            if self.generated_by is not None:
+                raise ValueError("fermi はコードが生成するため generated_by は指定できません")
+        elif self.generated_by is None:
+            raise ValueError(f"{self.type} には generated_by(claude|gemini)が必須です")
+        return self
+```
+
+`cli/src/medo_cli/main.py` の `artifacts_save` を次に変更し、`artifacts_get` を追加(importに `OptionMeta, GrownFrom` を追加):
+
+```python
+@artifacts_app.command("save")
+def artifacts_save(
+    project: str = typer.Option(...),
+    artifact_type: str = typer.Option(..., "--type"),
+    file: Path = typer.Option(..., exists=True, readable=True),
+    cites: str = typer.Option("", help="引用カタログエントリID(カンマ区切り)"),
+    cites_facts: str = typer.Option("", help="引用ファクトID(カンマ区切り)"),
+    options: str = typer.Option("", help="mini-prfaq用: name:approach_type をカンマ区切り"),
+    grown_from: str = typer.Option("", help="prfaq用: <mini-prfaq-vN>:<打ち手名>"),
+    generated_by: str | None = typer.Option(None),
+    requirements_version: int = typer.Option(...),
+):
+    try:
+        option_metas = [
+            OptionMeta(name=name, approach_type=approach)
+            for name, _, approach in (o.partition(":") for o in options.split(",") if o)
+        ]
+        gf = None
+        if grown_from:
+            art, _, opt = grown_from.partition(":")
+            gf = GrownFrom(artifact=art, option=opt)
+        artifact = Artifact(
+            project=project,
+            type=artifact_type,
+            requirements_version=requirements_version,
+            cited_catalog_entries=[c for c in cites.split(",") if c],
+            cited_facts=[c for c in cites_facts.split(",") if c],
+            options=option_metas,
+            grown_from=gf,
+            generated_by=generated_by,
+            content=file.read_text(encoding="utf-8"),
+        )
+    except Exception as e:
+        _fail(f"生成物のスキーマ不正: {e}")
+    artifact_id = ArtifactStore(get_storage()).save(project, artifact)
+    typer.echo(f"saved: {artifact_id}")
+
+
+@artifacts_app.command("get")
+def artifacts_get(
+    project: str = typer.Option(...),
+    id: str = typer.Option(..., "--id", help="例: mini-prfaq-v1"),
+):
+    artifact = ArtifactStore(get_storage()).get(project, id)
+    if artifact is None:
+        _fail(f"生成物 {id} が見つかりません")
+    typer.echo(json.dumps(artifact.model_dump(mode="json"), ensure_ascii=False, indent=2))
+```
+
+`cli/tests/test_cli.py` に追記:
+
+```python
+def test_artifacts_save_mini_prfaq_and_get(medo_home: Path):
+    _save_requirements(medo_home)
+    doc = medo_home / "options.md"
+    doc.write_text("# 打ち手候補セット", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "artifacts", "save", "--project", "yoyaku", "--type", "mini-prfaq",
+            "--file", str(doc), "--cites-facts", "fact-1",
+            "--options", "多言語AI音声予約:業務改革,予約代行:既存解決",
+            "--generated-by", "claude", "--requirements-version", "1",
+        ],
+    )
+    assert result.exit_code == 0 and "mini-prfaq-v1" in result.output
+
+    result = runner.invoke(app, ["artifacts", "get", "--project", "yoyaku", "--id", "mini-prfaq-v1"])
+    payload = json.loads(result.output)
+    assert payload["options"][0]["name"] == "多言語AI音声予約"
+    assert payload["cited_facts"] == ["fact-1"]
+
+
+def test_artifacts_save_prfaq_requires_grown_from(medo_home: Path):
+    _save_requirements(medo_home)
+    doc = medo_home / "prfaq.md"
+    doc.write_text("# PRFAQ", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "artifacts", "save", "--project", "yoyaku", "--type", "prfaq",
+            "--file", str(doc), "--generated-by", "claude", "--requirements-version", "1",
+        ],
+    )
+    assert result.exit_code == 1 and "error:" in result.output
+```
+
+- [ ] **Step 4: テストが通ることを確認**
+
+Run: `uv run pytest core/tests/test_artifacts.py cli/tests/test_cli.py -v && uv run ruff check .`
+Expected: 全件PASS、リント警告なし
+
+- [ ] **Step 5: コミット**
+
+```bash
+git add core/src/medo_core/artifacts.py core/tests/test_artifacts.py cli/src/medo_cli/main.py cli/tests/test_cli.py
+git commit -m "feat(core): 生成物にmini-prfaq/prfaq/fermiと引用ファクトを追加"
+```
+
+---
+
+### Task 6e: フェルミ推定(決定論計算 + CLI fermi)
+
+**Files:**
+- Create: `core/src/medo_core/fermi.py`
+- Modify: `cli/src/medo_cli/main.py`(fermi サブコマンド追加)
+- Test: `core/tests/test_fermi.py`、`cli/tests/test_cli.py`(追記)
+
+**Interfaces:**
+- Consumes: `Fact` / `FactStore`(Task 6c)、`Artifact` / `ArtifactStore`(Task 6d)、`RequirementsStore.latest_version`(Task 3)
+- Produces:
+  - `FermiVar(fact: str|None=None, assume: float|None=None, note="")` — factかassumeのどちらか一方のみ(バリデーション)
+  - `FermiModel(name, variables: dict[str, FermiVar], formula: str)`
+  - `evaluate(model, facts: dict[str, Fact]) -> FermiResult(name, value, resolved, cited_facts)` — ast制限の四則演算+累乗のみ。未定義変数・許可外構文・ファクト不在・value欠落はValueError
+  - CLI: `medo fermi calc --project <id> --file <model.yaml>` → 計算し `type: fermi` 生成物(content=モデル+結果のJSON、cited_facts付き、generated_by=None)として保存、`saved: fermi-v<n>` と結果を出力。`--from-artifact fermi-v<n>` で保存済みモデルからファクトを最新解決して再計算(新バージョン保存)
+- **契約変更**: CLI新コマンドのため、PRは人間レビューを経てマージする
+
+- [ ] **Step 1: 失敗するテストを書く**
+
+`core/tests/test_fermi.py`:
+
+```python
+import pytest
+from medo_core.facts import Fact
+from medo_core.fermi import FermiModel, FermiVar, evaluate
+from pydantic import ValidationError
+
+
+def _fact(**kw) -> Fact:
+    base = dict(
+        fact_id="fact-1",
+        kind="market",
+        statement="訪日外国人旅行者数",
+        value=36870000.0,
+        unit="人",
+        source="https://www.jnto.go.jp/statistics/",
+        retrieved="2026-07-01",
+    )
+    base.update(kw)
+    return Fact(**base)
+
+
+def test_evaluate_mixes_facts_and_assumptions():
+    model = FermiModel(
+        name="多言語予約対応の市場機会",
+        variables={
+            "visitors": FermiVar(fact="fact-1"),
+            "dining_rate": FermiVar(assume=0.8, note="外食利用率の仮定"),
+            "unit_price": FermiVar(assume=5000.0),
+        },
+        formula="visitors * dining_rate * unit_price",
+    )
+    result = evaluate(model, {"fact-1": _fact()})
+    assert result.value == 36870000.0 * 0.8 * 5000.0
+    assert result.cited_facts == ["fact-1"]
+    assert result.resolved["dining_rate"] == 0.8
+
+
+def test_power_operator_enables_cagr():
+    model = FermiModel(
+        name="5年後の市場規模",
+        variables={"base": FermiVar(assume=100.0), "growth": FermiVar(assume=1.1)},
+        formula="base * growth ** 5",
+    )
+    assert abs(evaluate(model, {}).value - 100.0 * 1.1**5) < 1e-9
+
+
+def test_undefined_variable_rejected():
+    model = FermiModel(name="x", variables={"a": FermiVar(assume=1.0)}, formula="a + b")
+    with pytest.raises(ValueError):
+        evaluate(model, {})
+
+
+def test_huge_exponent_rejected():
+    model = FermiModel(
+        name="x", variables={"a": FermiVar(assume=10.0)}, formula="a ** 1000000"
+    )
+    with pytest.raises(ValueError):
+        evaluate(model, {})
+
+
+def test_bool_constant_rejected():
+    model = FermiModel(name="x", variables={"a": FermiVar(assume=1.0)}, formula="a + True")
+    with pytest.raises(ValueError):
+        evaluate(model, {})
+
+
+def test_disallowed_syntax_rejected():
+    model = FermiModel(
+        name="x", variables={"a": FermiVar(assume=1.0)}, formula="__import__('os').getcwd()"
+    )
+    with pytest.raises(ValueError):
+        evaluate(model, {})
+
+
+def test_missing_fact_and_missing_value_rejected():
+    model = FermiModel(name="x", variables={"a": FermiVar(fact="fact-9")}, formula="a")
+    with pytest.raises(ValueError):
+        evaluate(model, {})
+    with pytest.raises(ValueError):
+        evaluate(FermiModel(name="x", variables={"a": FermiVar(fact="fact-1")}, formula="a"),
+                 {"fact-1": _fact(value=None)})
+
+
+def test_var_requires_exactly_one_of_fact_or_assume():
+    with pytest.raises(ValidationError):
+        FermiVar(fact="fact-1", assume=1.0)
+    with pytest.raises(ValidationError):
+        FermiVar()
+```
+
+- [ ] **Step 2: テストが失敗することを確認**
+
+Run: `uv run pytest core/tests/test_fermi.py -v`
+Expected: FAIL(ModuleNotFoundError: medo_core.fermi)
+
+- [ ] **Step 3: 実装**
+
+`core/src/medo_core/fermi.py`:
+
+```python
+"""フェルミ推定の決定論計算。仮定は明示、計算はコード(ast制限: 四則演算+累乗)。LLM・eval不使用。"""
+
+from __future__ import annotations
+
+import ast
+
+from pydantic import BaseModel, Field, model_validator
+
+from medo_core.facts import Fact
+
+_ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)
+MAX_EXPONENT = 100  # 資源枯渇(巨大数の計算)防止
+
+
+class FermiVar(BaseModel):
+    fact: str | None = None      # ファクトID参照(valueを使う)
+    assume: float | None = None  # 明示的仮定
+    note: str = ""
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "FermiVar":
+        if (self.fact is None) == (self.assume is None):
+            raise ValueError("fact か assume のどちらか一方を指定してください")
+        return self
+
+
+class FermiModel(BaseModel):
+    name: str
+    variables: dict[str, FermiVar]
+    formula: str
+
+
+class FermiResult(BaseModel):
+    name: str
+    value: float
+    resolved: dict[str, float]
+    cited_facts: list[str] = Field(default_factory=list)
+
+
+def _safe_eval(node: ast.AST, names: dict[str, float]) -> float:
+    if isinstance(node, ast.Expression):
+        return _safe_eval(node.body, names)
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+        return float(node.value)
+    if isinstance(node, ast.Name):
+        if node.id not in names:
+            raise ValueError(f"未定義の変数です: {node.id}")
+        return names[node.id]
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = _safe_eval(node.operand, names)
+        return -value if isinstance(node.op, ast.USub) else value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, _ALLOWED_BINOPS):
+        lhs = _safe_eval(node.left, names)
+        rhs = _safe_eval(node.right, names)
+        if isinstance(node.op, ast.Add):
+            return lhs + rhs
+        if isinstance(node.op, ast.Sub):
+            return lhs - rhs
+        if isinstance(node.op, ast.Mult):
+            return lhs * rhs
+        if isinstance(node.op, ast.Div):
+            return lhs / rhs
+        if abs(rhs) > MAX_EXPONENT:
+            raise ValueError(f"累乗の指数が大きすぎます(上限{MAX_EXPONENT})")
+        return lhs**rhs
+    raise ValueError(f"許可されていない式の要素です: {type(node).__name__}")
+
+
+def evaluate(model: FermiModel, facts: dict[str, Fact]) -> FermiResult:
+    resolved: dict[str, float] = {}
+    cited: list[str] = []
+    for name, var in model.variables.items():
+        if var.fact is not None:
+            fact = facts.get(var.fact)
+            if fact is None:
+                raise ValueError(f"参照先ファクトが見つかりません: {var.fact}")
+            if fact.value is None:
+                raise ValueError(f"ファクト {var.fact} に数値(value)がありません")
+            resolved[name] = fact.value
+            cited.append(var.fact)
+        else:
+            resolved[name] = float(var.assume)  # _exactly_oneによりNoneでないことが保証される
+    tree = ast.parse(model.formula, mode="eval")
+    value = _safe_eval(tree, resolved)
+    return FermiResult(name=model.name, value=value, resolved=resolved, cited_facts=cited)
+```
+
+`cli/src/medo_cli/main.py` に追記(importに `from medo_core.fermi import FermiModel, evaluate` を追加。`yaml` は既存importを使う):
+
+```python
+fermi_app = typer.Typer(no_args_is_help=True)
+app.add_typer(fermi_app, name="fermi", help="フェルミ推定(仮定明示・コードが計算)")
+
+
+@fermi_app.command("calc")
+def fermi_calc(
+    project: str = typer.Option(...),
+    file: Path | None = typer.Option(None, exists=True, readable=True, help="モデルYAML"),
+    from_artifact: str | None = typer.Option(None, help="保存済みfermi生成物から再計算(例: fermi-v1)"),
+):
+    storage = get_storage()
+    try:
+        if from_artifact and file:
+            raise ValueError("--file と --from-artifact は同時に指定できません")
+        if from_artifact:
+            saved = ArtifactStore(storage).get(project, from_artifact)
+            if saved is None:
+                raise ValueError(f"生成物 {from_artifact} が見つかりません")
+            model = FermiModel.model_validate(json.loads(saved.content)["model"])
+        elif file:
+            model = FermiModel.model_validate(yaml.safe_load(file.read_text(encoding="utf-8")))
+        else:
+            raise ValueError("--file か --from-artifact のどちらかを指定してください")
+        facts = {f.fact_id: f for f in FactStore(storage).list(project)}
+        result = evaluate(model, facts)
+    except Exception as e:
+        _fail(f"フェルミ計算に失敗: {e}")
+    artifact = Artifact(
+        project=project,
+        type="fermi",
+        requirements_version=RequirementsStore(storage).latest_version(project),
+        cited_facts=result.cited_facts,
+        content=json.dumps(
+            {"model": model.model_dump(mode="json"), "result": result.model_dump(mode="json")},
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+    artifact_id = ArtifactStore(storage).save(project, artifact)
+    typer.echo(f"saved: {artifact_id}")
+    typer.echo(f"{result.name} = {result.value}")
+```
+
+`cli/tests/test_cli.py` に追記:
+
+```python
+FERMI_YAML = """\
+name: 多言語予約対応の市場機会
+variables:
+  visitors: {fact: fact-1}
+  dining_rate: {assume: 0.8}
+formula: visitors * dining_rate
+"""
+
+
+def test_fermi_calc_saves_artifact_and_recalcs(medo_home: Path):
+    _save_requirements(medo_home)
+    runner.invoke(
+        app,
+        [
+            "facts", "save", "--project", "yoyaku", "--kind", "market",
+            "--statement", "訪日客数", "--value", "36870000",
+            "--source", "https://www.jnto.go.jp/statistics/",
+        ],
+    )
+    model = medo_home / "model.yaml"
+    model.write_text(FERMI_YAML, encoding="utf-8")
+
+    result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--file", str(model)])
+    assert result.exit_code == 0, result.output
+    assert "fermi-v1" in result.output and "29496000" in result.output
+
+    result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--from-artifact", "fermi-v1"])
+    assert result.exit_code == 0 and "fermi-v2" in result.output
+
+
+def test_fermi_calc_missing_fact_fails(medo_home: Path):
+    _save_requirements(medo_home)
+    model = medo_home / "model.yaml"
+    model.write_text(FERMI_YAML, encoding="utf-8")
+    result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--file", str(model)])
+    assert result.exit_code == 1 and "error:" in result.output
+```
+
+- [ ] **Step 4: テストが通ることを確認**
+
+Run: `uv run pytest core/tests/test_fermi.py cli/tests/test_cli.py -v && uv run ruff check .`
+Expected: 全件PASS、リント警告なし
+
+- [ ] **Step 5: コミット**
+
+```bash
+git add core/src/medo_core/fermi.py core/tests/test_fermi.py cli/src/medo_cli/main.py cli/tests/test_cli.py
+git commit -m "feat(core): フェルミ推定の決定論計算と再計算可能なfermi生成物"
+```
+
+---
+
+### Task 6f: medo status(現在地の可視化)+ docs/usage.md
 
 **Files:**
 - Create: `core/src/medo_core/status.py`
 - Create: `docs/usage.md`
-- Modify: `cli/src/medo_cli/main.py`(status コマンド追加)
-- Test: `core/tests/test_status.py`、`cli/tests/test_cli.py`(status テスト追記)
+- Modify: `cli/src/medo_cli/main.py`(status コマンド追加、requirements diff を引用根拠込みの陳腐化判定に変更)
+- Test: `core/tests/test_status.py`、`cli/tests/test_cli.py`(追記)
 
 **Interfaces:**
-- Consumes: `Storage`(Task 2)、`RequirementsStore`(Task 3)、`ArtifactStore`(Task 5)、`get_storage()`(Task 2)
+- Consumes: `RequirementsStore`(Task 3/6b)、`CatalogStore`(Task 4)、`FactStore`(Task 6c)、`ArtifactStore`(Task 6d)
 - Produces:
-  - `project_status(storage: Storage, project_id: str) -> dict` — 現在地レポート(requirements/artifacts/next_step)を決定論的に返す
-  - `medo status --project <id>` — 上記をJSONで出力(要件未作成はエラーではなく `next_step: "hearing"`)
-  - `next_step` の導出規則(優先順): 要件なし→`"hearing"` / **typeごとの最新**生成物に陳腐化あり→`"regenerate-stale-artifacts"` / architecture生成物なし→`"propose-architecture"` / それ以外→`"up-to-date"`
-  - status の `artifacts` は **typeごとの最新バージョンのみ** をtype昇順で返す(旧バージョンは `medo artifacts list` で見る。再生成済みなのに旧版のstaleで `up-to-date` に到達できない事態を防ぐ)
+  - `project_status(storage, project_id, today=None) -> dict` — requirements / facts / artifacts(typeごと最新のみ・type昇順)/ next_step を決定論的に返す
+  - 陳腐化判定: `requirements_version` が古い、または引用ファクト(180日)・引用カタログエントリ(30日)にstale/欠落がある場合
+  - `next_step`(優先順): 要件なし→`"hearing"` / 最新生成物に陳腐化→`"regenerate-stale-artifacts"` / mini-prfaqなし→`"propose-options"` / prfaqなし→`"grow-prfaq"` / それ以外→`"up-to-date"`
+  - `stale_artifact_ids(storage, project_id, today=None) -> list[str]`(requirements diff CLIが使用)
+  - CLI: `medo status --project <id>` がJSONで現在地を出力(要件未作成はエラーではなく `next_step: "hearing"`)
 
 - [ ] **Step 1: 失敗するテストを書く**
 
 `core/tests/test_status.py`:
 
 ```python
-from medo_core.artifacts import Artifact, ArtifactStore
-from medo_core.requirements import RequirementsDoc, RequirementsStore
-from medo_core.status import project_status
+from datetime import date
+
+from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom
+from medo_core.catalog import CatalogEntry, CatalogStore
+from medo_core.facts import Fact, FactStore
+from medo_core.requirements import ConfidenceItem, FunctionalRequirement, RequirementsDoc, RequirementsStore
+from medo_core.status import project_status, stale_artifact_ids
 from medo_core.storage import LocalJsonStorage
+
+TODAY = date(2026, 7, 12)
 
 
 def _doc(**kw) -> RequirementsDoc:
-    base = {
-        "project": "yoyaku",
-        "goal": "飲食店の予約システム",
-        "industry": "飲食",
-        "functional": [
-            {"text": "ネット予約", "confidence": "confirmed"},
-            {"text": "リマインド通知", "confidence": "assumed"},
-        ],
-        "open_questions": ["ピーク時同時予約数は?"],
-    }
+    base = dict(
+        project="yoyaku",
+        goal="飲食店の多言語対応AI自動音声予約システム",
+        industry="飲食",
+        challenges=[ConfidenceItem(text="外国語の電話予約に対応できず機会損失", confidence="confirmed")],
+        functional=[FunctionalRequirement(text="ネット予約", confidence="confirmed")],
+        open_questions=["ピーク時の同時電話着信数は?"],
+    )
     base.update(kw)
     return RequirementsDoc(**base)
 
 
-def _artifact(**kw) -> Artifact:
-    base = {
-        "project": "yoyaku",
-        "type": "architecture",
-        "requirements_version": 1,
-        "content": "# 案",
-    }
+def _mini(**kw) -> Artifact:
+    base = dict(
+        project="yoyaku", type="mini-prfaq", requirements_version=1,
+        generated_by="claude", content="# 候補セット",
+    )
     base.update(kw)
     return Artifact(**base)
 
 
-def test_status_without_requirements_suggests_hearing(tmp_path):
-    s = LocalJsonStorage(tmp_path)
-    report = project_status(s, "yoyaku")
-    assert report["requirements"] is None
-    assert report["artifacts"] == []
-    assert report["next_step"] == "hearing"
+def _prfaq(**kw) -> Artifact:
+    base = dict(
+        project="yoyaku",
+        type="prfaq",
+        requirements_version=1,
+        grown_from=GrownFrom(artifact="mini-prfaq-v1", option="多言語AI音声予約"),
+        generated_by="claude",
+        content="# PRFAQ",
+    )
+    base.update(kw)
+    return Artifact(**base)
 
 
-def test_status_with_requirements_but_no_architecture_suggests_propose(tmp_path):
-    s = LocalJsonStorage(tmp_path)
-    RequirementsStore(s).save("yoyaku", _doc())
-    report = project_status(s, "yoyaku")
-    assert report["requirements"]["version"] == 1
-    assert report["requirements"]["confidence_counts"] == {"confirmed": 1, "assumed": 1, "open": 0}
-    assert report["requirements"]["open_questions"] == 1
-    assert report["next_step"] == "propose-architecture"
+def test_no_requirements_suggests_hearing(tmp_path):
+    report = project_status(LocalJsonStorage(tmp_path), "yoyaku", today=TODAY)
+    assert report["requirements"] is None and report["next_step"] == "hearing"
 
 
-def test_status_flags_stale_artifacts_and_suggests_regeneration(tmp_path):
-    s = LocalJsonStorage(tmp_path)
-    store = RequirementsStore(s)
-    store.save("yoyaku", _doc())
-    ArtifactStore(s).save("yoyaku", _artifact(requirements_version=1))
-    store.save("yoyaku", _doc(goal="予約+顧客管理"))  # v2 → 生成物が陳腐化
-    report = project_status(s, "yoyaku")
-    assert report["artifacts"][0]["stale"] is True
-    assert report["next_step"] == "regenerate-stale-artifacts"
-
-
-def test_status_up_to_date_when_architecture_matches_latest(tmp_path):
+def test_requirements_only_suggests_propose_options(tmp_path):
     s = LocalJsonStorage(tmp_path)
     RequirementsStore(s).save("yoyaku", _doc())
-    ArtifactStore(s).save("yoyaku", _artifact(requirements_version=1))
-    report = project_status(s, "yoyaku")
-    assert report["next_step"] == "up-to-date"
+    report = project_status(s, "yoyaku", today=TODAY)
+    assert report["next_step"] == "propose-options"
+    assert report["requirements"]["confidence_counts"]["confirmed"] == 2  # challenges+functional
 
 
-def test_status_recovers_to_up_to_date_after_regeneration(tmp_path):
-    """再生成後は旧バージョンのstaleに引きずられず up-to-date に戻る(typeごと最新のみで判定)。"""
+def test_mini_prfaq_suggests_grow_prfaq(tmp_path):
+    s = LocalJsonStorage(tmp_path)
+    RequirementsStore(s).save("yoyaku", _doc())
+    ArtifactStore(s).save("yoyaku", _mini())
+    assert project_status(s, "yoyaku", today=TODAY)["next_step"] == "grow-prfaq"
+
+
+def test_prfaq_reaches_up_to_date(tmp_path):
+    s = LocalJsonStorage(tmp_path)
+    RequirementsStore(s).save("yoyaku", _doc())
+    ArtifactStore(s).save("yoyaku", _mini())
+    ArtifactStore(s).save("yoyaku", _prfaq())
+    assert project_status(s, "yoyaku", today=TODAY)["next_step"] == "up-to-date"
+
+
+def test_stale_cited_fact_triggers_regenerate(tmp_path):
+    s = LocalJsonStorage(tmp_path)
+    RequirementsStore(s).save("yoyaku", _doc())
+    FactStore(s).save("yoyaku", Fact(
+        fact_id="fact-1", kind="market", statement="訪日客数", value=1.0,
+        source="https://example.com/", retrieved="2025-01-01",
+    ))
+    ArtifactStore(s).save("yoyaku", _mini(cited_facts=["fact-1"]))
+    assert project_status(s, "yoyaku", today=TODAY)["next_step"] == "regenerate-stale-artifacts"
+    assert stale_artifact_ids(s, "yoyaku", today=TODAY) == ["mini-prfaq-v1"]
+
+
+def test_stale_cited_catalog_entry_triggers_regenerate(tmp_path):
+    s = LocalJsonStorage(tmp_path)
+    RequirementsStore(s).save("yoyaku", _doc())
+    CatalogStore(s).upsert(CatalogEntry(
+        service="vertex-ai", feature="context-caching", launch_stage="GA",
+        summary="x", sources=["https://cloud.google.com/"], last_verified="2020-01-01",
+    ))
+    ArtifactStore(s).save("yoyaku", _mini(cited_catalog_entries=["vertex-ai__context-caching"]))
+    assert project_status(s, "yoyaku", today=TODAY)["next_step"] == "regenerate-stale-artifacts"
+
+
+def test_regeneration_recovers_via_latest_per_type(tmp_path):
     s = LocalJsonStorage(tmp_path)
     store = RequirementsStore(s)
-    art_store = ArtifactStore(s)
-    store.save("yoyaku", _doc())                                  # 要件v1
-    art_store.save("yoyaku", _artifact(requirements_version=1))   # architecture-v1
-    store.save("yoyaku", _doc(goal="予約+顧客管理"))               # 要件v2 → v1案が陳腐化
-    art_store.save("yoyaku", _artifact(requirements_version=2))   # architecture-v2(再生成)
-    report = project_status(s, "yoyaku")
-    assert [a["id"] for a in report["artifacts"]] == ["architecture-v2"]
-    assert report["artifacts"][0]["stale"] is False
-    assert report["next_step"] == "up-to-date"
-```
-
-`cli/tests/test_cli.py` に追記:
-
-```python
-def test_status_outputs_next_step(medo_home: Path):
-    result = runner.invoke(app, ["status", "--project", "yoyaku"])
-    assert result.exit_code == 0
-    report = json.loads(result.output)
-    assert report["next_step"] == "hearing"
-
-    _save_requirements(medo_home)
-    result = runner.invoke(app, ["status", "--project", "yoyaku"])
-    report = json.loads(result.output)
-    assert report["next_step"] == "propose-architecture"
+    art = ArtifactStore(s)
+    store.save("yoyaku", _doc())                       # 要件v1
+    art.save("yoyaku", _mini())                        # mini-prfaq-v1
+    store.save("yoyaku", _doc(goal="改"))              # 要件v2 → v1候補セットが陳腐化
+    assert project_status(s, "yoyaku", today=TODAY)["next_step"] == "regenerate-stale-artifacts"
+    art.save("yoyaku", _mini(requirements_version=2))  # 再生成
+    assert project_status(s, "yoyaku", today=TODAY)["next_step"] == "grow-prfaq"
 ```
 
 - [ ] **Step 2: テストが失敗することを確認**
 
-Run: `uv run pytest core/tests/test_status.py cli/tests/test_cli.py::test_status_outputs_next_step -v`
-Expected: FAIL(`ModuleNotFoundError: medo_core.status` / CLIに status コマンドなし)
+Run: `uv run pytest core/tests/test_status.py -v`
+Expected: FAIL(ModuleNotFoundError: medo_core.status)
 
 - [ ] **Step 3: 実装**
 
@@ -1385,25 +2334,69 @@ Expected: FAIL(`ModuleNotFoundError: medo_core.status` / CLIに status コマン
 ```python
 """プロジェクトの現在地レポート。保存状態から決定論的に導出し、LLMを挟まない。"""
 
-from medo_core.artifacts import ArtifactStore
+from __future__ import annotations
+
+from datetime import date
+
+from medo_core.artifacts import Artifact, ArtifactStore
+from medo_core.catalog import CatalogStore
+from medo_core.facts import Fact, FactStore
 from medo_core.requirements import RequirementsStore
 from medo_core.storage import Storage
 
 
-def project_status(storage: Storage, project_id: str) -> dict:
+def _catalog_entry_stale(store: CatalogStore, entry_id: str, today: date | None) -> bool:
+    """引用カタログエントリがstaleまたは欠落ならTrue。"""
+    if "__" not in entry_id:
+        return True
+    service, feature = entry_id.split("__", 1)
+    entry = store.get(service, feature)
+    return entry is None or entry.is_stale(today=today)
+
+
+def _artifact_stale(
+    artifact: Artifact,
+    current_version: int,
+    facts_by_id: dict[str, Fact],
+    cat_store: CatalogStore,
+    today: date | None,
+) -> bool:
+    if artifact.requirements_version < current_version:
+        return True
+    for fact_id in artifact.cited_facts:
+        fact = facts_by_id.get(fact_id)
+        if fact is None or fact.is_stale(today=today):
+            return True
+    return any(
+        _catalog_entry_stale(cat_store, entry_id, today)
+        for entry_id in artifact.cited_catalog_entries
+    )
+
+
+def project_status(storage: Storage, project_id: str, today: date | None = None) -> dict:
     req_store = RequirementsStore(storage)
     version = req_store.latest_version(project_id)
     if version == 0:
-        return {"project": project_id, "requirements": None, "artifacts": [], "next_step": "hearing"}
+        return {
+            "project": project_id,
+            "requirements": None,
+            "facts": {"count": 0, "stale": 0},
+            "artifacts": [],
+            "next_step": "hearing",
+        }
 
     doc = req_store.get(project_id)
     counts = {"confirmed": 0, "assumed": 0, "open": 0}
-    for req in doc.functional:
-        counts[req.confidence] += 1
+    for item in [*doc.functional, *doc.principles, *doc.challenges]:
+        counts[item.confidence] += 1
+
+    facts = FactStore(storage).list(project_id)
+    facts_by_id = {f.fact_id: f for f in facts}
+    cat_store = CatalogStore(storage)
 
     # typeごとの最新バージョンのみを対象にする(旧版のstaleに引きずられて
     # 再生成後も up-to-date に到達できない事態を防ぐ)。type昇順で決定論的に返す
-    latest_by_type: dict[str, object] = {}
+    latest_by_type: dict[str, Artifact] = {}
     for a in ArtifactStore(storage).list(project_id):
         current = latest_by_type.get(a.type)
         if current is None or a.version > current.version:
@@ -1413,15 +2406,18 @@ def project_status(storage: Storage, project_id: str) -> dict:
             "id": f"{a.type}-v{a.version}",
             "type": a.type,
             "requirements_version": a.requirements_version,
-            "stale": a.requirements_version < version,
+            "stale": _artifact_stale(a, version, facts_by_id, cat_store, today),
         }
         for a in sorted(latest_by_type.values(), key=lambda a: a.type)
     ]
 
+    types = {row["type"] for row in artifact_rows}
     if any(row["stale"] for row in artifact_rows):
         next_step = "regenerate-stale-artifacts"
-    elif not any(row["type"] == "architecture" for row in artifact_rows):
-        next_step = "propose-architecture"
+    elif "mini-prfaq" not in types:
+        next_step = "propose-options"
+    elif "prfaq" not in types:
+        next_step = "grow-prfaq"
     else:
         next_step = "up-to-date"
 
@@ -1432,27 +2428,67 @@ def project_status(storage: Storage, project_id: str) -> dict:
             "confidence_counts": counts,
             "open_questions": len(doc.open_questions),
         },
+        "facts": {
+            "count": len(facts),
+            "stale": sum(1 for f in facts if f.is_stale(today=today)),
+        },
         "artifacts": artifact_rows,
         "next_step": next_step,
     }
+
+
+def stale_artifact_ids(storage: Storage, project_id: str, today: date | None = None) -> list[str]:
+    report = project_status(storage, project_id, today=today)
+    return [row["id"] for row in report["artifacts"] if row["stale"]]
 ```
 
-`cli/src/medo_cli/main.py` に追記(トップレベルコマンド):
+`cli/src/medo_cli/main.py` に status コマンドを追加し、`requirements_diff` の陳腐化判定を差し替える(importに `from medo_core.status import project_status, stale_artifact_ids` を追加):
 
 ```python
 @app.command()
-def status(project: str = typer.Option(..., "--project")) -> None:
-    """プロジェクトの現在地(要件・生成物・次ステップ)をJSONで出力する。"""
-    from medo_core.status import project_status
-
+def status(project: str = typer.Option(...)):
+    """プロジェクトの現在地(要件・ファクト・生成物・next_step)をJSONで出力する。"""
     report = project_status(get_storage(), project)
     typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
 ```
 
+```python
+@requirements_app.command("diff")
+def requirements_diff(project: str = typer.Option(...)):
+    storage = get_storage()
+    req_store = RequirementsStore(storage)
+    current = req_store.latest_version(project)
+    if current == 0:
+        _fail(f"プロジェクト '{project}' の要件が見つかりません")
+    typer.echo(
+        json.dumps(
+            {
+                "requirements": req_store.diff(project),
+                "stale_artifacts": stale_artifact_ids(storage, project),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+```
+
+`cli/tests/test_cli.py` に追記:
+
+```python
+def test_status_flow_next_steps(medo_home: Path):
+    result = runner.invoke(app, ["status", "--project", "yoyaku"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["next_step"] == "hearing"
+
+    _save_requirements(medo_home)
+    result = runner.invoke(app, ["status", "--project", "yoyaku"])
+    assert json.loads(result.output)["next_step"] == "propose-options"
+```
+
 - [ ] **Step 4: テストが通ることを確認**
 
-Run: `uv run pytest core/tests/test_status.py cli/tests/test_cli.py -v`
-Expected: PASS(status 5件+CLI全件)
+Run: `uv run pytest -v && uv run ruff check .`
+Expected: 全件PASS(既存の `test_artifacts_save_and_diff_flow` も引き続き通る)、リント警告なし
 
 - [ ] **Step 5: docs/usage.md を書く(人間用の全体像)**
 
@@ -1461,12 +2497,15 @@ Expected: PASS(status 5件+CLI全件)
 ```markdown
 # Medo 使い方ガイド(フェーズ1)
 
-Medoは「アイデア→要件→根拠付きアーキ案」の上流工程を支援する。作業は次のステージを進む:
+Medoは「ビジネスの打ち手に目処をつける」上流工程を支援する。作業は次のステージを進む:
 
-    アイデア ──(medo-hearing)──▶ 要件 v1 ──(medo-propose-architecture)──▶ アーキ案
+    課題 ──(medo-hearing)──▶ 要件v1(背景・理念・課題)
+      ──(medo-propose-options)──▶ 市場ファクト+フェルミ推定+カタログ根拠
+                                   → 打ち手候補のミニPRFAQ候補セット
+      ──(比較・Q&A・合意)──▶ (medo-grow-prfaq)──▶ 完全版PRFAQ(How+効果+ロードマップ)
                   ▲                                    │
-                  └──── 過不足に気づいたら要件を更新(v2) ◀──┘
-                        → medo requirements diff で陳腐化を検出 → 再生成
+                  └── 過不足に気づいたら要件・ファクトを更新 ◀──┘
+                      → medo status / requirements diff が陳腐化を検出 → 再生成
 
 ## 今どこにいるかを知る
 
@@ -1477,26 +2516,26 @@ Medoは「アイデア→要件→根拠付きアーキ案」の上流工程を�
 | next_step | 状態 | 次にやること |
 |---|---|---|
 | `hearing` | 要件が未作成 | ホストで medo-hearing Skill を実行 |
-| `propose-architecture` | 要件はあるがアーキ案がない | medo-propose-architecture Skill を実行 |
-| `regenerate-stale-artifacts` | 要件更新で生成物が陳腐化 | `medo requirements diff` で差分確認→再生成 |
-| `up-to-date` | 最新要件に生成物が追従 | フェーズ1のゴール到達(フェーズ2でスライド等に続く) |
-
-各Skillも開始時・終了時に status を実行して現在地を報告する。
+| `propose-options` | 要件はあるが打ち手候補がない | medo-propose-options Skill を実行 |
+| `grow-prfaq` | 候補セットはあるが完全版PRFAQがない | 合意した打ち手を medo-grow-prfaq で育成 |
+| `regenerate-stale-artifacts` | 要件更新・引用ファクト/カタログの鮮度切れで生成物が陳腐化 | `medo requirements diff` で確認→再生成 |
+| `up-to-date` | 最新要件・鮮度に生成物が追従 | フェーズ1のゴール到達(フェーズ2でスライド等に続く) |
 
 ## ステージとコマンドの対応
 
 | ステージ | Skill | 主なCLI |
 |---|---|---|
-| 要件抽出 | medo-hearing | `medo requirements save/get` |
-| アーキ提案 | medo-propose-architecture | `medo catalog search`、`medo artifacts save` |
-| 見直し | (どちらからでも) | `medo requirements diff`、`medo status` |
+| 課題・方針の構造化 | medo-hearing | `medo requirements save/get` |
+| 打ち手候補の提案 | medo-propose-options | `medo facts save/list`、`medo fermi calc`、`medo catalog search`、`medo artifacts save --type mini-prfaq` |
+| PRFAQ育成 | medo-grow-prfaq | `medo artifacts get`、`medo catalog search`、`medo artifacts save --type prfaq` |
+| 見直し | (どこからでも) | `medo requirements diff`、`medo status`、`medo fermi calc --from-artifact` |
 ```
 
 - [ ] **Step 6: コミット**
 
 ```bash
 git add core/src/medo_core/status.py core/tests/test_status.py cli/src/medo_cli/main.py cli/tests/test_cli.py docs/usage.md
-git commit -m "feat(core): medo status(現在地と次ステップの決定論導出)"
+git commit -m "feat(core): medo status(引用根拠込みの陳腐化判定とnext_step導出)"
 ```
 
 ---
@@ -2161,19 +3200,20 @@ git commit -m "feat(etl): SKUスナップショットとパイプライン、med
 
 ---
 
-### Task 9: Skill 2本(hearing / propose-architecture)とビルドスクリプト
+### Task 9: Skill 3本(hearing / propose-options / grow-prfaq)とビルドスクリプト
 
 **Files:**
 - Create: `skills/src/hearing.md`
-- Create: `skills/src/propose-architecture.md`
+- Create: `skills/src/propose-options.md`
+- Create: `skills/src/grow-prfaq.md`
 - Create: `skills/build.py`
 - Test: `skills/tests/test_build.py`
 
 **Interfaces:**
-- Consumes: `medo` CLI のコマンド体系(Task 6)
+- Consumes: `medo` CLI のコマンド体系(Task 6・6b〜6f)
 - Produces:
   - `skills/dist/claude/<name>/SKILL.md`(Claude Code形式: frontmatter付きそのまま)
-  - `skills/dist/agy/<name>.md`(agy/Gemini形式: frontmatter除去+H1見出し追加。AGENTS.mdから参照して使う)
+  - `skills/dist/agy/<name>.md`(agy/Gemini形式: frontmatter除去。AGENTS.mdから参照)
   - `python skills/build.py` で dist を再生成
 
 - [ ] **Step 1: hearing Skill本文を書く**
@@ -2183,27 +3223,25 @@ git commit -m "feat(etl): SKUスナップショットとパイプライン、med
 ```markdown
 ---
 name: medo-hearing
-description: サービスやアプリのアイデア・ヒアリングメモから要件を対話的に抽出し、medoの要件ドキュメント(バージョン付き)として保存する。要件は最初から確定しない前提で、confidenceとopen_questionsを育てる。
+description: 業界・ビジネス状況・課題・経営思想/方針をヒアリングとブレストで構造化し、medoの要件ドキュメント(バージョン付き)として保存する。課題も要件も最初から確定しない前提で、confidenceとopen_questionsを育てる。
 ---
 
-# medo-hearing: アイデアから要件を育てる
+# medo-hearing: 課題と方針を構造化する
 
-あなたはGoogle Cloud上流工程の要件整理支援を行う。ユーザーのアイデア・ヒアリングメモ・参考URLから、構造化された要件ドキュメントを対話的に作る。
+あなたは上流工程のビジネス課題整理を支援する。ユーザーの話・ヒアリングメモ・参考資料から、システム要件に直行せず、まず業界・ビジネス状況・課題・経営思想を構造化する。
 
 ## 進め方
 
-0. プロジェクトIDが既に決まっている場合は `medo status --project <project-id>` を実行し、現在地(要件バージョン・生成物・next_step)をユーザーに報告してから始める。
-1. ユーザーの入力(アイデアの説明、ヒアリングメモ、参考URL)を読み、まず理解した内容を1段落で要約して確認する。
+0. プロジェクトIDが既に決まっている場合は `medo status --project <project-id>` を実行し、現在地(要件バージョン・ファクト・生成物・next_step)をユーザーに報告してから始める。
+1. ユーザーの入力を読み、まず理解した内容を1段落で要約して確認する。
 2. 次を一つずつ質問して埋める(すでに分かっている項目は聞かない):
-   - goal: やりたいことの一文
-   - industry: 業界(蓄積・類似案件検索のキーになる)
-   - functional: 機能要件。各項目に confidence を付ける
-     - confirmed: ユーザーが明言した
-     - assumed: 文脈からの推定(ユーザーに確認するまでassumedのまま)
-     - open: 要検討
-   - non_functional: 性能・可用性・セキュリティ・予算上限(分かる範囲で)
+   - industry / background: 業界と、そのビジネス状況の要約(市場環境・競合・業務の現状)
+   - challenges: 課題(What/Whyの起点)。各項目に confidence を付ける
+     - confirmed: ユーザーが明言した / assumed: 文脈からの推定 / open: 要検討
+   - principles: 経営思想・理念・方針。**これは検索で調べる事実ではなく、ヒアリングとブレストで引き出して合意する対象**。「何を大切にしたいか」「どんな会社でありたいか」を対話し、ブレストで言語化を手伝い、合意した文言だけを confirmed にする
+   - goal: 現時点のやりたいことの一文(打ち手の合意とともに変わってよい)
+   - functional / non_functional: 既に見えているシステム要件があれば(薄くてよい。打ち手合意後に育てる)
 3. 確認できなかった事項・判断に効く未確定事項は、勝手に埋めずに open_questions に残す。
-   open_questionsは「次のヒアリングで聞くことリスト」であり、意思決定の不確定パラメタである。
 4. 以下のYAMLを作り、ユーザーに見せて確認を取ってから保存する。
 
 ## 保存
@@ -2214,22 +3252,26 @@ description: サービスやアプリのアイデア・ヒアリングメモか�
 
 - project-id はユーザーと合意した英数字slug(例: yoyaku-system)
 - 保存後、`saved: v<n>` の出力をユーザーに伝える
-- 2回目以降の保存は自動的に新バージョンになる(上書きではない)。保存後に
-  `medo requirements diff --project <project-id>` を実行し、要件差分と陳腐化した生成物を報告する
-- 最後に `medo status --project <project-id>` を実行し、現在地と次ステップ(next_step)をユーザーに報告して終える
+- 2回目以降の保存は自動的に新バージョンになる。保存後に `medo requirements diff --project <project-id>` を実行し、差分と陳腐化した生成物を報告する
+- 最後に `medo status --project <project-id>` を実行し、現在地と次ステップ(next_step)を報告して終える
 
 ## YAMLスキーマ
 
     project: <slug>
-    goal: <一文>
     industry: <業界>
+    background: <業界・ビジネス状況の要約>
+    goal: <一文>
+    principles:
+      - text: <経営思想・理念・方針>
+        confidence: confirmed | assumed | open
+    challenges:
+      - text: <課題>
+        confidence: confirmed | assumed | open
     functional:
       - text: <機能要件>
         confidence: confirmed | assumed | open
     non_functional:
       performance: <値>
-      availability: <値>
-      security: <値>
       budget_cap: <値>
     open_questions:
       - <未確定事項>
@@ -2240,70 +3282,136 @@ description: サービスやアプリのアイデア・ヒアリングメモか�
 
 - CLIが失敗したら(非ゼロ終了)、推測で補完せずエラー内容をそのまま報告する
 - 開始時(プロジェクトIDが分かる場合)と終了時に `medo status` を実行し、現在地と次ステップを報告する
-- ユーザーが言っていないことを confirmed にしない
-- 要件の妥当性への意見(過剰・不足の指摘)は述べてよいが、要件本文はユーザーの合意した内容だけを書く
+- ユーザーが言っていないことを confirmed にしない。principles はユーザーが合意した文言だけを書く
+- 課題の妥当性への意見(見落とし・深掘りの提案)は述べてよいが、本文はユーザーの合意した内容だけを書く
 ```
 
-- [ ] **Step 2: propose-architecture Skill本文を書く**
+- [ ] **Step 2: propose-options Skill本文を書く**
 
-`skills/src/propose-architecture.md`:
+`skills/src/propose-options.md`:
 
 ```markdown
 ---
-name: medo-propose-architecture
-description: medoの要件ドキュメントとカタログ根拠に基づき、Google Cloudアーキテクチャ案を複数(2〜3案)生成して保存する。事実(launch_stage・鮮度)はカタログ値のみを使い、引用エントリIDを記録する。
+name: medo-propose-options
+description: 要件ドキュメント(課題・方針)を起点に、市場・国策・業界動向ファクトとフェルミ推定に裏づけられた打ち手候補(2〜3案)を生成し、ミニPRFAQ候補セットとして保存する。事実はCLIが検証・保存した出典付きファクトとカタログ値に縛る。
 ---
 
-# medo-propose-architecture: 根拠付きアーキテクチャ提案
+# medo-propose-options: 打ち手候補をミニPRFAQで比較可能にする
 
-要件ドキュメントを入力に、Google Cloudのアーキテクチャ案を2〜3案生成する。発想は自由に、事実はカタログに縛る。
+要件ドキュメントを入力に、ビジネスの打ち手候補を2〜3案生成する。発想は自由に、事実はファクトとカタログに縛る。
 
 ## 進め方
 
-1. まず現在地を確認し、ユーザーに報告する:
+1. 現在地を確認し、ユーザーに報告する:
 
        medo status --project <project-id>
 
-   `next_step` が `hearing` なら「まず medo-hearing で要件を作る」ようユーザーに案内して終了する。
+   `next_step` が `hearing` なら「まず medo-hearing で課題を構造化する」よう案内して終了する。
    続けて最新要件を取得する:
 
        medo requirements get --project <project-id> --format json
 
-2. 要件の機能・非機能からキーワードを抽出し、カタログを検索する(複数回実行してよい):
+2. 市場・国策・業界動向を検索し(自分の検索能力を使う)、案件の判断に効くファクトを保存する:
+
+       medo facts save --project <project-id> --kind <market|policy|trend> \
+         --statement "<出典の記述に忠実な一文>" --value <数値> --unit <単位> \
+         --source <出典URL> --retrieved <取得日YYYY-MM-DD>
+
+   - **数値は出典に忠実に転記し、加工しない**(換算・集計が必要ならフェルミ推定で行う)
+   - ヒアリング由来の個社情報は `--kind company --source "ヒアリング(<日付> <相手>)"` で保存する
+   - 出典のないデータは保存も引用もしない
+
+3. 効果・市場規模の桁感をフェルミ推定で計算する。モデルYAML(variables: fact参照 or assume、formula)を一時ファイルに書き:
+
+       medo fermi calc --project <project-id> --file /tmp/model.yaml
+
+   - 仮定(assume)は明示し、計算は自分でしない(CLIのコードが計算する)
+   - 将来予測は policy/trend ファクトを成長率等の根拠に使う
+
+4. Howの目処のためカタログを検索する(複数回実行してよい):
 
        medo catalog search "<キーワード>" --format json
-       medo catalog search "" --service <service-slug> --format json
 
-3. アーキテクチャ案を2〜3案作る。各案に必ず含めること:
-   - 案の名前とねらい(何を優先した設計か: コスト最小/運用レス/拡張性 など)
-   - 構成(サービスの組み合わせと役割。mermaid図があるとよい)
-   - この案を選ぶ理由と、選ばない理由(トレードオフ)
-   - 導入難易度(低/中/高)と、難易度の根拠
-   - 使用サービス一覧: サービス名、launch_stage、引用カタログエントリID
+5. 打ち手候補を2〜3案作る。切り口: **既存の解決 / 破壊的業務改革 / 新規市場開拓** × **スコープ / 立ち位置 / 根本治療vs対症療法**。各案のミニPRFAQに必ず含めること:
+   - 打ち手の宣言(顧客に届いた未来のプレスリリース1段落)
+   - 価値仮説(What/Why)。**principles(理念・方針)との整合を明記**
+   - 効果の桁感(フェルミ推定の生成物IDと結果を引用)
+   - Howの目処(カタログ根拠の要点。launch_stageと引用エントリID)
+   - 主要リスク・open_questions
 
-4. 案をmarkdownファイル(例: /tmp/arch.md)に書き、保存する:
+6. 全案を1つのmarkdown(候補セット)にまとめて保存する:
 
-       medo artifacts save --project <project-id> --type architecture \
-         --file /tmp/arch.md --cites <entry-id,entry-id,...> \
+       medo artifacts save --project <project-id> --type mini-prfaq \
+         --file /tmp/options.md \
+         --options "<打ち手名>:<切り口>,<打ち手名>:<切り口>" \
+         --cites <entry-id,...> --cites-facts <fact-id,...> \
          --generated-by <claude|gemini> --requirements-version <n>
 
-   - --cites には提案中で参照した全カタログエントリIDを列挙する
-   - --generated-by は自分がClaude系ならclaude、Gemini系ならgemini
-   - --requirements-version は手順1で取得した要件のversion値
+7. 保存後 `medo status --project <project-id>` を実行し、「候補セットを比較・Q&Aし、合意した打ち手を medo-grow-prfaq で完全版に育てる」ことを案内して終える。
 
 ## 契約(必ず守る)
 
-- launch_stage・鮮度・機能の有無は、カタログ検索結果に書かれている値だけを使う。
-  自分の学習知識でカタログにない機能を「ある」と書かない
-- カタログ検索結果に `"stale": true` が付いたエントリを使う場合、提案文中に
-  「(情報が古い可能性: last_verified <日付>)」と必ず注記する
-- カタログに情報がなく提案に必要な場合は、その旨を明示して open_questions への追加を提案する
-- assumed/open の要件に依存する設計判断には「要確認」の印を付ける
-- 保存後に `medo status --project <project-id>` を実行し、現在地と次ステップを報告して終える
+- 引用する市場数値・国策・業界動向は `medo facts` に保存済みの出典付きファクトのみ。launch_stage・GCP機能の有無はカタログ値のみ
+- ファクト・カタログに `"stale": true` が付いたものを使う場合、文中に「(情報が古い可能性: <取得日/last_verified>)」と必ず注記する
+- フェルミ推定の計算をLLM(自分)で行わない。必ず `medo fermi calc` の結果を使う
+- assumed/open の課題・要件に依存する判断には「要確認」の印を付ける
 - CLIが失敗したら推測で補完せずエラー内容を報告する
 ```
 
-- [ ] **Step 3: 失敗するテストを書く**
+- [ ] **Step 3: grow-prfaq Skill本文を書く**
+
+`skills/src/grow-prfaq.md`:
+
+```markdown
+---
+name: medo-grow-prfaq
+description: 合意した打ち手を完全版PRFAQ(技術的背景・workflow改善見込み・効果・ロードマップ付き)に育成して保存する。技術的背景はGCPカタログ根拠に縛り、育成元(grown_from)を記録する。
+---
+
+# medo-grow-prfaq: 合意した打ち手を完全版PRFAQに育てる
+
+ミニPRFAQ候補セットから合意された打ち手を、顧客に持ち帰れる完全版PRFAQに育成する。
+
+## 進め方
+
+1. 現在地を確認し、ユーザーに報告する:
+
+       medo status --project <project-id>
+
+   `next_step` が `propose-options` なら「まず medo-propose-options で候補を作る」よう案内して終了する。
+2. **どの打ち手に合意したかをユーザーに確認する**(合意はツールの外の意思決定。勝手に選ばない)。
+3. 育成元の候補セットと要件を取得する:
+
+       medo artifacts get --project <project-id> --id <mini-prfaq-vN>
+       medo requirements get --project <project-id> --format json
+
+4. 技術的背景を深めるためカタログを検索し(`medo catalog search`)、必要に応じてファクトを追加保存する。
+5. 完全版PRFAQを作る。ミニPRFAQの内容に加えて:
+   - 技術的背景(GCP構成の要点。launch_stage・引用エントリID付きで、絵に描いた餅にしない)
+   - workflow改善見込み(現状業務がどう変わるか)
+   - 効果(フェルミ推定の引用。必要なら `medo fermi calc` で追加計算)
+   - ロードマップ(段階と、open_questionsが各段階に与える影響)
+   - FAQ(顧客・社内から想定される問いと答え)
+6. 保存する:
+
+       medo artifacts save --project <project-id> --type prfaq \
+         --file /tmp/prfaq.md \
+         --grown-from "<mini-prfaq-vN>:<合意した打ち手名>" \
+         --cites <entry-id,...> --cites-facts <fact-id,...> \
+         --generated-by <claude|gemini> --requirements-version <n>
+
+7. 保存後 `medo status --project <project-id>` を実行し、現在地と次ステップを報告して終える。
+
+## 契約(必ず守る)
+
+- launch_stage・鮮度・機能の有無はカタログ値のみ。市場数値は保存済みファクトのみを引用する
+- stale なファクト・カタログエントリを使う場合は必ず注記する
+- 打ち手の選択(合意)を自分で行わない。ユーザーの確認を必ず取る
+- `--grown-from` に育成元の候補セットIDと打ち手名を必ず記録する
+- CLIが失敗したら推測で補完せずエラー内容を報告する
+```
+
+- [ ] **Step 4: 失敗するテストを書く**
 
 `skills/tests/test_build.py`:
 
@@ -2314,6 +3422,8 @@ from pathlib import Path
 
 SKILLS_DIR = Path(__file__).parent.parent
 
+SKILL_NAMES = ["medo-hearing", "medo-propose-options", "medo-grow-prfaq"]
+
 
 def test_build_generates_claude_and_agy_dist(tmp_path):
     result = subprocess.run(
@@ -2323,28 +3433,26 @@ def test_build_generates_claude_and_agy_dist(tmp_path):
     )
     assert result.returncode == 0, result.stderr
 
-    claude_skill = tmp_path / "claude" / "medo-hearing" / "SKILL.md"
-    assert claude_skill.exists()
-    text = claude_skill.read_text(encoding="utf-8")
-    assert text.startswith("---")
-    assert "name: medo-hearing" in text
+    for name in SKILL_NAMES:
+        claude_skill = tmp_path / "claude" / name / "SKILL.md"
+        assert claude_skill.exists(), name
+        text = claude_skill.read_text(encoding="utf-8")
+        assert text.startswith("---") and f"name: {name}" in text
 
-    agy_skill = tmp_path / "agy" / "medo-hearing.md"
-    assert agy_skill.exists()
-    agy_text = agy_skill.read_text(encoding="utf-8")
-    assert not agy_text.startswith("---")  # frontmatterは除去される
-    assert "medo requirements save" in agy_text
+        agy_skill = tmp_path / "agy" / f"{name}.md"
+        assert agy_skill.exists(), name
+        assert not agy_skill.read_text(encoding="utf-8").startswith("---")  # frontmatter除去
 
-    assert (tmp_path / "claude" / "medo-propose-architecture" / "SKILL.md").exists()
-    assert (tmp_path / "agy" / "medo-propose-architecture.md").exists()
+    hearing = (tmp_path / "agy" / "medo-hearing.md").read_text(encoding="utf-8")
+    assert "medo requirements save" in hearing
 ```
 
-- [ ] **Step 4: テストが失敗することを確認**
+- [ ] **Step 5: テストが失敗することを確認**
 
 Run: `uv run pytest skills/tests/test_build.py -v`
 Expected: FAIL(build.py が存在しない)
 
-- [ ] **Step 5: build.py を実装**
+- [ ] **Step 6: build.py を実装**
 
 `skills/build.py`:
 
@@ -2392,35 +3500,35 @@ if __name__ == "__main__":
     build(args.out)
 ```
 
-- [ ] **Step 6: テストが通ることを確認**
+- [ ] **Step 7: テストが通ることを確認**
 
-Run: `uv run pytest skills/tests/test_build.py -v`
-Expected: PASS(1 passed)
+Run: `uv run pytest skills/tests/test_build.py -v && uv run ruff check .`
+Expected: PASS(1 passed)、リント警告なし
 
-- [ ] **Step 7: distを生成して中身を目視確認**
+- [ ] **Step 8: distを生成して中身を目視確認**
 
 Run: `python skills/build.py && ls -R skills/dist`
-Expected: `claude/medo-hearing/SKILL.md`, `claude/medo-propose-architecture/SKILL.md`, `agy/medo-hearing.md`, `agy/medo-propose-architecture.md`
+Expected: `claude/{medo-hearing,medo-propose-options,medo-grow-prfaq}/SKILL.md` と `agy/{medo-hearing,medo-propose-options,medo-grow-prfaq}.md`
 
-- [ ] **Step 8: コミット**
+- [ ] **Step 9: コミット**
 
 ```bash
 git add skills/src/ skills/build.py skills/tests/
-git commit -m "feat(skills): hearing/propose-architecture Skillとビルドスクリプト"
+git commit -m "feat(skills): hearing/propose-options/grow-prfaq Skillとビルドスクリプト"
 ```
 
 ---
 
-### Task 10: 統合スモーク(実環境での縦切り確認)
+### Task 10: 統合スモーク(実環境でのWhat/Why縦切り確認)
 
 **Files:**
 - Create: `docs/setup.md`(セットアップ手順の記録)
 
 **Interfaces:**
 - Consumes: これまでの全タスク
-- Produces: フェーズ1完了の定義「実案件1件でヒアリング→要件保存→根拠付きアーキ案生成が両ホストで通る」の確認記録
+- Produces: フェーズ1完了の定義「実案件1件で 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(GCPカタログ根拠付き) が両ホストで通る」の確認記録
 
-このタスクは人間(利用者本人)との共同作業。GCP認証・課金が絡むため自動化しない。
+このタスクは人間(利用者本人)との共同作業。GCP認証・課金・実案件の意思決定が絡むため自動化しない。
 
 - [ ] **Step 1: GCP前提の確認**
 
@@ -2453,7 +3561,8 @@ Expected: `saved: sku_snapshots/vertex-ai (<N> SKUs)`
 python skills/build.py
 mkdir -p ~/.claude/skills
 cp -r skills/dist/claude/medo-hearing ~/.claude/skills/
-cp -r skills/dist/claude/medo-propose-architecture ~/.claude/skills/
+cp -r skills/dist/claude/medo-propose-options ~/.claude/skills/
+cp -r skills/dist/claude/medo-grow-prfaq ~/.claude/skills/
 ```
 
 - [ ] **Step 6: Skillをagyに配置**
@@ -2462,21 +3571,24 @@ cp -r skills/dist/claude/medo-propose-architecture ~/.claude/skills/
 
 ```markdown
 ## Medo Skills
-- 要件整理: skills/dist/agy/medo-hearing.md の手順に従う
-- アーキ提案: skills/dist/agy/medo-propose-architecture.md の手順に従う
+- 課題・方針の構造化: skills/dist/agy/medo-hearing.md の手順に従う
+- 打ち手候補の提案: skills/dist/agy/medo-propose-options.md の手順に従う
+- PRFAQ育成: skills/dist/agy/medo-grow-prfaq.md の手順に従う
 ```
 
-- [ ] **Step 7: 実案件1件で縦切りを通す(受け入れテスト)**
+- [ ] **Step 7: 実案件1件でWhat/Why縦切りを通す(受け入れテスト)**
 
-1. Claude Codeで `medo-hearing` を起動し、実案件のアイデアを入力 → 要件保存(`saved: v1` を確認)
-2. 続けて `medo-propose-architecture` → アーキ案2〜3案が生成され、`--cites` に実カタログエントリIDが入って保存されることを確認
-3. agyでも同じ手順を実行し、`--generated-by gemini` で保存されることを確認
-4. `medo artifacts list --project <id>` で claude / gemini 両方の生成物が並ぶことを確認
-5. 要件を1項目追加して再保存(v2)→ `medo requirements diff` が陳腐化した生成物を報告することを確認
+1. Claude Codeで `medo-hearing` を起動し、実案件の課題を入力 → 背景・理念(principles)・課題(challenges)込みで要件保存(`saved: v1` を確認)
+2. `medo-propose-options` → 市場・国策・業界動向ファクトが出典付きで保存され(`medo facts list` で確認)、フェルミ推定が `fermi-v1` として保存され、打ち手2〜3案のミニPRFAQ候補セットが `--options`・`--cites-facts`・`--cites` 付きで保存されることを確認
+3. 候補セットを見て打ち手を1つ選び(合意)、`medo-grow-prfaq` → 完全版PRFAQが `--grown-from` 付きで保存されることを確認
+4. agyでも手順1〜3を実行し、`--generated-by gemini` で保存されることを確認
+5. `medo artifacts list --project <id>` で claude / gemini 両方の生成物が並ぶことを確認
+6. 課題を1項目追加して再保存(v2)→ `medo status` が `regenerate-stale-artifacts` を返し、`medo requirements diff` が陳腐化した生成物を報告することを確認
+7. `medo fermi calc --from-artifact fermi-v1` で再計算できることを確認
 
 - [ ] **Step 8: セットアップ手順を docs/setup.md に記録してコミット**
 
-スモークで実際に使ったコマンド・環境変数・ハマりどころを `docs/setup.md` に記録する(内容はスモーク結果に依存するため、実行時に書く。「GCP前提」「ETL実行」「Skill配置(Claude Code/agy)」の3節を含めること)。
+スモークで実際に使ったコマンド・環境変数・ハマりどころを `docs/setup.md` に記録する(内容はスモーク結果に依存するため、実行時に書く。「GCP前提」「ETL実行」「Skill配置(Claude Code/agy)」「What/Why縦切りの流れ」の4節を含めること)。
 
 ```bash
 git add docs/setup.md
@@ -2487,6 +3599,7 @@ git commit -m "docs: フェーズ1セットアップ手順とスモーク結果"
 
 ## 自己レビュー結果
 
-- **スペック対応**: フェーズ1の構成要素(core: スキーマ・カタログ・要件ストア/最小ETL: リリースノート+主要SKU・手動実行/CLI/Skill 2本の両ホスト配布)はTask 1〜10で網羅。鮮度契約(30日・stale伝播・Skill注記義務)はTask 4・6・9に、「検証通過分のみコミット」はTask 7・8に、「CLI失敗時に推測しない」はTask 6(エラー処理)と両Skillの契約節に実装される
-- **フェーズ1対象外(意図的)**: pricing計算機・make-slides・build-mock・compare-aws・decision-roadmap・Webアプリ・Scheduler自動化・knowledge-digest はフェーズ2以降(スペックのフェーズ計画どおり)
-- **型整合**: `CatalogEntry.entry_id` = `{service}__{feature}` をCLI(`--cites`)・ETL(upsert)・Skill(引用ID)で共通使用。日付はISO文字列で統一。`RequirementsStore.save → int`、`ArtifactStore.save → str(artifact_id)` は各消費箇所と一致
+- **スペック対応**: What/Why縦切りMVPの構成要素(要件拡張=background/principles/challenges、市場ファクト=kind別出典検証+180日stale、フェルミ=決定論計算+再計算、生成物=mini-prfaq候補セット/grown_from付きprfaq、status=引用根拠込み陳腐化判定、Skill 3本、最小ETL)はTask 1〜10で網羅
+- **フェーズ1対象外(意図的)**: make-slides・build-mock・propose-architecture(詳細)・pricing計算機・decision-roadmap・knowledge-digest・Webアプリ・Scheduler自動化はフェーズ2以降、compare-awsはバックログ(スペックのフェーズ計画どおり)
+- **型整合**: `Fact.fact_id`=`fact-<n>`、`CatalogEntry.entry_id`=`{service}__{feature}`、生成物ID=`{type}-v{n}`、`GrownFrom{artifact, option}`、`ConfidenceItem{text, confidence}` を core / CLI / Skill 間で共通使用。日付はISO文字列で統一
+- **契約変更の扱い**: Task 6b(要件スキーマ)・6c/6e(CLI新コマンド)・6d(生成物スキーマ)は人間レビュー対象としてGlobal Constraintsに明記
