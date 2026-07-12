@@ -816,7 +816,7 @@ git commit -m "feat(core): 鮮度判定付きカタログストア"
     - `list(project_id: str) -> list[Artifact]`
     - `stale_artifacts(project_id: str, current_requirements_version: int) -> list[Artifact]`(依存要件バージョンが古いもの)
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `core/tests/test_artifacts.py`:
 
@@ -868,12 +868,12 @@ def test_stale_artifacts(store: ArtifactStore):
     assert [a.type for a in stale] == ["architecture"]
 ```
 
-- [ ] **Step 2: テストが失敗することを確認**
+- [x] **Step 2: テストが失敗することを確認**
 
 Run: `uv run pytest core/tests/test_artifacts.py -v`
 Expected: FAIL(ModuleNotFoundError: medo_core.artifacts)
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `core/src/medo_core/artifacts.py`:
 
@@ -943,12 +943,12 @@ class ArtifactStore:
         ]
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `uv run pytest core/tests/test_artifacts.py -v`
 Expected: PASS(3 passed)
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add core/src/medo_core/artifacts.py core/tests/test_artifacts.py
