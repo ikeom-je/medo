@@ -92,7 +92,8 @@ python skills/build.py && cp -r skills/dist/claude/* ~/.claude/skills/
 
 ## 8. 実案件での利用フロー(ドッグフーディング)
 
-1. ホスト(Claude Code / agy)で `medo-hearing` → 要件保存(v1)
-2. `medo-propose-architecture` → 根拠付きアーキ案を生成・保存
-3. 案を見て要件の過不足に気づいたら要件を更新(v2) → `medo requirements diff` で陳腐化した生成物を確認 → 再生成
-4. 使いにくさ・不足を感じたら、その場で直さずIssueメモとして `docs/feedback.md` に追記し、次の設計サイクルで扱う
+1. ホスト(Claude Code / agy)で `medo-hearing` → 業界・ビジネス状況・課題・経営思想/方針を構造化して要件保存(v1)
+2. `medo-propose-options` → 市場・国策・業界動向ファクト収集+フェルミ推定+カタログ根拠 → 打ち手候補のミニPRFAQ候補セットを生成・保存
+3. 候補セットで比較・Q&A・合意 → `medo-grow-prfaq` → 合意案を完全版PRFAQ(How+効果+ロードマップ)に育成
+4. 過不足に気づいたら要件・ファクトを更新(v2) → `medo requirements diff` / `medo status` で陳腐化した生成物を確認 → 再生成
+5. 使いにくさ・不足を感じたら、その場で直さずIssueメモとして `docs/feedback.md` に追記し、次の設計サイクルで扱う
