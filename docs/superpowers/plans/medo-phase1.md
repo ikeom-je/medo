@@ -640,7 +640,7 @@ git commit -m "feat(core): 要件ドキュメントのバージョン管理とdi
     - `get(service: str, feature: str) -> CatalogEntry | None`
     - `search(query: str = "", service: str | None = None, limit: int = 10) -> list[CatalogEntry]`(feature/summary/caveatsの部分一致・大文字小文字無視)
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `core/tests/test_catalog.py`:
 
@@ -713,12 +713,12 @@ def test_search_matches_feature_summary_caveats(store: CatalogStore):
     assert len(store.search("", limit=2)) == 2
 ```
 
-- [ ] **Step 2: テストが失敗することを確認**
+- [x] **Step 2: テストが失敗することを確認**
 
 Run: `uv run pytest core/tests/test_catalog.py -v`
 Expected: FAIL(ModuleNotFoundError: medo_core.catalog)
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `core/src/medo_core/catalog.py`:
 
@@ -786,12 +786,12 @@ class CatalogStore:
         return results
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `uv run pytest core/tests/test_catalog.py -v`
 Expected: PASS(5 passed)
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add core/src/medo_core/catalog.py core/tests/test_catalog.py
