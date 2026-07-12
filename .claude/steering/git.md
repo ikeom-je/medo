@@ -19,8 +19,8 @@
 
 1. 実装計画のTaskごとに `gh issue create`(ラベル `phase1`、本文に実装計画へのリンク)
 2. `git worktree add .worktrees/<name> -b feature/<issue番号>-<説明> dev` で作業ディレクトリを分離
-3. TDDで実装(Codex/agyに委譲、Claudeが `uv run pytest` / `uv run ruff check .` で検証)し、worktree上でコミット
-4. **コミット前に相互レビューを実施**(workflow.mdの相互レビュープロトコル。Claude作のdiffはCodex+agy、agy/Codex作のdiffはClaude。上限2ラウンド)し、結果をコミット本文の `review:` 行に記録
+3. TDDで実装(Codexに委譲、必要な調査はagy。Claudeが `uv run pytest` / `uv run ruff check .` で検証)する
+4. **相互レビューを実施**(workflow.mdの相互レビュープロトコル。Claude作のdiffはCodex+agy、agy/Codex作のdiffはClaude。上限2ラウンド)し、結果を `review:` 行に記録してworktree上でコミット
 5. `git push -u github feature/<issue番号>-<説明>`
 6. `gh pr create --base dev`(本文に "Closes #<issue番号>" + テスト結果 + レビュー記録を転記)
 7. **重要度判定**(次のいずれかに該当する場合のみ人間レビューを依頼、それ以外はClaudeが自動マージ):
