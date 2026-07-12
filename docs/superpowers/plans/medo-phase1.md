@@ -1053,6 +1053,37 @@ def test_catalog_search_marks_stale(medo_home: Path):
     assert items[0]["stale"] is True
 
 
+def test_catalog_get_digest_and_json_format(medo_home: Path):
+    from medo_core.catalog import CatalogEntry, CatalogStore
+    from medo_core.storage import LocalJsonStorage
+
+    CatalogStore(LocalJsonStorage(medo_home)).upsert(CatalogEntry(**ENTRY))
+
+    result = runner.invoke(app, ["catalog", "get", "vertex-ai", "context-caching", "--format", "digest"])
+    assert result.exit_code == 0
+    assert "vertex-ai__context-caching" in result.output
+    assert "[STALE]" in result.output
+
+    result = runner.invoke(app, ["catalog", "get", "vertex-ai", "context-caching", "--format", "json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["entry"]["feature"] == "context-caching"
+
+
+def test_requirements_get_invalid_format_fails(medo_home: Path):
+    _save_requirements(medo_home)
+    result = runner.invoke(app, ["requirements", "get", "--project", "yoyaku", "--format", "yaml"])
+    assert result.exit_code != 0
+
+
+def test_requirements_save_invalid_yaml_fails(medo_home: Path):
+    f = medo_home / "bad.yaml"
+    f.write_text("- just\n- a\n- list\n", encoding="utf-8")
+    result = runner.invoke(app, ["requirements", "save", "--project", "yoyaku", "--file", str(f)])
+    assert result.exit_code == 1
+    assert "error:" in result.output
+
+
 def test_artifacts_save_and_diff_flow(medo_home: Path):
     _save_requirements(medo_home)
     arch = medo_home / "arch.md"
@@ -1088,8 +1119,8 @@ Expected: FAIL(ModuleNotFoundError: medo_cli.main)
 """medo CLI。事実と計算の決定論的インターフェース。失敗時は推測せずエラーを返す。"""
 
 import json
-import sys
 from pathlib import Path
+from typing import Literal
 
 import typer
 import yaml
@@ -1117,10 +1148,12 @@ def requirements_save(
     project: str = typer.Option(...),
     file: Path = typer.Option(..., exists=True, readable=True),
 ):
-    data = yaml.safe_load(file.read_text(encoding="utf-8"))
     try:
+        data = yaml.safe_load(file.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("YAMLのトップレベルはマッピングである必要があります")
         doc = RequirementsDoc.model_validate({**data, "project": project})
-    except Exception as e:  # pydantic.ValidationError
+    except Exception as e:  # yaml.YAMLError, ValueError, pydantic.ValidationError
         _fail(f"要件のスキーマ不正: {e}")
     version = RequirementsStore(get_storage()).save(project, doc)
     typer.echo(f"saved: v{version}")
@@ -1130,7 +1163,7 @@ def requirements_save(
 def requirements_get(
     project: str = typer.Option(...),
     version: int | None = typer.Option(None),
-    format: str = typer.Option("json"),
+    format: Literal["json", "digest"] = typer.Option("json"),
 ):
     doc = RequirementsStore(get_storage()).get(project, version)
     if doc is None:
@@ -1174,7 +1207,7 @@ def catalog_search(
     query: str = typer.Argument(""),
     service: str | None = typer.Option(None),
     limit: int = typer.Option(10),
-    format: str = typer.Option("digest"),
+    format: Literal["json", "digest"] = typer.Option("digest"),
 ):
     entries = CatalogStore(get_storage()).search(query, service=service, limit=limit)
     if format == "json":
@@ -1189,17 +1222,25 @@ def catalog_search(
 
 
 @catalog_app.command("get")
-def catalog_get(service: str, feature: str, format: str = typer.Option("json")):
+def catalog_get(
+    service: str,
+    feature: str,
+    format: Literal["json", "digest"] = typer.Option("json"),
+):
     entry = CatalogStore(get_storage()).get(service, feature)
     if entry is None:
         _fail(f"カタログに {service}/{feature} が見つかりません")
-    typer.echo(json.dumps(_entry_payload(entry), ensure_ascii=False, indent=2))
+    if format == "json":
+        typer.echo(json.dumps(_entry_payload(entry), ensure_ascii=False, indent=2))
+        return
+    stale = " [STALE]" if entry.is_stale() else ""
+    typer.echo(f"{entry.entry_id} [{entry.launch_stage}]{stale} {entry.summary[:60]}")
 
 
 @artifacts_app.command("save")
 def artifacts_save(
     project: str = typer.Option(...),
-    type: str = typer.Option(...),
+    artifact_type: str = typer.Option(..., "--type"),
     file: Path = typer.Option(..., exists=True, readable=True),
     cites: str = typer.Option("", help="引用カタログエントリID(カンマ区切り)"),
     generated_by: str | None = typer.Option(None),
@@ -1208,7 +1249,7 @@ def artifacts_save(
     try:
         artifact = Artifact(
             project=project,
-            type=type,
+            type=artifact_type,
             requirements_version=requirements_version,
             cited_catalog_entries=[c for c in cites.split(",") if c],
             generated_by=generated_by,
@@ -1234,10 +1275,12 @@ if __name__ == "__main__":
     app()
 ```
 
+**設計メモ(実装時のレビューで追加した箇所)**: `--format` は `Literal["json", "digest"]` でtyperのChoiceとして検証し、不正値はUsageエラー(exit 2)で拒否する。`catalog get` は `catalog search` と同じdigest整形を持つ。`requirements save` のYAML読み込みはパース失敗・非マッピング・スキーマ不正のすべてを`try`内で捕捉して`error:`契約を満たす。`artifacts_save` の内部パラメータ名は `artifact_type`(CLIフラグは `--type` のまま)でbuiltin shadowingを避ける。
+
 - [ ] **Step 4: テストが通ることを確認**
 
 Run: `uv run pytest cli/tests/test_cli.py -v`
-Expected: PASS(4 passed)
+Expected: PASS(7 passed。契約の網羅性向上のためcatalog get digest/json・不正format・不正YAMLのテストをレビューで追加)
 
 - [ ] **Step 5: インストール済みコマンドとしての動作確認**
 
