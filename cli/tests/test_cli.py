@@ -102,6 +102,38 @@ def test_requirements_save_invalid_yaml_fails(medo_home: Path):
     assert "error:" in result.output
 
 
+def test_catalog_get_missing_entry_fails(medo_home: Path):
+    result = runner.invoke(app, ["catalog", "get", "vertex-ai", "nashi"])
+    assert result.exit_code == 1
+    assert "error:" in result.output
+
+
+def test_requirements_diff_missing_project_fails(medo_home: Path):
+    result = runner.invoke(app, ["requirements", "diff", "--project", "nashi"])
+    assert result.exit_code == 1
+    assert "error:" in result.output
+
+
+def test_artifacts_list_empty_and_after_save(medo_home: Path):
+    result = runner.invoke(app, ["artifacts", "list", "--project", "yoyaku"])
+    assert result.exit_code == 0
+    assert "(生成物なし)" in result.output
+
+    _save_requirements(medo_home)
+    arch = medo_home / "arch.md"
+    arch.write_text("# 案A", encoding="utf-8")
+    runner.invoke(
+        app,
+        [
+            "artifacts", "save", "--project", "yoyaku", "--type", "architecture",
+            "--file", str(arch), "--requirements-version", "1",
+        ],
+    )
+    result = runner.invoke(app, ["artifacts", "list", "--project", "yoyaku"])
+    assert result.exit_code == 0
+    assert "architecture-v1" in result.output
+
+
 def test_artifacts_save_and_diff_flow(medo_home: Path):
     _save_requirements(medo_home)
     arch = medo_home / "arch.md"
