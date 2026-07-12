@@ -437,7 +437,7 @@ git commit -m "feat(core): Storage抽象とLocalJSON/Firestoreバックエンド
     - `latest_version(project_id: str) -> int`(なければ0)
     - `diff(project_id: str) -> dict`(最新2バージョンの差分: `{"from": n-1, "to": n, "functional_added": [...], "functional_removed": [...], "open_questions_added": [...], "open_questions_resolved": [...]}`。バージョンが1つ以下なら `{"from": 0, "to": n, ...空リスト}`)
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `core/tests/test_requirements.py`:
 
@@ -518,12 +518,12 @@ def test_diff_with_single_version(store: RequirementsStore):
     assert d["functional_added"] == []
 ```
 
-- [ ] **Step 2: テストが失敗することを確認**
+- [x] **Step 2: テストが失敗することを確認**
 
 Run: `uv run pytest core/tests/test_requirements.py -v`
 Expected: FAIL(ModuleNotFoundError: medo_core.requirements)
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `core/src/medo_core/requirements.py`:
 
@@ -609,12 +609,12 @@ class RequirementsStore:
         return empty
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `uv run pytest core/tests/test_requirements.py -v`
 Expected: PASS(5 passed)
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add core/src/medo_core/requirements.py core/tests/test_requirements.py
