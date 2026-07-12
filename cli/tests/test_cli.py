@@ -7,15 +7,27 @@ from typer.testing import CliRunner
 
 runner = CliRunner()
 
+
+# Medoの実際のユースケース(AI/ML活用によるGCPアーキ提案)をfixtureに反映する。
+# 飲食店がインバウンド客の電話予約に対応しきれず、多言語AI音声応対と
+# ノーショウ予測でGCPのAI/ML機能を活用したい、という具体案件を想定する。
 REQ_YAML = """\
 project: yoyaku
-goal: 飲食店の予約システム
+goal: 飲食店の多言語対応AI自動音声予約システム
 industry: 飲食
 functional:
-  - text: ネット予約
+  - text: ネット予約とLINE通知
     confidence: confirmed
+  - text: 多言語対応AIエージェントによる電話予約の自動応対・空席照会
+    confidence: confirmed
+  - text: 過去の予約データに基づくノーショウ(無断キャンセル)確率の事前予測
+    confidence: assumed
+non_functional:
+  performance: 音声応対のレスポンスを2秒以内に抑える
+  budget_cap: 月額ランニングコストを低く抑える
 open_questions:
-  - ピーク時同時予約数は?
+  - ピーク時の同時電話着信数は?
+  - 既存のPOSシステムや座席管理システムとの連携APIは存在するか?
 """
 
 ENTRY = {
@@ -23,7 +35,7 @@ ENTRY = {
     "feature": "context-caching",
     "launch_stage": "GA",
     "since": "2025-11-01",
-    "summary": "プロンプト共通部分のキャッシュで入力コスト削減",
+    "summary": "電話応対のシステムプロンプト(店舗情報・予約ルール)をキャッシュし入力コストと応答遅延を削減",
     "pricing_refs": [],
     "caveats": [],
     "sources": ["https://cloud.google.com/vertex-ai/docs/release-notes"],
@@ -50,7 +62,7 @@ def test_requirements_save_and_get(medo_home: Path):
     result = runner.invoke(app, ["requirements", "get", "--project", "yoyaku", "--format", "json"])
     assert result.exit_code == 0
     doc = json.loads(result.output)
-    assert doc["goal"] == "飲食店の予約システム" and doc["version"] == 1
+    assert doc["goal"] == "飲食店の多言語対応AI自動音声予約システム" and doc["version"] == 1
 
 
 def test_requirements_get_missing_project_fails(medo_home: Path):
@@ -121,7 +133,12 @@ def test_artifacts_list_empty_and_after_save(medo_home: Path):
 
     _save_requirements(medo_home)
     arch = medo_home / "arch.md"
-    arch.write_text("# 案A", encoding="utf-8")
+    arch.write_text(
+        "# 案A: 多言語AI音声予約\n"
+        "店舗情報・予約ルールをVertex AI Context Cachingに保持し、"
+        "Geminiで多言語音声応対の入力コストと遅延を削減する。\n",
+        encoding="utf-8",
+    )
     runner.invoke(
         app,
         [
@@ -137,7 +154,12 @@ def test_artifacts_list_empty_and_after_save(medo_home: Path):
 def test_artifacts_save_and_diff_flow(medo_home: Path):
     _save_requirements(medo_home)
     arch = medo_home / "arch.md"
-    arch.write_text("# 案A", encoding="utf-8")
+    arch.write_text(
+        "# 案A: 多言語AI音声予約\n"
+        "店舗情報・予約ルールをVertex AI Context Cachingに保持し、"
+        "Geminiで多言語音声応対の入力コストと遅延を削減する。\n",
+        encoding="utf-8",
+    )
     result = runner.invoke(
         app,
         [
