@@ -9,7 +9,7 @@
 | 2 | Storage(Protocol + LocalJSON + Firestore) | 1 | 完了 |
 | 3 | 要件ドキュメント(RequirementsDoc + Store) | 2 | 完了 |
 | 4 | カタログ(CatalogEntry + Store) | 2 | 完了 |
-| 5 | 生成物(Artifact + Store) | 2 | 未着手 |
+| 5 | 生成物(Artifact + Store) | 2 | 完了 |
 | 6 | medo CLI(requirements/catalog/artifacts) | 3,4,5 | 未着手 |
 | 6b | medo status(現在地の可視化)+ docs/usage.md | 3,5,6 | 未着手 |
 | 7 | ETL: リリースノート取得+Gemini構造化 | 4 | 未着手 |
