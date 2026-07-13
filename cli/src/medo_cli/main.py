@@ -54,6 +54,12 @@ def requirements_get(
         typer.echo(json.dumps(doc.model_dump(mode="json"), ensure_ascii=False, indent=2))
     else:
         typer.echo(f"{doc.project} v{doc.version}: {doc.goal}")
+        if doc.background:
+            typer.echo(f"  背景: {doc.background}")
+        for p in doc.principles:
+            typer.echo(f"  理念 [{p.confidence}] {p.text}")
+        for c in doc.challenges:
+            typer.echo(f"  課題 [{c.confidence}] {c.text}")
         for f in doc.functional:
             typer.echo(f"  - [{f.confidence}] {f.text}")
         for q in doc.open_questions:
