@@ -1,6 +1,7 @@
 """medo CLI。事実と計算の決定論的インターフェース。失敗時は推測せずエラーを返す。"""
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -9,15 +10,18 @@ import yaml
 from medo_core.artifacts import Artifact, ArtifactStore
 from medo_core.catalog import CatalogStore
 from medo_core.config import get_storage
+from medo_core.facts import Fact, FactStore
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 
 app = typer.Typer(no_args_is_help=True, help="Medo(目処) — Google Cloud上流工程Agent CLI")
 requirements_app = typer.Typer(no_args_is_help=True)
 catalog_app = typer.Typer(no_args_is_help=True)
 artifacts_app = typer.Typer(no_args_is_help=True)
+facts_app = typer.Typer(no_args_is_help=True)
 app.add_typer(requirements_app, name="requirements", help="要件ドキュメント(バージョン管理)")
 app.add_typer(catalog_app, name="catalog", help="鮮度メタ付きカタログ照会")
 app.add_typer(artifacts_app, name="artifacts", help="生成物の保存・一覧")
+app.add_typer(facts_app, name="facts", help="市場・国策・業界動向・個社ファクト(出典必須)")
 
 
 def _fail(reason: str) -> None:
@@ -117,6 +121,51 @@ def catalog_get(
         return
     stale = " [STALE]" if entry.is_stale() else ""
     typer.echo(f"{entry.entry_id} [{entry.launch_stage}]{stale} {entry.summary[:60]}")
+
+
+@facts_app.command("save")
+def facts_save(
+    project: str = typer.Option(...),
+    kind: str = typer.Option(..., help="market | policy | trend | company"),
+    statement: str = typer.Option(...),
+    source: str = typer.Option(..., help="market/policy/trendはURL、companyは由来表記"),
+    value: float | None = typer.Option(None),
+    unit: str = typer.Option(""),
+    retrieved: str | None = typer.Option(None, help="取得日 YYYY-MM-DD(省略時は今日)"),
+    note: str = typer.Option(""),
+):
+    try:
+        fact = Fact(
+            kind=kind,
+            statement=statement,
+            value=value,
+            unit=unit,
+            source=source,
+            retrieved=retrieved or date.today().isoformat(),
+            note=note,
+        )
+    except Exception as e:
+        _fail(f"ファクトのスキーマ不正: {e}")
+    fact_id = FactStore(get_storage()).save(project, fact)
+    typer.echo(f"saved: {fact_id}")
+
+
+@facts_app.command("list")
+def facts_list(
+    project: str = typer.Option(...),
+    format: Literal["json", "digest"] = typer.Option("digest"),
+):
+    facts = FactStore(get_storage()).list(project)
+    if format == "json":
+        payload = [{"fact": f.model_dump(mode="json"), "stale": f.is_stale()} for f in facts]
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    if not facts:
+        typer.echo("(ファクトなし)")
+        return
+    for f in facts:
+        stale = " [STALE]" if f.is_stale() else ""
+        typer.echo(f"{f.fact_id} [{f.kind}]{stale} {f.statement} (出典: {f.source}, {f.retrieved})")
 
 
 @artifacts_app.command("save")
