@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "medo-core",
     "typer>=0.12",
+    "pyyaml>=6",
 ]
 
 [project.scripts]

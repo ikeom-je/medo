@@ -601,12 +601,14 @@ version = "0.1.0"
 source = { editable = "cli" }
 dependencies = [
     { name = "medo-core" },
+    { name = "pyyaml" },
     { name = "typer" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "medo-core", editable = "core" },
+    { name = "pyyaml", specifier = ">=6" },
     { name = "typer", specifier = ">=0.12" },
 ]
 
