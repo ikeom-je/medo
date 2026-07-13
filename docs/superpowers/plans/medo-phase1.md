@@ -985,7 +985,7 @@ git commit -m "feat(core): 要件バージョン紐づけ付き生成物スト�
   - `medo artifacts list --project <id>`
   - エラー時: stderrに `error: <理由>`、終了コード1
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `cli/tests/test_cli.py`:
 
@@ -1170,12 +1170,12 @@ def test_artifacts_save_and_diff_flow(medo_home: Path):
     assert d["stale_artifacts"] == ["architecture-v1"]
 ```
 
-- [ ] **Step 2: テストが失敗することを確認**
+- [x] **Step 2: テストが失敗することを確認**
 
 Run: `uv run pytest cli/tests/test_cli.py -v`
 Expected: FAIL(ModuleNotFoundError: medo_cli.main)
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `cli/src/medo_cli/main.py`:
 
@@ -1343,17 +1343,17 @@ if __name__ == "__main__":
 
 **テストfixtureの見直し(PR#11レビュー対応)**: 当初のfixtureは「飲食店の予約システム」という汎用プレースホルダーだったが、MedoのAI/ML中心のGCPアーキ提案という価値提案を反映していないという指摘を受け、agyによる設計ドキュメント調査(product.md・medo-design.md)を踏まえ「多言語対応AI自動音声予約(電話応対の自動化・ノーショウ予測)」という、実際にVertex AIのcontext-caching/batch-prediction的な機能が根拠として効くシナリオに更新した(Task 3/5で既に確定した`project: yoyaku`のIDと`vertex-ai__context-caching`エントリは踏襲し、既存テストとの一貫性を保っている)。
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `uv run pytest cli/tests/test_cli.py -v`
 Expected: PASS(10 passed。契約の網羅性向上のためcatalog get digest/json・不正format・不正YAML・catalog get未登録・requirements diff未登録・artifacts list空/保存後のテストをレビューで追加)
 
-- [ ] **Step 5: インストール済みコマンドとしての動作確認**
+- [x] **Step 5: インストール済みコマンドとしての動作確認**
 
 Run: `uv run medo --help`
 Expected: `requirements` / `catalog` / `artifacts` サブコマンドが表示される
 
-- [ ] **Step 6: コミット**
+- [x] **Step 6: コミット**
 
 ```bash
 git add cli/src/medo_cli/main.py cli/tests/test_cli.py
