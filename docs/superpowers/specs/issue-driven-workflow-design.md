@@ -26,7 +26,7 @@
 実装計画のTask N(docs/superpowers/plans/medo-phase1.md)
   → gh issue create(ラベル phase1、本文にTask概要+計画へのリンク)
   → git worktree add .worktrees/task-N -b feature/<issue番号>-<説明>
-  → TDD実装(Codexに委譲、必要な調査はagy。Claudeがpytest/ruffで検証)
+  → TDD実装(担当は `.claude/steering/workflow.md` Section 3 の担当表に従って委譲。Claudeがpytest/ruffで検証)
   → コミット前に相互レビュー(Claude作のdiffはCodex+agy、Codex/agy作のdiffはClaude。上限2ラウンド。workflow.md既存プロトコル)
   → git push -u github feature/<issue番号>-<説明>
   → gh pr create --base dev(本文に "Closes #<issue番号>" + テスト結果 + レビュー記録)
