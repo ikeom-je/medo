@@ -25,12 +25,14 @@
 
 ## Medo Skills(フェーズ1 Task 9 のビルド後に有効)
 
-- 要件整理: `skills/dist/agy/medo-hearing.md` の手順に従う
-- アーキ提案: `skills/dist/agy/medo-propose-architecture.md` の手順に従う
+- 課題・方針の構造化: `skills/dist/agy/medo-hearing.md` の手順に従う
+- 打ち手候補の提案: `skills/dist/agy/medo-propose-options.md` の手順に従う
+- PRFAQ育成: `skills/dist/agy/medo-grow-prfaq.md` の手順に従う
 
 ## 絶対に守ること
 
 1. 数値・launch_stage・鮮度の通り道にLLMを挟まない(事実はカタログ値・CLI出力のみ)
 2. CLI・ツールが失敗したら推測で補完せず失敗を報告する
-3. テストが通ることを確認してからコミットする(`uv run pytest`)
+3. テストとリントが通ることを確認してからコミットする(`uv run pytest` / `uv run ruff check .`)
 4. 設計承認前に実装を始めない(スペック駆動: workflow.md参照)
+5. 実行主体はClaudeが統制する: **担当は workflow.md Section 3 の担当表(唯一の定義箇所)に従う**(担当表の更新で変更可能。最終判断・検証・コミットが常にClaudeであることは不変)。中間生成物は相互レビュー(作成モデル≠レビューモデル、上限2ラウンド)を通す
