@@ -25,6 +25,7 @@
 - 実装・テストコード作成はCodex、最終検証(pytest/ruff実行)とコミットはClaude(workflow.md Section 3)
 - ファクトは出典必須(market/policy/trend はURL、company は由来表記)。鮮度は180日
 - フェルミ計算は ast 制限の四則演算+累乗のみ。LLM・`eval` 不使用
+- 表現の分担: コード=How / テストコード=What / コミットログ=Why / コードコメント=Why not(workflow.md Section 4)
 
 ## ファイル構成(フェーズ1で作るもの)
 

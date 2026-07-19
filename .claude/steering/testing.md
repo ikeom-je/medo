@@ -65,6 +65,7 @@ LLM出力の検証ロジック(pydantic検証・不正JSON・不正launch_stage)
 
 ## 4. テストの書き方
 
+- テストコードは **What** を表現する: テストを読めば「何が満たされるべきか(仕様)」が分かるように書く(表現の分担: workflow.md Section 4)
 - テスト名は挙動を表す: `test_stale_when_older_than_30_days`(◯) / `test_catalog_2`(✕)
 - 1テスト1検証事項。Arrange(準備)→Act(実行)→Assert(検証)
 - 日付依存のテストは `today` を引数注入して固定する(`date.today()` をテスト内で直接踏まない)
