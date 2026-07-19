@@ -1378,7 +1378,7 @@ git commit -m "feat(cli): medoコマンド(requirements/catalog/artifacts)"
   - `RequirementsDoc` に追加: `background: str=""` / `principles: list[ConfidenceItem]=[]` / `challenges: list[ConfidenceItem]=[]`(全てデフォルト付きのadditive change。既存保存データはそのまま検証を通る)
 - **契約変更**: 要件スキーマの拡張のため、PRは人間レビューを経てマージする
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `core/tests/test_requirements.py` に追記:
 
@@ -1406,12 +1406,12 @@ def test_backward_compat_docs_without_new_fields(store: RequirementsStore):
     assert doc.background == "" and doc.principles == [] and doc.challenges == []
 ```
 
-- [ ] **Step 2: テストが失敗することを確認**
+- [x] **Step 2: テストが失敗することを確認**
 
 Run: `uv run pytest core/tests/test_requirements.py -v`
 Expected: FAIL(ImportError: ConfidenceItem / ValidationError)
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `core/src/medo_core/requirements.py` の `FunctionalRequirement` と `RequirementsDoc` を次に変更:
 
@@ -1477,12 +1477,12 @@ def test_requirements_get_digest_shows_business_context(medo_home: Path):
     assert "理念 [confirmed] 地域の食文化を海外客に開く" in result.output
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `uv run pytest core/tests/test_requirements.py cli/tests/test_cli.py -v && uv run ruff check .`
 Expected: 全件PASS、リント警告なし
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add core/src/medo_core/requirements.py core/tests/test_requirements.py cli/src/medo_cli/main.py cli/tests/test_cli.py
@@ -1507,7 +1507,7 @@ git commit -m "feat(core): 要件スキーマにビジネス文脈(背景・理�
   - CLI: `medo facts save --project <id> --kind <k> --statement <s> --source <src> [--value f] [--unit u] [--retrieved YYYY-MM-DD] [--note n]` → `saved: fact-<n>` / `medo facts list --project <id> [--format json|digest]`(stale付き)
 - **契約変更**: CLI新コマンドのため、PRは人間レビューを経てマージする
 
-- [ ] **Step 1: 失敗するテストを書く**
+- [x] **Step 1: 失敗するテストを書く**
 
 `core/tests/test_facts.py`:
 
@@ -1568,12 +1568,12 @@ def test_save_assigns_incrementing_fact_ids(tmp_path):
     assert store.list("nashi") == []
 ```
 
-- [ ] **Step 2: テストが失敗することを確認**
+- [x] **Step 2: テストが失敗することを確認**
 
 Run: `uv run pytest core/tests/test_facts.py -v`
 Expected: FAIL(ModuleNotFoundError: medo_core.facts)
 
-- [ ] **Step 3: 実装**
+- [x] **Step 3: 実装**
 
 `core/src/medo_core/facts.py`:
 
@@ -1742,12 +1742,12 @@ def test_facts_save_rejects_non_url_source_for_market(medo_home: Path):
     assert "error:" in result.output
 ```
 
-- [ ] **Step 4: テストが通ることを確認**
+- [x] **Step 4: テストが通ることを確認**
 
 Run: `uv run pytest core/tests/test_facts.py cli/tests/test_cli.py -v && uv run ruff check .`
 Expected: 全件PASS、リント警告なし
 
-- [ ] **Step 5: コミット**
+- [x] **Step 5: コミット**
 
 ```bash
 git add core/src/medo_core/facts.py core/tests/test_facts.py cli/src/medo_cli/main.py cli/tests/test_cli.py
