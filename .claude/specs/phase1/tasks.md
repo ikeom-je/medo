@@ -11,8 +11,8 @@
 | 4 | カタログ(CatalogEntry + Store) | 2 | 完了 |
 | 5 | 生成物(Artifact + Store) | 2 | 完了 |
 | 6 | medo CLI(requirements/catalog/artifacts) | 3,4,5 | 完了 |
-| 6b | 要件スキーマ拡張(背景・理念・課題)※契約変更 | 6 | 未着手 |
-| 6c | 市場ファクト(Fact + Store + CLI)※契約変更 | 6 | 未着手 |
+| 6b | 要件スキーマ拡張(背景・理念・課題)※契約変更 | 6 | 完了 |
+| 6c | 市場ファクト(Fact + Store + CLI)※契約変更 | 6 | 完了 |
 | 6d | 生成物スキーマ拡張(mini-prfaq/prfaq/fermi)※契約変更 | 6 | 未着手 |
 | 6e | フェルミ推定(決定論計算 + CLI)※契約変更 | 6c,6d | 未着手 |
 | 6f | medo status + docs/usage.md | 6b,6c,6d,6e | 未着手 |
