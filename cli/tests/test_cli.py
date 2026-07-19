@@ -14,6 +14,13 @@ runner = CliRunner()
 REQ_YAML = """\
 project: yoyaku
 goal: 飲食店の多言語対応AI自動音声予約システム
+background: インバウンド客の増加と人手不足が同時進行
+principles:
+  - text: 地域の食文化を海外客に開く
+    confidence: confirmed
+challenges:
+  - text: 外国語の電話予約に対応できず機会損失
+    confidence: confirmed
 industry: 飲食
 functional:
   - text: ネット予約とLINE通知
@@ -104,6 +111,14 @@ def test_requirements_get_invalid_format_fails(medo_home: Path):
     _save_requirements(medo_home)
     result = runner.invoke(app, ["requirements", "get", "--project", "yoyaku", "--format", "yaml"])
     assert result.exit_code != 0
+
+
+def test_requirements_get_digest_shows_business_context(medo_home: Path):
+    _save_requirements(medo_home)
+    result = runner.invoke(app, ["requirements", "get", "--project", "yoyaku", "--format", "digest"])
+    assert result.exit_code == 0
+    assert "課題 [confirmed] 外国語の電話予約に対応できず機会損失" in result.output
+    assert "理念 [confirmed] 地域の食文化を海外客に開く" in result.output
 
 
 def test_requirements_save_invalid_yaml_fails(medo_home: Path):
