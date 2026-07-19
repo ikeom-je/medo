@@ -28,6 +28,7 @@ make-slides / build-mock / propose-architecture(詳細) / pricing計算機 / dec
 4. **出典必須**: sources空のカタログエントリ、source空のファクトはバリデーション拒否(market/policy/trendはURL必須)
 5. **失敗を推測で補完しない**: CLI失敗=非ゼロ終了+`error:`。ETLは検証通過分のみコミット
 6. **課題も要件も確定しない**: 保存は常に新バージョン。生成物は `requirements_version`・`cited_facts`・`cited_catalog_entries` を持ち、prfaqは `grown_from` 必須
+7. **表現の分担**: コード=How / テストコード=What / コミットログ=Why / コードコメント=Why not(workflow.md Section 4)
 
 ## 主要インターフェース(実装の正はコード)
 
