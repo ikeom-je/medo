@@ -126,6 +126,36 @@ def test_requirements_diff_missing_project_fails(medo_home: Path):
     assert "error:" in result.output
 
 
+def test_facts_save_and_list_with_stale_flag(medo_home: Path):
+    result = runner.invoke(
+        app,
+        [
+            "facts", "save", "--project", "yoyaku", "--kind", "market",
+            "--statement", "訪日外国人旅行者数 3,687万人", "--value", "36870000",
+            "--unit", "人", "--source", "https://www.jnto.go.jp/statistics/",
+            "--retrieved", "2020-01-01",
+        ],
+    )
+    assert result.exit_code == 0 and "fact-1" in result.output
+
+    result = runner.invoke(app, ["facts", "list", "--project", "yoyaku", "--format", "json"])
+    items = json.loads(result.output)
+    assert items[0]["fact"]["fact_id"] == "fact-1"
+    assert items[0]["stale"] is True
+
+
+def test_facts_save_rejects_non_url_source_for_market(medo_home: Path):
+    result = runner.invoke(
+        app,
+        [
+            "facts", "save", "--project", "yoyaku", "--kind", "market",
+            "--statement", "x", "--source", "ヒアリングで聞いた",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "error:" in result.output
+
+
 def test_artifacts_list_empty_and_after_save(medo_home: Path):
     result = runner.invoke(app, ["artifacts", "list", "--project", "yoyaku"])
     assert result.exit_code == 0
