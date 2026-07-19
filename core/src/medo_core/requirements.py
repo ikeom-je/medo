@@ -9,16 +9,23 @@ from medo_core.storage import Storage
 Confidence = Literal["confirmed", "assumed", "open"]
 
 
-class FunctionalRequirement(BaseModel):
+class ConfidenceItem(BaseModel):
     text: str
     confidence: Confidence = "open"
+
+
+class FunctionalRequirement(ConfidenceItem):
+    """機能要件。後方互換のため名前を維持(実体はConfidenceItem)。"""
 
 
 class RequirementsDoc(BaseModel):
     project: str
     version: int = 1
     industry: str = ""
+    background: str = ""  # 業界・ビジネス状況の要約
     goal: str = ""
+    principles: list[ConfidenceItem] = Field(default_factory=list)  # 経営思想・理念・方針
+    challenges: list[ConfidenceItem] = Field(default_factory=list)  # 課題(What/Whyの起点)
     functional: list[FunctionalRequirement] = Field(default_factory=list)
     non_functional: dict[str, str] = Field(default_factory=dict)
     open_questions: list[str] = Field(default_factory=list)

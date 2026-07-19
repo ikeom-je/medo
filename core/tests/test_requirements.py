@@ -41,6 +41,29 @@ def test_confidence_defaults_to_open():
     assert fr.confidence == "open"
 
 
+def test_business_context_fields_roundtrip(store: RequirementsStore):
+    from medo_core.requirements import ConfidenceItem
+
+    doc = _doc(
+        background="インバウンド客の増加と人手不足が同時進行",
+        principles=[ConfidenceItem(text="地域の食文化を海外客に開く", confidence="confirmed")],
+        challenges=[ConfidenceItem(text="外国語の電話予約に対応できず機会損失")],
+    )
+    store.save("yoyaku", doc)
+    got = store.get("yoyaku")
+    assert got.background == "インバウンド客の増加と人手不足が同時進行"
+    assert got.principles[0].confidence == "confirmed"
+    assert got.challenges[0].confidence == "open"  # 既定はopen
+
+
+def test_backward_compat_docs_without_new_fields(store: RequirementsStore):
+    raw = _doc().model_dump(mode="json")
+    for key in ("background", "principles", "challenges"):
+        raw.pop(key, None)
+    doc = RequirementsDoc.model_validate(raw)
+    assert doc.background == "" and doc.principles == [] and doc.challenges == []
+
+
 def test_diff_between_latest_two_versions(store: RequirementsStore):
     store.save(
         "yoyaku",
