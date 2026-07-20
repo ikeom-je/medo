@@ -188,7 +188,8 @@ def test_artifacts_list_empty_and_after_save(medo_home: Path):
         app,
         [
             "artifacts", "save", "--project", "yoyaku", "--type", "architecture",
-            "--file", str(arch), "--requirements-version", "1",
+            "--file", str(arch), "--generated-by", "claude",
+            "--requirements-version", "1",
         ],
     )
     result = runner.invoke(app, ["artifacts", "list", "--project", "yoyaku"])
@@ -221,3 +222,42 @@ def test_artifacts_save_and_diff_flow(medo_home: Path):
     d = json.loads(result.output)
     assert d["requirements"]["to"] == 2
     assert d["stale_artifacts"] == ["architecture-v1"]
+
+
+def test_artifacts_save_mini_prfaq_and_get(medo_home: Path):
+    _save_requirements(medo_home)
+    doc = medo_home / "options.md"
+    doc.write_text("# 打ち手候補セット", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "artifacts", "save", "--project", "yoyaku", "--type", "mini-prfaq",
+            "--file", str(doc), "--cites-facts", "fact-1",
+            "--options", "多言語AI音声予約:業務改革,予約代行:既存解決",
+            "--generated-by", "claude",
+            "--requirements-version", "1",
+        ],
+    )
+    assert result.exit_code == 0 and "mini-prfaq-v1" in result.output
+
+    result = runner.invoke(
+        app, ["artifacts", "get", "--project", "yoyaku", "--id", "mini-prfaq-v1"]
+    )
+    payload = json.loads(result.output)
+    assert payload["options"][0]["name"] == "多言語AI音声予約"
+    assert payload["cited_facts"] == ["fact-1"]
+
+
+def test_artifacts_save_prfaq_requires_grown_from(medo_home: Path):
+    _save_requirements(medo_home)
+    doc = medo_home / "prfaq.md"
+    doc.write_text("# PRFAQ", encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "artifacts", "save", "--project", "yoyaku", "--type", "prfaq",
+            "--file", str(doc), "--generated-by", "claude",
+            "--requirements-version", "1",
+        ],
+    )
+    assert result.exit_code == 1 and "error:" in result.output

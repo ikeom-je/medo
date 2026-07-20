@@ -4,11 +4,23 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from medo_core.storage import Storage
 
-ArtifactType = Literal["architecture", "slides", "mock", "comparison"]
+ArtifactType = Literal[
+    "architecture", "slides", "mock", "comparison", "mini-prfaq", "prfaq", "fermi"
+]
+
+
+class OptionMeta(BaseModel):
+    name: str
+    approach_type: str = ""
+
+
+class GrownFrom(BaseModel):
+    artifact: str
+    option: str
 
 
 class Artifact(BaseModel):
@@ -17,8 +29,26 @@ class Artifact(BaseModel):
     version: int = 1
     requirements_version: int
     cited_catalog_entries: list[str] = Field(default_factory=list)
+    cited_facts: list[str] = Field(default_factory=list)
+    options: list[OptionMeta] = Field(default_factory=list)
+    grown_from: GrownFrom | None = None
     generated_by: Literal["claude", "gemini"] | None = None
     content: str
+
+    @model_validator(mode="after")
+    def _validate_type_rules(self) -> "Artifact":
+        if self.type == "prfaq" and self.grown_from is None:
+            raise ValueError(
+                "prfaq には grown_from(育成元のミニPRFAQ候補セットと打ち手)が必須です"
+            )
+        if self.type == "fermi":
+            if self.generated_by is not None:
+                raise ValueError(
+                    "fermi はコードが生成するため generated_by は指定できません"
+                )
+        elif self.generated_by is None:
+            raise ValueError(f"{self.type} には generated_by(claude|gemini)が必須です")
+        return self
 
 
 class ArtifactStore:
