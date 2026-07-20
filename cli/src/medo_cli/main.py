@@ -12,6 +12,7 @@ from medo_core.catalog import CatalogStore
 from medo_core.config import get_storage
 from medo_core.facts import Fact, FactStore
 from medo_core.requirements import RequirementsDoc, RequirementsStore
+from medo_core.status import project_status, stale_artifact_ids
 
 app = typer.Typer(no_args_is_help=True, help="Medo(目処) — Google Cloud上流工程Agent CLI")
 requirements_app = typer.Typer(no_args_is_help=True)
@@ -77,17 +78,23 @@ def requirements_diff(project: str = typer.Option(...)):
     current = req_store.latest_version(project)
     if current == 0:
         _fail(f"プロジェクト '{project}' の要件が見つかりません")
-    stale = ArtifactStore(storage).stale_artifacts(project, current)
     typer.echo(
         json.dumps(
             {
                 "requirements": req_store.diff(project),
-                "stale_artifacts": [f"{a.type}-v{a.version}" for a in stale],
+                "stale_artifacts": stale_artifact_ids(storage, project),
             },
             ensure_ascii=False,
             indent=2,
         )
     )
+
+
+@app.command()
+def status(project: str = typer.Option(...)):
+    """プロジェクトの現在地(要件・ファクト・生成物・next_step)をJSONで出力する。"""
+    report = project_status(get_storage(), project)
+    typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 def _entry_payload(entry) -> dict:

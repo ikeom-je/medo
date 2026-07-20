@@ -141,6 +141,16 @@ def test_requirements_diff_missing_project_fails(medo_home: Path):
     assert "error:" in result.output
 
 
+def test_status_flow_next_steps(medo_home: Path):
+    result = runner.invoke(app, ["status", "--project", "yoyaku"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["next_step"] == "hearing"
+
+    _save_requirements(medo_home)
+    result = runner.invoke(app, ["status", "--project", "yoyaku"])
+    assert json.loads(result.output)["next_step"] == "propose-options"
+
+
 def test_facts_save_and_list_with_stale_flag(medo_home: Path):
     result = runner.invoke(
         app,
