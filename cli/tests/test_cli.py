@@ -49,6 +49,14 @@ ENTRY = {
     "last_verified": "2020-01-01",
 }
 
+FERMI_YAML = """\
+name: 多言語予約対応の市場機会
+variables:
+  visitors: {fact: fact-1}
+  dining_rate: {assume: 0.8}
+formula: visitors * dining_rate
+"""
+
 
 @pytest.fixture(autouse=True)
 def medo_home(tmp_path: Path, monkeypatch):
@@ -260,4 +268,33 @@ def test_artifacts_save_prfaq_requires_grown_from(medo_home: Path):
             "--requirements-version", "1",
         ],
     )
+    assert result.exit_code == 1 and "error:" in result.output
+
+
+def test_fermi_calc_saves_artifact_and_recalcs(medo_home: Path):
+    _save_requirements(medo_home)
+    runner.invoke(
+        app,
+        [
+            "facts", "save", "--project", "yoyaku", "--kind", "market",
+            "--statement", "訪日客数", "--value", "36870000",
+            "--source", "https://www.jnto.go.jp/statistics/",
+        ],
+    )
+    model = medo_home / "model.yaml"
+    model.write_text(FERMI_YAML, encoding="utf-8")
+
+    result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--file", str(model)])
+    assert result.exit_code == 0, result.output
+    assert "fermi-v1" in result.output and "29496000" in result.output
+
+    result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--from-artifact", "fermi-v1"])
+    assert result.exit_code == 0 and "fermi-v2" in result.output
+
+
+def test_fermi_calc_missing_fact_fails(medo_home: Path):
+    _save_requirements(medo_home)
+    model = medo_home / "model.yaml"
+    model.write_text(FERMI_YAML, encoding="utf-8")
+    result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--file", str(model)])
     assert result.exit_code == 1 and "error:" in result.output

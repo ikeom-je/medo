@@ -11,6 +11,7 @@ from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta
 from medo_core.catalog import CatalogStore
 from medo_core.config import get_storage
 from medo_core.facts import Fact, FactStore
+from medo_core.fermi import FermiModel, evaluate
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 
 app = typer.Typer(no_args_is_help=True, help="Medo(目処) — Google Cloud上流工程Agent CLI")
@@ -18,10 +19,12 @@ requirements_app = typer.Typer(no_args_is_help=True)
 catalog_app = typer.Typer(no_args_is_help=True)
 artifacts_app = typer.Typer(no_args_is_help=True)
 facts_app = typer.Typer(no_args_is_help=True)
+fermi_app = typer.Typer(no_args_is_help=True)
 app.add_typer(requirements_app, name="requirements", help="要件ドキュメント(バージョン管理)")
 app.add_typer(catalog_app, name="catalog", help="鮮度メタ付きカタログ照会")
 app.add_typer(artifacts_app, name="artifacts", help="生成物の保存・一覧")
 app.add_typer(facts_app, name="facts", help="市場・国策・業界動向・個社ファクト(出典必須)")
+app.add_typer(fermi_app, name="fermi", help="フェルミ推定(仮定明示・コードが計算)")
 
 
 def _fail(reason: str) -> None:
@@ -231,6 +234,45 @@ def artifacts_list(project: str = typer.Option(...)):
         typer.echo(f"{a.type}-v{a.version} (req v{a.requirements_version}){by}")
     if not items:
         typer.echo("(生成物なし)")
+
+
+@fermi_app.command("calc")
+def fermi_calc(
+    project: str = typer.Option(...),
+    file: Path | None = typer.Option(None, exists=True, readable=True, help="モデルYAML"),
+    from_artifact: str | None = typer.Option(None, help="保存済みfermi生成物から再計算(例: fermi-v1)"),
+):
+    storage = get_storage()
+    try:
+        if from_artifact and file:
+            raise ValueError("--file と --from-artifact は同時に指定できません")
+        if from_artifact:
+            saved = ArtifactStore(storage).get(project, from_artifact)
+            if saved is None:
+                raise ValueError(f"生成物 {from_artifact} が見つかりません")
+            model = FermiModel.model_validate(json.loads(saved.content)["model"])
+        elif file:
+            model = FermiModel.model_validate(yaml.safe_load(file.read_text(encoding="utf-8")))
+        else:
+            raise ValueError("--file か --from-artifact のどちらかを指定してください")
+        facts = {f.fact_id: f for f in FactStore(storage).list(project)}
+        result = evaluate(model, facts)
+    except Exception as e:
+        _fail(f"フェルミ計算に失敗: {e}")
+    artifact = Artifact(
+        project=project,
+        type="fermi",
+        requirements_version=RequirementsStore(storage).latest_version(project),
+        cited_facts=result.cited_facts,
+        content=json.dumps(
+            {"model": model.model_dump(mode="json"), "result": result.model_dump(mode="json")},
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+    artifact_id = ArtifactStore(storage).save(project, artifact)
+    typer.echo(f"saved: {artifact_id}")
+    typer.echo(f"{result.name} = {result.value}")
 
 
 if __name__ == "__main__":
