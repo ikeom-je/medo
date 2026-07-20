@@ -638,6 +638,7 @@ dependencies = [
     { name = "google-cloud-billing" },
     { name = "google-genai" },
     { name = "medo-core" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -646,6 +647,7 @@ requires-dist = [
     { name = "google-cloud-billing", specifier = ">=1.13" },
     { name = "google-genai", specifier = ">=1.0" },
     { name = "medo-core", editable = "core" },
+    { name = "pyyaml", specifier = ">=6" },
 ]
 
 [[package]]

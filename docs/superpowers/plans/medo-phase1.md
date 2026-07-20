@@ -2830,6 +2830,18 @@ def _fake_generate(valid: list[dict]):
     return generate
 
 
+def test_non_array_output_reported_as_error():
+    entries, errors = structure_notes(
+        SERVICE, NOTES, lambda p: '{"not": "array"}', today="2026-07-20"
+    )
+    assert entries == [] and len(errors) == 1
+
+
+def test_non_dict_items_reported_without_crash():
+    entries, errors = structure_notes(SERVICE, NOTES, lambda p: '["just-a-string"]', today="2026-07-20")
+    assert entries == [] and len(errors) == 1
+
+
 def test_structure_notes_returns_validated_entries():
     generate = _fake_generate(
         [
@@ -2923,9 +2935,15 @@ def structure_notes(
     except json.JSONDecodeError as e:
         return [], [f"{service.slug}: LLM出力がJSONとして不正: {e}"]
 
+    if not isinstance(items, list):
+        return [], [f"{service.slug}: LLM出力がJSON配列ではありません: {type(items).__name__}"]
+
     entries: list[CatalogEntry] = []
     errors: list[str] = []
     for item in items:
+        if not isinstance(item, dict):
+            errors.append(f"{service.slug}: 配列要素がオブジェクトではありません: {item!r}")
+            continue
         try:
             entries.append(
                 CatalogEntry(
@@ -2969,7 +2987,7 @@ Expected: PASS(3 passed)
 - [ ] **Step 10: コミット**
 
 ```bash
-git add etl/services.yaml etl/src/medo_etl/release_notes.py etl/src/medo_etl/structure.py etl/tests/test_release_notes.py etl/tests/test_structure.py
+git add etl/pyproject.toml etl/services.yaml etl/src/medo_etl/release_notes.py etl/src/medo_etl/structure.py etl/tests/test_release_notes.py etl/tests/test_structure.py uv.lock
 git commit -m "feat(etl): リリースノート取得とGemini構造化(検証必須・注入可能)"
 ```
 

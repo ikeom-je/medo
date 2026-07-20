@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "medo-core",
+    "pyyaml>=6",
     "google-cloud-bigquery>=3.25",
     "google-cloud-billing>=1.13",
     "google-genai>=1.0",

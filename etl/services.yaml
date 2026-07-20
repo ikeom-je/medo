@@ -1,0 +1,20 @@
+# カタログ対象サービス。AI/ML重点+アプリ構築定番。
+services:
+  - slug: vertex-ai
+    product_name: "Vertex AI"
+    release_notes_url: "https://cloud.google.com/vertex-ai/docs/release-notes"
+  - slug: gemini-api
+    product_name: "Gemini API"
+    release_notes_url: "https://ai.google.dev/gemini-api/docs/changelog"
+  - slug: cloud-run
+    product_name: "Cloud Run"
+    release_notes_url: "https://cloud.google.com/run/docs/release-notes"
+  - slug: cloud-functions
+    product_name: "Cloud Functions"
+    release_notes_url: "https://cloud.google.com/functions/docs/release-notes"
+  - slug: bigquery
+    product_name: "BigQuery"
+    release_notes_url: "https://cloud.google.com/bigquery/docs/release-notes"
+  - slug: firestore
+    product_name: "Firestore"
+    release_notes_url: "https://cloud.google.com/firestore/docs/release-notes"
