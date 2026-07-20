@@ -7,7 +7,7 @@ from typing import Literal
 
 import typer
 import yaml
-from medo_core.artifacts import Artifact, ArtifactStore
+from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta
 from medo_core.catalog import CatalogStore
 from medo_core.config import get_storage
 from medo_core.facts import Fact, FactStore
@@ -180,15 +180,29 @@ def artifacts_save(
     artifact_type: str = typer.Option(..., "--type"),
     file: Path = typer.Option(..., exists=True, readable=True),
     cites: str = typer.Option("", help="引用カタログエントリID(カンマ区切り)"),
+    cites_facts: str = typer.Option("", help="引用ファクトID(カンマ区切り)"),
+    options: str = typer.Option("", help="mini-prfaq用: name:approach_type をカンマ区切り"),
+    grown_from: str = typer.Option("", help="prfaq用: <mini-prfaq-vN>:<打ち手名>"),
     generated_by: str | None = typer.Option(None),
     requirements_version: int = typer.Option(...),
 ):
     try:
+        option_metas = [
+            OptionMeta(name=name, approach_type=approach)
+            for name, _, approach in (o.partition(":") for o in options.split(",") if o)
+        ]
+        gf = None
+        if grown_from:
+            art, _, opt = grown_from.partition(":")
+            gf = GrownFrom(artifact=art, option=opt)
         artifact = Artifact(
             project=project,
             type=artifact_type,
             requirements_version=requirements_version,
             cited_catalog_entries=[c for c in cites.split(",") if c],
+            cited_facts=[c for c in cites_facts.split(",") if c],
+            options=option_metas,
+            grown_from=gf,
             generated_by=generated_by,
             content=file.read_text(encoding="utf-8"),
         )
@@ -196,6 +210,17 @@ def artifacts_save(
         _fail(f"生成物のスキーマ不正: {e}")
     artifact_id = ArtifactStore(get_storage()).save(project, artifact)
     typer.echo(f"saved: {artifact_id}")
+
+
+@artifacts_app.command("get")
+def artifacts_get(
+    project: str = typer.Option(...),
+    id: str = typer.Option(..., "--id", help="例: mini-prfaq-v1"),
+):
+    artifact = ArtifactStore(get_storage()).get(project, id)
+    if artifact is None:
+        _fail(f"生成物 {id} が見つかりません")
+    typer.echo(json.dumps(artifact.model_dump(mode="json"), ensure_ascii=False, indent=2))
 
 
 @artifacts_app.command("list")
