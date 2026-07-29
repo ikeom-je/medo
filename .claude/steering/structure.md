@@ -42,7 +42,7 @@ core/
 │   ├── requirements.py  # RequirementsDoc(背景・方針/理念・課題・要件)+ Store(自動バージョン採番・diff)
 │   ├── facts.py         # Fact + FactStore(kind: market/policy/trend/company。案件スコープ・出典必須・180日stale判定)
 │   ├── fermi.py         # フェルミ推定の決定論計算(ファクト参照+明示的仮定×式。ast制限の四則演算+累乗。モデル込み保存で再計算可能)
-│   ├── knowledge.py     # KnowledgeEntry + KnowledgeStore(factsと同型スキーマ+kind="tech"追加。案件横断スコープ・出典必須・kind別stale判定)
+│   ├── knowledge.py     # KnowledgeEntry + KnowledgeStore(factsと同型・案件横断・出典必須) + ProjectKnowledgeEntry + KnowledgeBackend(markdown/sqlite。案件固有・単一案件スコープ)
 │   ├── artifacts.py     # Artifact + ArtifactStore(要件バージョン・引用ファクト/ナリッジ紐づけ・陳腐化検出)
 │   └── status.py        # project_status(): 現在地と次ステップ(next_step)の決定論導出
 └── tests/
@@ -94,6 +94,7 @@ document=偶数セグメント、collection=奇数セグメント。LocalJsonSto
 | `projects/{id}/facts/{fact_id}` | 市場・国策・業界動向・個社ファクト(案件スコープ・出典必須) |
 | `projects/{id}/artifacts/{type}-v{n}` | 生成物(type別バージョン採番。mini-prfaq/prfaq/fermi/comparison/architecture/slides/mock) |
 | `knowledge/{kind}/{entry_id}` | 技術ナリッジ(案件横断スコープ・出典必須。既定でMEDO_HOME配下の別gitリポジトリ) |
+| `knowledge/projects/{project_id}/{entry_id}` | 案件固有ナレッジ(単一案件スコープ・出典URL不要。同じgitリポジトリ内。バックエンドはmarkdown\|sqliteを案件ごとに選択) |
 
 ---
 

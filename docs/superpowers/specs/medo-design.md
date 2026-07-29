@@ -84,13 +84,15 @@ Claude Codeやagy(Antigravity/Gemini)といった普段のAIツールからSkill
               requirements(課題・方針・要件のバージョン管理・差分) /
               facts(市場・国策・業界動向・個社ファクト。案件スコープ・出典必須・鮮度判定) /
               fermi(仮定×式の決定論計算。LLM不使用) /
-              knowledge(技術/サービスナレッジ照会・鮮度判定。案件横断スコープ) /
+              knowledge(技術ナレッジ[案件横断]+案件固有ナレッジ[単一案件]照会・鮮度判定) /
               artifacts(生成物の保存・紐づけ) /
               pricing(フェーズ2)
               │
 [知識層]   Firestore(本番) or ローカルJSON(開発) + GCS(フェーズ2)
            knowledge/ は案件データと分離した専用ストア(既定: MEDO_HOME配下の別gitリポジトリ。
-           git履歴がレビュー記録になる。GitHub公開のmedoツールリポジトリには含めない)
+           git履歴がレビュー記録になる。GitHub公開のmedoツールリポジトリには含めない)。
+           案件固有ナレッジは同リポジトリ内 knowledge/projects/{id}/ に同居(バックエンドは
+           案件ごとにmarkdown|sqliteを選択、フェーズ2でObsidian/Notion外部連携を追加)
               ↑
 [洗練フロー] フェーズ1: ホストLLMが検索→CLIが出典検証して保存(facts同様)+ git履歴による参照・レビュー
            フェーズ2: knowledge-digest(収集データの分析・統合による洗練。重複検知・要約統合)
@@ -240,6 +242,27 @@ note: "..."
 - **配置**: 既定で`MEDO_HOME`配下の別gitリポジトリ(medoツールリポジトリ本体には含めない)。git履歴がナレッジの成長・レビュー記録になる
 - **フェーズ1のスコープ**: 保存・参照・stale判定・git履歴による目視レビューまで。「収集データを分析して統合・重複解消するフロー」はフェーズ2の`knowledge-digest`で扱う(バックログではなくフェーズ2の主要機能に格上げ)
 
+### 案件固有ナレッジ — `knowledge/projects/{project_id}/{entry_id}.md`(単一案件スコープ)
+
+技術ナレッジ(案件横断)とは別に、案件を掘り下げるほど蓄積される「その案件固有のノウハウ・気づき」を保持する層。medoは汎用支援ツールであり、個社の暗黙知を汎用ナレッジに混在させないための分離。
+
+```yaml
+project: "yoyaku"
+statement: "顧客の予約システムは現在Excel管理。現場担当者はPC操作に不慣れ"
+source: "hearing Skill 2026-07-27対話"   # URL出典は強制しない(対話由来のメモのため)
+retrieved: "2026-07-27"
+note: null
+```
+
+- 新規スキーマ `ProjectKnowledgeEntry`(`project` / `statement` / `source` / `retrieved` / `note`)。`kind`は持たない。既存`KnowledgeEntry`(出典URL必須)とはバリデーションを分ける
+- **配置**: 既存の技術ナレッジと同じ`knowledge/`gitリポジトリ内に`projects/{project_id}/`サブディレクトリとして同居させる(リポジトリを分けない)。git履歴が案件ノウハウの成長記録になる
+- **バックエンド選択**: `KnowledgeBackend` Protocol(`append` / `list` / `search`)を挟み、案件の`requirements`ドキュメントの`knowledge_backend: markdown | sqlite`(既定`markdown`)で1案件につき1つ選ぶ
+  - `MarkdownBackend`(既定): frontmatter付きmd、1エントリ=1ファイル
+  - `SqliteBackend`: `MEDO_HOME/projects/{id}/knowledge.sqlite`(バイナリのためgit管理外)、同一スキーマを1テーブルで保持
+  - フェーズ2: `ExternalBackend`(Obsidian vault参照 / Notion API連携。認証情報は`.env`の`NOTION_API_KEY`等で分離)
+- **蓄積フロー(フェーズ1: 追記のみ)**: 各Skill(hearing/propose-options/grow-prfaq)は終了時に、対話から得た案件固有ノウハウをホストLLMが抽出し `medo knowledge save --project <id> --statement "..." --source "<Skill名> <日付>対話"` で追記する。既存エントリとの重複統合・要約はしない(フェーズ2の`knowledge-digest`が案件横断・案件固有の両方を対象にする際に拡張)
+- **CLI**: 既存`medo knowledge`に`--project <id>`を追加。指定時は案件固有ナレッジ(ProjectKnowledgeEntry・backend選択に従う)、未指定時は従来どおり案件横断の技術ナレッジ(kind必須)
+
 ### 生成物 — `projects/{id}/artifacts/{type}-v{n}`
 
 type: `mini-prfaq` / `prfaq` / `fermi` / `comparison` / `architecture` / `slides` / `mock`。必ず以下を持つ:
@@ -269,7 +292,7 @@ type: `mini-prfaq` / `prfaq` / `fermi` / `comparison` / `architecture` / `slides
 | `decision-roadmap` | open_questionsを不確定パラメタとした修正コントロール | 2 |
 | `compare-aws` | 同一要件でのAWS比較 | バックログ |
 
-共通契約: CLIが失敗したら推測で補完せず失敗を報告する / stale項目(ファクト・技術ナレッジとも)は注記必須 / 出典のないファクトを提案に引用しない / フェルミ推定の計算をLLMで行わない / 開始時(プロジェクトID既知の場合のみ)・終了時に `medo status` を実行して現在地を報告する。
+共通契約: CLIが失敗したら推測で補完せず失敗を報告する / stale項目(ファクト・技術ナレッジとも)は注記必須 / 出典のないファクトを提案に引用しない / フェルミ推定の計算をLLMで行わない / 開始時(プロジェクトID既知の場合のみ)・終了時に `medo status` を実行して現在地を報告する / 終了時、対話から得た案件固有ノウハウがあれば `medo knowledge save --project <id>` で追記する(フェーズ1: 追記のみ、統合・重複解消はしない)。
 
 ---
 
