@@ -140,3 +140,34 @@ def test_source_and_statement_required():
         ProjectKnowledgeEntry(project="yoyaku", statement="", source="hearing対話", retrieved="2026-07-27")
     with pytest.raises(ValueError):
         ProjectKnowledgeEntry(project="yoyaku", statement="x", source="", retrieved="2026-07-27")
+
+
+from medo_core.knowledge import SqliteKnowledgeBackend
+
+
+@pytest.fixture
+def sqlite_backend(tmp_path: Path) -> SqliteKnowledgeBackend:
+    return SqliteKnowledgeBackend(tmp_path / "knowledge.sqlite")
+
+
+def test_sqlite_append_and_list_roundtrip(sqlite_backend: SqliteKnowledgeBackend):
+    sqlite_backend.append(_project_entry())
+    sqlite_backend.append(_project_entry(statement="second"))
+    entries = sqlite_backend.list("yoyaku")
+    assert [e.statement for e in entries] == [
+        "顧客の予約システムは現在Excel管理。現場担当者はPC操作に不慣れ",
+        "second",
+    ]
+
+
+def test_sqlite_search_matches_statement(sqlite_backend: SqliteKnowledgeBackend):
+    sqlite_backend.append(_project_entry(statement="Excel管理からの脱却"))
+    sqlite_backend.append(_project_entry(statement="無関係"))
+    results = sqlite_backend.search("yoyaku", "Excel")
+    assert len(results) == 1
+
+
+def test_sqlite_scoped_to_project(sqlite_backend: SqliteKnowledgeBackend):
+    sqlite_backend.append(_project_entry(project="yoyaku"))
+    sqlite_backend.append(_project_entry(project="other"))
+    assert len(sqlite_backend.list("yoyaku")) == 1

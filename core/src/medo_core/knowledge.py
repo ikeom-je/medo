@@ -180,3 +180,58 @@ class MarkdownKnowledgeBackend:
             if q in " ".join([e.statement, e.note]).lower()
         ]
 
+
+import sqlite3
+
+
+class SqliteKnowledgeBackend:
+    """`db_path` のsqliteファイルに案件固有ナレッジを保持する。git管理外(バイナリ)。"""
+
+    def __init__(self, db_path: Path):
+        self._db_path = Path(db_path)
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self._db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS entries (
+                    entry_id TEXT PRIMARY KEY,
+                    project TEXT NOT NULL,
+                    statement TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    retrieved TEXT NOT NULL,
+                    note TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
+
+    def append(self, entry: ProjectKnowledgeEntry) -> str:
+        with sqlite3.connect(self._db_path) as con:
+            if not entry.entry_id:
+                (count,) = con.execute(
+                    "SELECT COUNT(*) FROM entries WHERE project = ?", (entry.project,)
+                ).fetchone()
+                entry = entry.model_copy(update={"entry_id": f"{entry.project}-{count + 1}"})
+            con.execute(
+                "INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?)",
+                (entry.entry_id, entry.project, entry.statement, entry.source, entry.retrieved, entry.note),
+            )
+        return entry.entry_id
+
+    def list(self, project: str) -> list[ProjectKnowledgeEntry]:
+        with sqlite3.connect(self._db_path) as con:
+            rows = con.execute(
+                "SELECT entry_id, project, statement, source, retrieved, note "
+                "FROM entries WHERE project = ? ORDER BY entry_id",
+                (project,),
+            ).fetchall()
+        return [
+            ProjectKnowledgeEntry(entry_id=r[0], project=r[1], statement=r[2], source=r[3], retrieved=r[4], note=r[5])
+            for r in rows
+        ]
+
+    def search(self, project: str, query: str) -> list[ProjectKnowledgeEntry]:
+        q = query.lower()
+        return [
+            e for e in self.list(project)
+            if q in " ".join([e.statement, e.note]).lower()
+        ]
