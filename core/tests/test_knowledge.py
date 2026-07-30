@@ -171,3 +171,16 @@ def test_sqlite_scoped_to_project(sqlite_backend: SqliteKnowledgeBackend):
     sqlite_backend.append(_project_entry(project="yoyaku"))
     sqlite_backend.append(_project_entry(project="other"))
     assert len(sqlite_backend.list("yoyaku")) == 1
+
+
+from medo_core.knowledge import resolve_knowledge_backend
+
+
+def test_resolve_knowledge_backend_markdown(tmp_path: Path):
+    backend = resolve_knowledge_backend("markdown", "yoyaku", tmp_path / "knowledge", tmp_path / "home")
+    assert isinstance(backend, MarkdownKnowledgeBackend)
+
+
+def test_resolve_knowledge_backend_sqlite(tmp_path: Path):
+    backend = resolve_knowledge_backend("sqlite", "yoyaku", tmp_path / "knowledge", tmp_path / "home")
+    assert isinstance(backend, SqliteKnowledgeBackend)

@@ -235,3 +235,11 @@ class SqliteKnowledgeBackend:
             e for e in self.list(project)
             if q in " ".join([e.statement, e.note]).lower()
         ]
+
+
+def resolve_knowledge_backend(
+    backend: Literal["markdown", "sqlite"], project: str, knowledge_root: Path, medo_home: Path
+) -> "KnowledgeBackend":
+    if backend == "sqlite":
+        return SqliteKnowledgeBackend(Path(medo_home) / "projects" / project / "knowledge.sqlite")
+    return MarkdownKnowledgeBackend(Path(knowledge_root) / "projects")
