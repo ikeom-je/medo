@@ -104,3 +104,79 @@ class KnowledgeStore:
                 if len(results) >= limit:
                     return results
         return results
+
+
+from typing import Protocol
+
+
+class ProjectKnowledgeEntry(BaseModel):
+    entry_id: str = ""
+    project: str
+    statement: str
+    source: str
+    retrieved: str
+    note: str = ""
+
+    @model_validator(mode="after")
+    def _validate(self) -> "ProjectKnowledgeEntry":
+        if not self.statement.strip():
+            raise ValueError("statement は必須です")
+        if not self.source.strip():
+            raise ValueError("source は必須です(対話メモでも出典表記は必須)")
+        try:
+            date.fromisoformat(self.retrieved)
+        except ValueError as e:
+            raise ValueError(f"retrieved はISO日付(YYYY-MM-DD)である必要があります: {e}") from e
+        return self
+
+
+class KnowledgeBackend(Protocol):
+    def append(self, entry: ProjectKnowledgeEntry) -> str: ...
+    def list(self, project: str) -> list[ProjectKnowledgeEntry]: ...
+    def search(self, project: str, query: str) -> list[ProjectKnowledgeEntry]: ...
+
+
+class MarkdownKnowledgeBackend:
+    """`root/{project}/{entry_id}.md` にfrontmatterで追記専用保存する。"""
+
+    def __init__(self, root: Path):
+        self._root = Path(root)
+
+    def _dir(self, project: str) -> Path:
+        return self._root / project
+
+    def append(self, entry: ProjectKnowledgeEntry) -> str:
+        if not entry.entry_id:
+            nums = []
+            d = self._dir(entry.project)
+            if d.is_dir():
+                for f in d.glob(f"{entry.project}-*.md"):
+                    m = re.fullmatch(rf"{re.escape(entry.project)}-(\d+)", f.stem)
+                    if m:
+                        nums.append(int(m.group(1)))
+            entry = entry.model_copy(update={"entry_id": f"{entry.project}-{max(nums, default=0) + 1}"})
+        path = self._dir(entry.project) / f"{entry.entry_id}.md"
+        _write_frontmatter(path, entry.model_dump(mode="json", exclude={"entry_id"}))
+        return entry.entry_id
+
+    def list(self, project: str) -> list[ProjectKnowledgeEntry]:
+        d = self._dir(project)
+        if not d.is_dir():
+            return []
+
+        def _num(p: Path) -> int:
+            return int(p.stem.rsplit("-", 1)[1])
+
+        entries = []
+        for path in sorted(d.glob(f"{project}-*.md"), key=_num):
+            meta = _read_frontmatter(path)
+            entries.append(ProjectKnowledgeEntry.model_validate({**meta, "entry_id": path.stem}))
+        return entries
+
+    def search(self, project: str, query: str) -> list[ProjectKnowledgeEntry]:
+        q = query.lower()
+        return [
+            e for e in self.list(project)
+            if q in " ".join([e.statement, e.note]).lower()
+        ]
+

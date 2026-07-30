@@ -80,3 +80,63 @@ def test_search_filters_by_kind(store: KnowledgeStore):
 
 def test_get_missing_returns_none(store: KnowledgeStore):
     assert store.get("tech", "tech-999") is None
+
+
+from medo_core.knowledge import MarkdownKnowledgeBackend, ProjectKnowledgeEntry
+
+
+def _project_entry(**kw) -> ProjectKnowledgeEntry:
+    base = dict(
+        project="yoyaku",
+        statement="顧客の予約システムは現在Excel管理。現場担当者はPC操作に不慣れ",
+        source="hearing Skill 2026-07-27対話",
+        retrieved="2026-07-27",
+    )
+    base.update(kw)
+    return ProjectKnowledgeEntry(**base)
+
+
+@pytest.fixture
+def md_backend(tmp_path: Path) -> MarkdownKnowledgeBackend:
+    return MarkdownKnowledgeBackend(tmp_path / "projects")
+
+
+def test_append_assigns_entry_id(md_backend: MarkdownKnowledgeBackend):
+    entry_id = md_backend.append(_project_entry())
+    assert entry_id == "yoyaku-1"
+
+
+def test_append_increments_per_project(md_backend: MarkdownKnowledgeBackend):
+    md_backend.append(_project_entry())
+    second = md_backend.append(_project_entry(statement="second"))
+    assert second == "yoyaku-2"
+
+
+def test_list_returns_saved_entries(md_backend: MarkdownKnowledgeBackend):
+    md_backend.append(_project_entry())
+    md_backend.append(_project_entry(statement="second"))
+    entries = md_backend.list("yoyaku")
+    assert [e.statement for e in entries] == [
+        "顧客の予約システムは現在Excel管理。現場担当者はPC操作に不慣れ",
+        "second",
+    ]
+
+
+def test_list_scoped_to_project(md_backend: MarkdownKnowledgeBackend):
+    md_backend.append(_project_entry(project="yoyaku"))
+    md_backend.append(_project_entry(project="other"))
+    assert len(md_backend.list("yoyaku")) == 1
+
+
+def test_search_matches_statement(md_backend: MarkdownKnowledgeBackend):
+    md_backend.append(_project_entry(statement="Excel管理からの脱却"))
+    md_backend.append(_project_entry(statement="無関係な話題"))
+    results = md_backend.search("yoyaku", "Excel")
+    assert len(results) == 1
+
+
+def test_source_and_statement_required():
+    with pytest.raises(ValueError):
+        ProjectKnowledgeEntry(project="yoyaku", statement="", source="hearing対話", retrieved="2026-07-27")
+    with pytest.raises(ValueError):
+        ProjectKnowledgeEntry(project="yoyaku", statement="x", source="", retrieved="2026-07-27")
