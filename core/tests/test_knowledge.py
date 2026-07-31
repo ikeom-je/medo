@@ -3,7 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
+from medo_core.knowledge import (
+    KnowledgeEntry,
+    KnowledgeStore,
+    MarkdownKnowledgeBackend,
+    ProjectKnowledgeEntry,
+    SqliteKnowledgeBackend,
+    resolve_knowledge_backend,
+)
 
 
 def _entry(**kw) -> KnowledgeEntry:
@@ -82,7 +89,6 @@ def test_get_missing_returns_none(store: KnowledgeStore):
     assert store.get("tech", "tech-999") is None
 
 
-from medo_core.knowledge import MarkdownKnowledgeBackend, ProjectKnowledgeEntry
 
 
 def _project_entry(**kw) -> ProjectKnowledgeEntry:
@@ -142,7 +148,6 @@ def test_source_and_statement_required():
         ProjectKnowledgeEntry(project="yoyaku", statement="x", source="", retrieved="2026-07-27")
 
 
-from medo_core.knowledge import SqliteKnowledgeBackend
 
 
 @pytest.fixture
@@ -173,7 +178,6 @@ def test_sqlite_scoped_to_project(sqlite_backend: SqliteKnowledgeBackend):
     assert len(sqlite_backend.list("yoyaku")) == 1
 
 
-from medo_core.knowledge import resolve_knowledge_backend
 
 
 def test_resolve_knowledge_backend_markdown(tmp_path: Path):

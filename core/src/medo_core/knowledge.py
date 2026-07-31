@@ -5,9 +5,10 @@ from __future__ import annotations
 import re
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 from urllib.parse import urlparse
 
+import sqlite3
 import yaml
 from pydantic import BaseModel, model_validator
 
@@ -106,7 +107,7 @@ class KnowledgeStore:
         return results
 
 
-from typing import Protocol
+
 
 
 class ProjectKnowledgeEntry(BaseModel):
@@ -180,8 +181,6 @@ class MarkdownKnowledgeBackend:
             if q in " ".join([e.statement, e.note]).lower()
         ]
 
-
-import sqlite3
 
 
 class SqliteKnowledgeBackend:
