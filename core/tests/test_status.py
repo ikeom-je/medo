@@ -92,7 +92,7 @@ def test_stale_cited_catalog_entry_triggers_regenerate(tmp_path):
         service="vertex-ai", feature="context-caching", launch_stage="GA",
         summary="x", sources=["https://cloud.google.com/"], last_verified="2020-01-01",
     ))
-    ArtifactStore(s).save("yoyaku", _mini(cited_catalog_entries=["vertex-ai__context-caching"]))
+    ArtifactStore(s).save("yoyaku", _mini(cited_knowledge=["vertex-ai__context-caching"]))
     assert project_status(s, "yoyaku", today=TODAY)["next_step"] == "regenerate-stale-artifacts"
 
 

@@ -209,7 +209,7 @@ def artifacts_save(
             project=project,
             type=artifact_type,
             requirements_version=requirements_version,
-            cited_catalog_entries=[c for c in cites.split(",") if c],
+            cited_knowledge=[c for c in cites.split(",") if c],
             cited_facts=[c for c in cites_facts.split(",") if c],
             options=option_metas,
             grown_from=gf,

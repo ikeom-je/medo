@@ -35,7 +35,7 @@ def _artifact_stale(
             return True
     return any(
         _catalog_entry_stale(cat_store, entry_id, today)
-        for entry_id in artifact.cited_catalog_entries
+        for entry_id in artifact.cited_knowledge
     )
 
 

@@ -15,7 +15,7 @@ def _artifact(**kw) -> Artifact:
         project="yoyaku",
         type="architecture",
         requirements_version=1,
-        cited_catalog_entries=["vertex-ai__context-caching"],
+        cited_knowledge=["vertex-ai__context-caching"],
         generated_by="claude",
         content="# アーキ案A\n...",
     )
