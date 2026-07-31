@@ -14,3 +14,7 @@ def get_storage() -> Storage:
         return FirestoreStorage(firestore.Client())
     root = Path(os.environ.get("MEDO_HOME", str(Path.home() / ".medo")))
     return LocalJsonStorage(root)
+
+
+def get_knowledge_root() -> Path:
+    return Path(os.environ.get("MEDO_HOME", str(Path.home() / ".medo"))) / "knowledge"

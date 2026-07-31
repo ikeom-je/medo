@@ -1,5 +1,6 @@
 """medo CLI。事実と計算の決定論的インターフェース。失敗時は推測せずエラーを返す。"""
 
+import os
 import json
 from datetime import date
 from pathlib import Path
@@ -8,21 +9,26 @@ from typing import Literal
 import typer
 import yaml
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta
-from medo_core.catalog import CatalogStore
-from medo_core.config import get_storage
 from medo_core.facts import Fact, FactStore
 from medo_core.fermi import FermiModel, evaluate
+from medo_core.config import get_knowledge_root, get_storage
+from medo_core.knowledge import (
+    KnowledgeEntry,
+    KnowledgeStore,
+    ProjectKnowledgeEntry,
+    resolve_knowledge_backend,
+)
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.status import project_status, stale_artifact_ids
 
-app = typer.Typer(no_args_is_help=True, help="Medo(目処) — Google Cloud上流工程Agent CLI")
+app = typer.Typer(no_args_is_help=True, help="Medo(目処) — クラウド非依存の上流工程Agent CLI")
 requirements_app = typer.Typer(no_args_is_help=True)
-catalog_app = typer.Typer(no_args_is_help=True)
+knowledge_app = typer.Typer(no_args_is_help=True)
 artifacts_app = typer.Typer(no_args_is_help=True)
 facts_app = typer.Typer(no_args_is_help=True)
 fermi_app = typer.Typer(no_args_is_help=True)
 app.add_typer(requirements_app, name="requirements", help="要件ドキュメント(バージョン管理)")
-app.add_typer(catalog_app, name="catalog", help="鮮度メタ付きカタログ照会")
+app.add_typer(knowledge_app, name="knowledge", help="技術ナレッジ(案件横断)/ 案件固有ナレッジ")
 app.add_typer(artifacts_app, name="artifacts", help="生成物の保存・一覧")
 app.add_typer(facts_app, name="facts", help="市場・国策・業界動向・個社ファクト(出典必須)")
 app.add_typer(fermi_app, name="fermi", help="フェルミ推定(仮定明示・コードが計算)")
@@ -85,7 +91,7 @@ def requirements_diff(project: str = typer.Option(...)):
         json.dumps(
             {
                 "requirements": req_store.diff(project),
-                "stale_artifacts": stale_artifact_ids(storage, project),
+                "stale_artifacts": stale_artifact_ids(storage, project, get_knowledge_root()),
             },
             ensure_ascii=False,
             indent=2,
@@ -96,47 +102,132 @@ def requirements_diff(project: str = typer.Option(...)):
 @app.command()
 def status(project: str = typer.Option(...)):
     """プロジェクトの現在地(要件・ファクト・生成物・next_step)をJSONで出力する。"""
-    report = project_status(get_storage(), project)
+    report = project_status(get_storage(), project, get_knowledge_root())
     typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
 
 
-def _entry_payload(entry) -> dict:
-    return {"entry": entry.model_dump(mode="json"), "stale": entry.is_stale()}
+def _knowledge_entry_payload(entry) -> dict:
+    return (
+        {"entry": entry.model_dump(mode="json"), "stale": entry.is_stale()}
+        if hasattr(entry, "is_stale")
+        else entry.model_dump(mode="json")
+    )
 
 
-@catalog_app.command("search")
-def catalog_search(
+@knowledge_app.command("search")
+def knowledge_search(
     query: str = typer.Argument(""),
-    service: str | None = typer.Option(None),
-    limit: int = typer.Option(10),
+    project: str | None = typer.Option(None, help="指定時は案件固有ナレッジを検索"),
+    kind: str | None = typer.Option(None, help="tech|market|policy|trend|company(案件横断のみ)"),
     format: Literal["json", "digest"] = typer.Option("digest"),
 ):
-    entries = CatalogStore(get_storage()).search(query, service=service, limit=limit)
+    if project:
+        storage = get_storage()
+        doc = RequirementsStore(storage).get(project)
+        backend_name = doc.knowledge_backend if doc else "markdown"
+        backend = resolve_knowledge_backend(
+            backend_name,
+            project,
+            get_knowledge_root(),
+            Path(os.environ.get("MEDO_HOME", str(Path.home() / ".medo"))),
+        )
+        entries = backend.search(project, query)
+        if format == "json":
+            typer.echo(
+                json.dumps([e.model_dump(mode="json") for e in entries], ensure_ascii=False, indent=2)
+            )
+            return
+        if not entries:
+            typer.echo("(該当なし)")
+            return
+        for e in entries:
+            typer.echo(f"{e.entry_id} {e.statement[:60]} (出典: {e.source}, {e.retrieved})")
+        return
+
+    entries = KnowledgeStore(get_knowledge_root()).search(query, kind=kind)
     if format == "json":
-        typer.echo(json.dumps([_entry_payload(e) for e in entries], ensure_ascii=False, indent=2))
+        typer.echo(
+            json.dumps([_knowledge_entry_payload(e) for e in entries], ensure_ascii=False, indent=2)
+        )
         return
     if not entries:
         typer.echo("(該当なし)")
         return
     for e in entries:
         stale = " [STALE]" if e.is_stale() else ""
-        typer.echo(f"{e.entry_id} [{e.launch_stage}]{stale} {e.summary[:60]}")
+        typer.echo(f"{e.entry_id} [{e.kind}]{stale} {e.statement[:60]}")
 
 
-@catalog_app.command("get")
-def catalog_get(
-    service: str,
-    feature: str,
+@knowledge_app.command("get")
+def knowledge_get(
+    kind: str = typer.Option(..., help="tech|market|policy|trend|company"),
+    id: str = typer.Option(..., "--id"),
     format: Literal["json", "digest"] = typer.Option("json"),
 ):
-    entry = CatalogStore(get_storage()).get(service, feature)
+    entry = KnowledgeStore(get_knowledge_root()).get(kind, id)
     if entry is None:
-        _fail(f"カタログに {service}/{feature} が見つかりません")
+        _fail(f"ナレッジに {kind}/{id} が見つかりません")
     if format == "json":
-        typer.echo(json.dumps(_entry_payload(entry), ensure_ascii=False, indent=2))
+        typer.echo(json.dumps(_knowledge_entry_payload(entry), ensure_ascii=False, indent=2))
         return
     stale = " [STALE]" if entry.is_stale() else ""
-    typer.echo(f"{entry.entry_id} [{entry.launch_stage}]{stale} {entry.summary[:60]}")
+    typer.echo(f"{entry.entry_id}{stale} {entry.statement[:60]}")
+
+
+@knowledge_app.command("save")
+def knowledge_save(
+    statement: str = typer.Option(...),
+    source: str = typer.Option(...),
+    project: str | None = typer.Option(None, help="指定時は案件固有ナレッジとして保存"),
+    kind: str | None = typer.Option(
+        None, help="案件横断ナレッジのみ必須: tech|market|policy|trend|company"
+    ),
+    value: float | None = typer.Option(None),
+    unit: str = typer.Option(""),
+    retrieved: str | None = typer.Option(None, help="取得日 YYYY-MM-DD(省略時は今日)"),
+    note: str = typer.Option(""),
+):
+    retrieved = retrieved or date.today().isoformat()
+    if project:
+        try:
+            entry = ProjectKnowledgeEntry(
+                project=project,
+                statement=statement,
+                source=source,
+                retrieved=retrieved,
+                note=note,
+            )
+        except Exception as e:
+            _fail(f"案件固有ナレッジのスキーマ不正: {e}")
+        storage = get_storage()
+        doc = RequirementsStore(storage).get(project)
+        backend_name = doc.knowledge_backend if doc else "markdown"
+        backend = resolve_knowledge_backend(
+            backend_name,
+            project,
+            get_knowledge_root(),
+            Path(os.environ.get("MEDO_HOME", str(Path.home() / ".medo"))),
+        )
+        entry_id = backend.append(entry)
+        typer.echo(f"saved: {entry_id}")
+        return
+
+    if not kind:
+        _fail("--project 未指定の場合は --kind が必須です")
+    try:
+        entry = KnowledgeEntry(
+            kind=kind,
+            statement=statement,
+            value=value,
+            unit=unit,
+            source=source,
+            retrieved=retrieved,
+            note=note,
+        )
+    except Exception as e:
+        _fail(f"ナレッジのスキーマ不正: {e}")
+    entry_id = KnowledgeStore(get_knowledge_root()).save(entry)
+    typer.echo(f"saved: {entry_id}")
 
 
 @facts_app.command("save")

@@ -38,15 +38,10 @@ open_questions:
 """
 
 ENTRY = {
-    "service": "vertex-ai",
-    "feature": "context-caching",
-    "launch_stage": "GA",
-    "since": "2025-11-01",
-    "summary": "電話応対のシステムプロンプト(店舗情報・予約ルール)をキャッシュし入力コストと応答遅延を削減",
-    "pricing_refs": [],
-    "caveats": [],
-    "sources": ["https://cloud.google.com/vertex-ai/docs/release-notes"],
-    "last_verified": "2020-01-01",
+    "kind": "tech",
+    "statement": "電話応対のcontext cachingで入力コストと応答遅延を削減",
+    "source": "https://cloud.google.com/vertex-ai/docs/release-notes",
+    "retrieved": "2020-01-01",
 }
 
 FERMI_YAML = """\
@@ -86,33 +81,35 @@ def test_requirements_get_missing_project_fails(medo_home: Path):
     assert "error:" in result.output
 
 
-def test_catalog_search_marks_stale(medo_home: Path):
-    from medo_core.catalog import CatalogEntry, CatalogStore
-    from medo_core.storage import LocalJsonStorage
+def test_knowledge_search_marks_stale(medo_home: Path):
+    from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
 
-    CatalogStore(LocalJsonStorage(medo_home)).upsert(CatalogEntry(**ENTRY))
-    result = runner.invoke(app, ["catalog", "search", "caching", "--format", "json"])
+    KnowledgeStore(medo_home / "knowledge").save(KnowledgeEntry(**ENTRY))
+    result = runner.invoke(app, ["knowledge", "search", "caching", "--format", "json"])
     assert result.exit_code == 0
     items = json.loads(result.output)
-    assert items[0]["entry"]["feature"] == "context-caching"
+    assert items[0]["entry"]["statement"].startswith("電話応対")
     assert items[0]["stale"] is True
 
 
-def test_catalog_get_digest_and_json_format(medo_home: Path):
-    from medo_core.catalog import CatalogEntry, CatalogStore
-    from medo_core.storage import LocalJsonStorage
+def test_knowledge_get_digest_and_json_format(medo_home: Path):
+    from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
 
-    CatalogStore(LocalJsonStorage(medo_home)).upsert(CatalogEntry(**ENTRY))
+    KnowledgeStore(medo_home / "knowledge").save(KnowledgeEntry(**ENTRY))
 
-    result = runner.invoke(app, ["catalog", "get", "vertex-ai", "context-caching", "--format", "digest"])
+    result = runner.invoke(
+        app, ["knowledge", "get", "--kind", "tech", "--id", "tech-1", "--format", "digest"]
+    )
     assert result.exit_code == 0
-    assert "vertex-ai__context-caching" in result.output
+    assert "tech-1" in result.output
     assert "[STALE]" in result.output
 
-    result = runner.invoke(app, ["catalog", "get", "vertex-ai", "context-caching", "--format", "json"])
+    result = runner.invoke(
+        app, ["knowledge", "get", "--kind", "tech", "--id", "tech-1", "--format", "json"]
+    )
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["entry"]["feature"] == "context-caching"
+    assert payload["entry"]["statement"].startswith("電話応対")
 
 
 def test_requirements_get_invalid_format_fails(medo_home: Path):
@@ -137,10 +134,38 @@ def test_requirements_save_invalid_yaml_fails(medo_home: Path):
     assert "error:" in result.output
 
 
-def test_catalog_get_missing_entry_fails(medo_home: Path):
-    result = runner.invoke(app, ["catalog", "get", "vertex-ai", "nashi"])
+def test_knowledge_get_missing_entry_fails(medo_home: Path):
+    result = runner.invoke(app, ["knowledge", "get", "--kind", "tech", "--id", "nashi"])
     assert result.exit_code == 1
     assert "error:" in result.output
+
+
+def test_knowledge_save_project_scope_and_search(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDO_HOME", str(tmp_path))
+    result = runner.invoke(
+        app,
+        [
+            "knowledge", "save",
+            "--project", "yoyaku",
+            "--statement", "顧客の予約システムは現在Excel管理",
+            "--source", "hearing Skill 2026-07-27対話",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "saved: yoyaku-1" in result.stdout
+
+    search = runner.invoke(app, ["knowledge", "search", "Excel", "--project", "yoyaku"])
+    assert search.exit_code == 0
+    assert "yoyaku-1" in search.stdout
+
+
+def test_knowledge_save_project_scope_rejects_missing_source(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDO_HOME", str(tmp_path))
+    result = runner.invoke(
+        app, ["knowledge", "save", "--project", "yoyaku", "--statement", "x", "--source", ""]
+    )
+    assert result.exit_code == 1
+    assert "error:" in result.stdout + result.stderr
 
 
 def test_requirements_diff_missing_project_fails(medo_home: Path):
