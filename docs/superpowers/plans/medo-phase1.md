@@ -1030,8 +1030,11 @@ def requirements_diff(project: str = typer.Option(...)):
 
 def _entry_payload(entry) -> dict:
     return {"entry": entry.model_dump(mode="json"), "stale": entry.is_stale()}
+```
 
+> **(実装は差し替え済み)** 以下の `knowledge search`/`knowledge get` は当時(catalogコマンド)のコード例をクラス名だけ機械置換した名残で、`service`/`launch_stage`等の旧カタログ由来フィールドを参照しており現行スキーマと一致しない。実際のCLI実装(`--project`分岐込み)は `docs/superpowers/plans/2026-07-30-knowledge-layer.md` Task 7を正とする。
 
+```python
 @knowledge_app.command("search")
 def knowledge_search(
     query: str = typer.Argument(""),
@@ -1065,8 +1068,9 @@ def knowledge_get(
         return
     stale = " [STALE]" if entry.is_stale() else ""
     typer.echo(f"{entry.entry_id} [{entry.launch_stage}]{stale} {entry.summary[:60]}")
+```
 
-
+```python
 @artifacts_app.command("save")
 def artifacts_save(
     project: str = typer.Option(...),
@@ -2194,6 +2198,8 @@ Expected: FAIL(ModuleNotFoundError: medo_core.status)
 
 - [ ] **Step 3: 実装**
 
+> **(実装は差し替え済み)** 以下は当時(catalog版)のコード例をクラス名だけ機械置換した名残で、`entry_id.split("__")`によるservice/feature分解は現行の`{kind}-{n}`形式と一致しない。実際の実装は `docs/superpowers/plans/2026-07-30-knowledge-layer.md` Task 6を正とする。
+
 `core/src/medo_core/status.py`:
 
 ```python
@@ -2405,665 +2411,10 @@ git commit -m "feat(core): medo status(引用根拠込みの陳腐化判定とne
 
 ---
 
-### Task 7: ETL — リリースノート取得とGemini構造化
+### Task 7・Task 8: ETL(不採用)
 
-**Files:**
-- Create: `etl/src/medo_etl/release_notes.py`
-- Create: `etl/src/medo_etl/structure.py`
-- Create: `etl/services.yaml`
-- Test: `etl/tests/test_release_notes.py`, `etl/tests/test_structure.py`
+GCP専用ETL(BigQuery公開データセットからのリリースノート取得+Gemini構造化、Billing Catalog APIからのSKUスナップショット)は、Medoを「クラウド非依存の上流工程Agentフレームワーク」に再定義した際に不採用として撤回した(GitHub Issue #18・PR #19参照)。技術ナレッジは自動ETLではなく、ホストLLMが案件で必要になった都度検索し `medo knowledge save` で出典検証して保存する方式に統一した(`docs/superpowers/specs/medo-design.md` Section 6)。
 
-**Interfaces:**
-- Consumes: `KnowledgeEntry`(Task 4)
-- Produces:
-  - `ReleaseNote(product_name: str, description: str, release_note_type: str, published_at: str)`
-  - `fetch_release_notes(bq_client, product_names: list[str], since: str) -> list[ReleaseNote]`
-  - `load_services(path: Path) -> list[ServiceConfig]`(`ServiceConfig(slug, product_name, release_notes_url)`)
-  - `structure_notes(service: ServiceConfig, notes: list[ReleaseNote], generate: Callable[[str], str], today: str) -> tuple[list[KnowledgeEntry], list[str]]` — `generate` はプロンプト→JSON文字列を返す注入可能関数(本番はGemini Flash)。返り値は(検証通過エントリ, 検証エラーメッセージ)。**LLM出力は必ずpydanticで検証し、通過分のみ返す**
-
-- [ ] **Step 1: services.yaml を作成**
-
-`etl/services.yaml`:
-
-```yaml
-# ナレッジ対象サービス。AI/ML重点+アプリ構築定番。
-services:
-  - slug: vertex-ai
-    product_name: "Vertex AI"
-    release_notes_url: "https://cloud.google.com/vertex-ai/docs/release-notes"
-  - slug: gemini-api
-    product_name: "Gemini API"
-    release_notes_url: "https://ai.google.dev/gemini-api/docs/changelog"
-  - slug: cloud-run
-    product_name: "Cloud Run"
-    release_notes_url: "https://cloud.google.com/run/docs/release-notes"
-  - slug: cloud-functions
-    product_name: "Cloud Functions"
-    release_notes_url: "https://cloud.google.com/functions/docs/release-notes"
-  - slug: bigquery
-    product_name: "BigQuery"
-    release_notes_url: "https://cloud.google.com/bigquery/docs/release-notes"
-  - slug: firestore
-    product_name: "Firestore"
-    release_notes_url: "https://cloud.google.com/firestore/docs/release-notes"
-```
-
-- [ ] **Step 2: 失敗するテストを書く(release_notes)**
-
-`etl/tests/test_release_notes.py`:
-
-```python
-from pathlib import Path
-from unittest.mock import MagicMock
-
-from medo_etl.release_notes import ReleaseNote, fetch_release_notes, load_services
-
-
-def test_load_services():
-    services = load_services(Path(__file__).parent.parent / "services.yaml")
-    slugs = [s.slug for s in services]
-    assert "vertex-ai" in slugs and "cloud-run" in slugs
-    va = next(s for s in services if s.slug == "vertex-ai")
-    assert va.product_name == "Vertex AI"
-    assert va.release_notes_url.startswith("https://")
-
-
-def test_fetch_release_notes_builds_query_and_maps_rows():
-    row = MagicMock()
-    row.product_name = "Vertex AI"
-    row.description = "Context caching is GA."
-    row.release_note_type = "FEATURE"
-    row.published_at = __import__("datetime").date(2026, 6, 20)
-    bq = MagicMock()
-    bq.query.return_value.result.return_value = [row]
-
-    notes = fetch_release_notes(bq, ["Vertex AI"], since="2026-06-01")
-    assert notes == [
-        ReleaseNote(
-            product_name="Vertex AI",
-            description="Context caching is GA.",
-            release_note_type="FEATURE",
-            published_at="2026-06-20",
-        )
-    ]
-    sql = bq.query.call_args.args[0]
-    assert "bigquery-public-data.google_cloud_release_notes.release_notes" in sql
-```
-
-- [ ] **Step 3: テストが失敗することを確認**
-
-Run: `uv run pytest etl/tests/test_release_notes.py -v`
-Expected: FAIL(ModuleNotFoundError: medo_etl.release_notes)
-
-- [ ] **Step 4: release_notes を実装**
-
-`etl/src/medo_etl/release_notes.py`:
-
-```python
-"""リリースノートの決定論的取得(BigQuery公開データセット)。"""
-
-from pathlib import Path
-
-import yaml
-from pydantic import BaseModel
-
-
-class ReleaseNote(BaseModel):
-    product_name: str
-    description: str
-    release_note_type: str
-    published_at: str  # YYYY-MM-DD
-
-
-class ServiceConfig(BaseModel):
-    slug: str
-    product_name: str
-    release_notes_url: str
-
-
-def load_services(path: Path) -> list[ServiceConfig]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return [ServiceConfig.model_validate(s) for s in data["services"]]
-
-
-QUERY = """
-SELECT product_name, description, release_note_type, published_at
-FROM `bigquery-public-data.google_cloud_release_notes.release_notes`
-WHERE product_name IN UNNEST(@products)
-  AND published_at >= @since
-ORDER BY published_at DESC
-"""
-
-
-def fetch_release_notes(bq_client, product_names: list[str], since: str) -> list[ReleaseNote]:
-    from google.cloud import bigquery
-
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ArrayQueryParameter("products", "STRING", product_names),
-            bigquery.ScalarQueryParameter("since", "DATE", since),
-        ]
-    )
-    rows = bq_client.query(QUERY, job_config=job_config).result()
-    return [
-        ReleaseNote(
-            product_name=row.product_name,
-            description=row.description,
-            release_note_type=row.release_note_type,
-            published_at=row.published_at.isoformat(),
-        )
-        for row in rows
-    ]
-```
-
-- [ ] **Step 5: テストが通ることを確認**
-
-Run: `uv run pytest etl/tests/test_release_notes.py -v`
-Expected: PASS(2 passed)
-
-- [ ] **Step 6: 失敗するテストを書く(structure)**
-
-`etl/tests/test_structure.py`:
-
-```python
-import json
-
-from medo_etl.release_notes import ReleaseNote, ServiceConfig
-from medo_etl.structure import structure_notes
-
-SERVICE = ServiceConfig(
-    slug="vertex-ai",
-    product_name="Vertex AI",
-    release_notes_url="https://cloud.google.com/vertex-ai/docs/release-notes",
-)
-
-NOTES = [
-    ReleaseNote(
-        product_name="Vertex AI",
-        description="Context caching is now GA.",
-        release_note_type="FEATURE",
-        published_at="2026-06-20",
-    )
-]
-
-
-def _fake_generate(valid: list[dict]):
-    def generate(prompt: str) -> str:
-        assert "Context caching" in prompt  # ノート本文がプロンプトに含まれる
-        return json.dumps(valid)
-
-    return generate
-
-
-def test_structure_notes_returns_validated_entries():
-    generate = _fake_generate(
-        [
-            {
-                "feature": "context-caching",
-                "launch_stage": "GA",
-                "since": "2026-06-20",
-                "summary": "コンテキストキャッシュがGA",
-                "caveats": [],
-            }
-        ]
-    )
-    entries, errors = structure_notes(SERVICE, NOTES, generate, today="2026-07-05")
-    assert errors == []
-    assert len(entries) == 1
-    e = entries[0]
-    assert e.service == "vertex-ai"
-    assert e.launch_stage == "GA"
-    assert e.last_verified == "2026-07-05"
-    assert e.sources == ["https://cloud.google.com/vertex-ai/docs/release-notes"]
-
-
-def test_structure_notes_rejects_invalid_items_but_keeps_valid():
-    generate = _fake_generate(
-        [
-            {"feature": "ok-feature", "launch_stage": "Preview", "summary": "ok", "caveats": []},
-            {"feature": "bad-feature", "launch_stage": "不正な値", "summary": "ng", "caveats": []},
-        ]
-    )
-    entries, errors = structure_notes(SERVICE, NOTES, generate, today="2026-07-05")
-    assert [e.feature for e in entries] == ["ok-feature"]
-    assert len(errors) == 1 and "bad-feature" in errors[0]
-
-
-def test_structure_notes_rejects_broken_json():
-    entries, errors = structure_notes(SERVICE, NOTES, lambda p: "not json", today="2026-07-05")
-    assert entries == [] and len(errors) == 1
-```
-
-- [ ] **Step 7: テストが失敗することを確認**
-
-Run: `uv run pytest etl/tests/test_structure.py -v`
-Expected: FAIL(ModuleNotFoundError: medo_etl.structure)
-
-- [ ] **Step 8: structure を実装**
-
-`etl/src/medo_etl/structure.py`:
-
-```python
-"""Gemini Flashによる構造化(生成的だが出典・検証必須)。generate関数は注入可能。"""
-
-import json
-from typing import Callable
-
-from medo_core.catalog import KnowledgeEntry
-from medo_etl.release_notes import ReleaseNote, ServiceConfig
-
-PROMPT_TEMPLATE = """\
-あなたはGoogle Cloudのリリースノートを機能ナレッジに構造化する係です。
-以下のリリースノート群から、アーキテクチャ検討に有用な「機能」単位のエントリを抽出し、
-JSON配列のみを出力してください。各要素のスキーマ:
-{{"feature": "kebab-case-slug", "launch_stage": "GA|Preview|Deprecated",
-  "since": "YYYY-MM-DD または null", "summary": "日本語で1〜2文", "caveats": ["注意点", ...]}}
-
-規則:
-- launch_stageはノート本文の記述(GA/generally available/Preview/deprecated)から判定する
-- 判定できない情報は捏造せず、その項目を出力しない
-- 修正のみのノート(FIX)はスキップしてよい
-
-対象サービス: {product_name}
-
-リリースノート:
-{notes}
-"""
-
-
-def structure_notes(
-    service: ServiceConfig,
-    notes: list[ReleaseNote],
-    generate: Callable[[str], str],
-    today: str,
-) -> tuple[list[KnowledgeEntry], list[str]]:
-    notes_text = "\n".join(
-        f"- [{n.release_note_type}] ({n.published_at}) {n.description}" for n in notes
-    )
-    prompt = PROMPT_TEMPLATE.format(product_name=service.product_name, notes=notes_text)
-    raw = generate(prompt)
-
-    try:
-        items = json.loads(raw)
-    except json.JSONDecodeError as e:
-        return [], [f"{service.slug}: LLM出力がJSONとして不正: {e}"]
-
-    entries: list[KnowledgeEntry] = []
-    errors: list[str] = []
-    for item in items:
-        try:
-            entries.append(
-                KnowledgeEntry(
-                    service=service.slug,
-                    feature=item.get("feature", ""),
-                    launch_stage=item.get("launch_stage"),
-                    since=item.get("since"),
-                    summary=item.get("summary", ""),
-                    caveats=item.get("caveats", []),
-                    sources=[service.release_notes_url],
-                    last_verified=today,
-                )
-            )
-        except Exception as e:  # pydantic.ValidationError
-            errors.append(f"{service.slug}/{item.get('feature', '?')}: 検証エラー: {e}")
-    return entries, errors
-
-
-def gemini_generate(model: str = "gemini-flash-latest") -> Callable[[str], str]:
-    """本番用generate。google-genaiクライアントを遅延生成する。"""
-    from google import genai
-
-    client = genai.Client()
-
-    def generate(prompt: str) -> str:
-        resp = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
-        )
-        return resp.text
-
-    return generate
-```
-
-- [ ] **Step 9: テストが通ることを確認**
-
-Run: `uv run pytest etl/tests/test_structure.py -v`
-Expected: PASS(3 passed)
-
-- [ ] **Step 10: コミット**
-
-```bash
-git add etl/services.yaml etl/src/medo_etl/release_notes.py etl/src/medo_etl/structure.py etl/tests/test_release_notes.py etl/tests/test_structure.py
-git commit -m "feat(etl): リリースノート取得とGemini構造化(検証必須・注入可能)"
-```
-
----
-
-### Task 8: ETL — SKUスナップショットとパイプライン+CLI統合
-
-**Files:**
-- Create: `etl/src/medo_etl/skus.py`
-- Create: `etl/src/medo_etl/pipeline.py`
-- Modify: `cli/src/medo_cli/main.py`(etlサブコマンド追加。`app.add_typer(etl_app, name="etl", ...)` を既存のadd_typer群の直後に追加)
-- Modify: `cli/pyproject.toml`(dependenciesに `"medo-etl"` を追加し、ルート `pyproject.toml` の `[tool.uv.sources]` に `medo-etl = { workspace = true }` を追加)
-- Test: `etl/tests/test_skus.py`, `etl/tests/test_pipeline.py`
-
-**Interfaces:**
-- Consumes: `fetch_release_notes` / `structure_notes` / `load_services`(Task 7)、`KnowledgeStore`(Task 4)、`Storage`(Task 2)
-- Produces:
-  - `fetch_skus(billing_client, service_display_name: str) -> list[dict]`(各dict: `{"sku_id", "description", "category"}`)
-  - `save_sku_snapshot(storage, service_slug: str, skus: list[dict], fetched_at: str) -> None`(パス `sku_snapshots/{service_slug}`)
-  - `run_pipeline(storage, services, notes_by_service: dict[str, list[ReleaseNote]], generate, today: str, dry_run: bool) -> PipelineReport`(`PipelineReport(upserted: list[str], errors: list[str], skipped: int)`)
-  - CLI: `medo (不採用) etl run --since YYYY-MM-DD [--services slug,slug] [--dry-run]` / `medo (不採用) etl skus --service <slug>`
-
-- [ ] **Step 1: 失敗するテストを書く(skus)**
-
-`etl/tests/test_skus.py`:
-
-```python
-from unittest.mock import MagicMock
-
-from medo_core.storage import LocalJsonStorage
-from medo_etl.skus import fetch_skus, save_sku_snapshot
-
-
-def _sku(sku_id: str, desc: str) -> MagicMock:
-    m = MagicMock()
-    m.sku_id = sku_id
-    m.description = desc
-    m.category.resource_family = "AI"
-    return m
-
-
-def test_fetch_skus_finds_service_and_lists_skus():
-    svc = MagicMock()
-    svc.display_name = "Vertex AI"
-    svc.name = "services/ABC-123"
-    billing = MagicMock()
-    billing.list_services.return_value = [svc]
-    billing.list_skus.return_value = [_sku("0001-AAAA", "Gemini Flash input tokens")]
-
-    skus = fetch_skus(billing, "Vertex AI")
-    assert skus == [
-        {"sku_id": "0001-AAAA", "description": "Gemini Flash input tokens", "category": "AI"}
-    ]
-    billing.list_skus.assert_called_once_with(parent="services/ABC-123")
-
-
-def test_fetch_skus_unknown_service_raises():
-    billing = MagicMock()
-    billing.list_services.return_value = []
-    try:
-        fetch_skus(billing, "Nashi Service")
-        raise AssertionError("should raise")
-    except ValueError as e:
-        assert "Nashi Service" in str(e)
-
-
-def test_save_sku_snapshot(tmp_path):
-    storage = LocalJsonStorage(tmp_path)
-    save_sku_snapshot(storage, "vertex-ai", [{"sku_id": "x", "description": "d", "category": "AI"}], "2026-07-05")
-    doc = storage.get("sku_snapshots/vertex-ai")
-    assert doc["fetched_at"] == "2026-07-05" and len(doc["skus"]) == 1
-```
-
-- [ ] **Step 2: テストが失敗することを確認**
-
-Run: `uv run pytest etl/tests/test_skus.py -v`
-Expected: FAIL(ModuleNotFoundError: medo_etl.skus)
-
-- [ ] **Step 3: skus を実装**
-
-`etl/src/medo_etl/skus.py`:
-
-```python
-"""Billing Catalog APIからのSKUスナップショット。金額はナレッジに焼き込まず、ここに保存する。"""
-
-from medo_core.storage import Storage
-
-
-def fetch_skus(billing_client, service_display_name: str) -> list[dict]:
-    service_name = None
-    for svc in billing_client.list_services():
-        if svc.display_name == service_display_name:
-            service_name = svc.name
-            break
-    if service_name is None:
-        raise ValueError(f"Billing Catalogにサービスが見つかりません: {service_display_name}")
-    return [
-        {
-            "sku_id": sku.sku_id,
-            "description": sku.description,
-            "category": sku.category.resource_family,
-        }
-        for sku in billing_client.list_skus(parent=service_name)
-    ]
-
-
-def save_sku_snapshot(storage: Storage, service_slug: str, skus: list[dict], fetched_at: str) -> None:
-    storage.put(
-        f"sku_snapshots/{service_slug}",
-        {"service": service_slug, "fetched_at": fetched_at, "skus": skus},
-    )
-```
-
-- [ ] **Step 4: テストが通ることを確認**
-
-Run: `uv run pytest etl/tests/test_skus.py -v`
-Expected: PASS(3 passed)
-
-- [ ] **Step 5: 失敗するテストを書く(pipeline)**
-
-`etl/tests/test_pipeline.py`:
-
-```python
-import json
-
-from medo_core.knowledge import KnowledgeStore
-from medo_core.storage import LocalJsonStorage
-from medo_etl.release_notes import ReleaseNote, ServiceConfig
-from medo_etl.pipeline import run_pipeline
-
-SERVICE = ServiceConfig(
-    slug="vertex-ai",
-    product_name="Vertex AI",
-    release_notes_url="https://cloud.google.com/vertex-ai/docs/release-notes",
-)
-
-NOTES = {
-    "vertex-ai": [
-        ReleaseNote(
-            product_name="Vertex AI",
-            description="Context caching is now GA.",
-            release_note_type="FEATURE",
-            published_at="2026-06-20",
-        )
-    ]
-}
-
-
-def _generate(prompt: str) -> str:
-    return json.dumps(
-        [{"feature": "context-caching", "launch_stage": "GA", "summary": "GAになった", "caveats": []}]
-    )
-
-
-def test_pipeline_upserts_validated_entries(tmp_path):
-    storage = LocalJsonStorage(tmp_path)
-    report = run_pipeline(storage, [SERVICE], NOTES, _generate, today="2026-07-05", dry_run=False)
-    assert report.upserted == ["vertex-ai__context-caching"]
-    assert report.errors == []
-    assert KnowledgeStore(storage).get("vertex-ai", "context-caching") is not None
-
-
-def test_pipeline_dry_run_does_not_write(tmp_path):
-    storage = LocalJsonStorage(tmp_path)
-    report = run_pipeline(storage, [SERVICE], NOTES, _generate, today="2026-07-05", dry_run=True)
-    assert report.upserted == ["vertex-ai__context-caching"]
-    assert KnowledgeStore(storage).get("vertex-ai", "context-caching") is None
-
-
-def test_pipeline_collects_errors_without_aborting(tmp_path):
-    storage = LocalJsonStorage(tmp_path)
-    report = run_pipeline(
-        storage, [SERVICE], NOTES, lambda p: "not json", today="2026-07-05", dry_run=False
-    )
-    assert report.upserted == [] and len(report.errors) == 1
-```
-
-- [ ] **Step 6: テストが失敗することを確認**
-
-Run: `uv run pytest etl/tests/test_pipeline.py -v`
-Expected: FAIL(ModuleNotFoundError: medo_etl.pipeline)
-
-- [ ] **Step 7: pipeline を実装**
-
-`etl/src/medo_etl/pipeline.py`:
-
-```python
-"""取得→構造化→検証→upsert。検証通過分のみコミットし、エラーはレポートに集約する。"""
-
-from typing import Callable
-
-from pydantic import BaseModel, Field
-
-from medo_core.knowledge import KnowledgeStore
-from medo_core.storage import Storage
-from medo_etl.release_notes import ReleaseNote, ServiceConfig
-from medo_etl.structure import structure_notes
-
-
-class PipelineReport(BaseModel):
-    upserted: list[str] = Field(default_factory=list)
-    errors: list[str] = Field(default_factory=list)
-    skipped: int = 0
-
-
-def run_pipeline(
-    storage: Storage,
-    services: list[ServiceConfig],
-    notes_by_service: dict[str, list[ReleaseNote]],
-    generate: Callable[[str], str],
-    today: str,
-    dry_run: bool,
-) -> PipelineReport:
-    report = PipelineReport()
-    catalog = KnowledgeStore(storage)
-    for service in services:
-        notes = notes_by_service.get(service.slug, [])
-        if not notes:
-            report.skipped += 1
-            continue
-        entries, errors = structure_notes(service, notes, generate, today)
-        report.errors.extend(errors)
-        for entry in entries:
-            if not dry_run:
-                catalog.upsert(entry)
-            report.upserted.append(entry.entry_id)
-    return report
-```
-
-- [ ] **Step 8: テストが通ることを確認**
-
-Run: `uv run pytest etl/tests/test_pipeline.py -v`
-Expected: PASS(3 passed)
-
-- [ ] **Step 9: CLIにetlサブコマンドを追加**
-
-`cli/pyproject.toml` の dependencies を修正:
-
-```toml
-dependencies = [
-    "medo-core",
-    "medo-etl",
-    "typer>=0.12",
-]
-```
-
-ルート `pyproject.toml` の `[tool.uv.sources]` を修正:
-
-```toml
-[tool.uv.sources]
-medo-core = { workspace = true }
-medo-etl = { workspace = true }
-```
-
-`cli/src/medo_cli/main.py` に追加(既存の `app.add_typer(...)` 群の直後):
-
-```python
-etl_app = typer.Typer(no_args_is_help=True)
-app.add_typer(etl_app, name="etl", help="ナレッジ更新パイプライン(手動実行)")
-
-
-@etl_app.command("run")
-def etl_run(
-    since: str = typer.Option(..., help="この日付以降のリリースノートを対象(YYYY-MM-DD)"),
-    services: str = typer.Option("", help="対象サービスslug(カンマ区切り。空なら全件)"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-):
-    from datetime import date
-    from pathlib import Path as P
-
-    from medo_etl.pipeline import run_pipeline
-    from medo_etl.release_notes import fetch_release_notes, load_services
-    from medo_etl.structure import gemini_generate
-
-    from google.cloud import bigquery
-
-    all_services = load_services(P(__file__).parents[3] / "etl" / "services.yaml")
-    wanted = [s for s in services.split(",") if s]
-    targets = [s for s in all_services if not wanted or s.slug in wanted]
-    if not targets:
-        _fail(f"対象サービスがありません: {services}")
-
-    bq = bigquery.Client()
-    notes_by_service = {}
-    for svc in targets:
-        notes = fetch_release_notes(bq, [svc.product_name], since=since)
-        notes_by_service[svc.slug] = notes
-
-    report = run_pipeline(
-        get_storage(), targets, notes_by_service,
-        gemini_generate(), today=date.today().isoformat(), dry_run=dry_run,
-    )
-    typer.echo(json.dumps(report.model_dump(), ensure_ascii=False, indent=2))
-    if report.errors:
-        raise typer.Exit(code=1)
-
-
-@etl_app.command("skus")
-def etl_skus(service: str = typer.Option(..., help="サービスslug(services.yaml準拠)")):
-    from datetime import date
-    from pathlib import Path as P
-
-    from google.cloud import billing_v1
-    from medo_etl.release_notes import load_services
-    from medo_etl.skus import fetch_skus, save_sku_snapshot
-
-    all_services = load_services(P(__file__).parents[3] / "etl" / "services.yaml")
-    target = next((s for s in all_services if s.slug == service), None)
-    if target is None:
-        _fail(f"services.yamlに未定義のサービス: {service}")
-    client = billing_v1.CloudCatalogClient()
-    skus = fetch_skus(client, target.product_name)
-    save_sku_snapshot(get_storage(), service, skus, fetched_at=date.today().isoformat())
-    typer.echo(f"saved: sku_snapshots/{service} ({len(skus)} SKUs)")
-```
-
-- [ ] **Step 10: 全テストが通ることを確認**
-
-Run: `uv sync --all-packages && uv run pytest -v`
-Expected: PASS(全テスト。etl runコマンド自体の実行はGCP認証が要るため手動スモーク=Task 10で確認)
-
-- [ ] **Step 11: コミット**
-
-```bash
-git add etl/src/medo_etl/skus.py etl/src/medo_etl/pipeline.py etl/tests/test_skus.py etl/tests/test_pipeline.py cli/src/medo_cli/main.py cli/pyproject.toml pyproject.toml uv.lock
-git commit -m "feat(etl): SKUスナップショットとパイプライン、medo etlコマンド"
-```
-
----
 
 ### Task 9: Skill 3本(hearing / propose-options / grow-prfaq)とビルドスクリプト
 
@@ -3393,34 +2744,14 @@ git commit -m "feat(skills): hearing/propose-options/grow-prfaq Skillとビル�
 - Consumes: これまでの全タスク
 - Produces: フェーズ1完了の定義「実案件1件で 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(技術ナレッジ根拠付き) が両ホストで通る」の確認記録
 
-このタスクは人間(利用者本人)との共同作業。GCP認証・課金・実案件の意思決定が絡むため自動化しない。
+このタスクは人間(利用者本人)との共同作業。実案件の意思決定が絡むため自動化しない。既定のローカルJSONバックエンドではGCP認証は不要(Firestoreを本番ストレージに選ぶ場合のみ`gcloud auth application-default login`が必要)。
 
-- [ ] **Step 1: GCP前提の確認**
+- [ ] **Step 1: ホストLLM検索→technical knowledgeを保存できることを確認**
 
-```bash
-gcloud auth application-default login   # 対話認証(ユーザー実行)
-gcloud config get-value project         # 課金有効なプロジェクトが設定されていること
-export GOOGLE_CLOUD_PROJECT=$(gcloud config get-value project)
-```
+Run: `MEDO_BACKEND=local uv run medo knowledge save --kind tech --statement "<検索で得た技術情報>" --source "<出典URL>" && uv run medo knowledge search "" --limit 20`
+Expected: 出典・鮮度付きの技術ナレッジエントリが一覧表示される
 
-注: BigQuery公開データセットのクエリとGemini API(`google-genai` はADC/Vertex経由または `GEMINI_API_KEY`)、(不採用)Billing Catalog APIが使えること。
-
-- [ ] **Step 2: (不採用)ローカルバックエンドでETLをdry-run**
-
-Run: `MEDO_BACKEND=local uv run medo (不採用) etl run --since 2026-06-01 --services vertex-ai --dry-run`
-Expected: upserted にエントリID群、errors が空(または少数。errorsの内容を確認)
-
-- [ ] **Step 3: 本実行してナレッジを確認**
-
-Run: `MEDO_BACKEND=local uv run medo (不採用) etl run --since 2026-04-01 --services vertex-ai,cloud-run && uv run medo knowledge search "" --limit 20`
-Expected: 鮮度付きナレッジエントリが一覧表示される
-
-- [ ] **Step 4: SKUスナップショットを取得**
-
-Run: `MEDO_BACKEND=local uv run medo (不採用) etl skus --service vertex-ai`
-Expected: `saved: sku_snapshots/vertex-ai (<N> SKUs)`
-
-- [ ] **Step 5: SkillをClaude Codeに配置**
+- [ ] **Step 2: SkillをClaude Codeに配置**
 
 ```bash
 python skills/build.py
@@ -3430,7 +2761,7 @@ cp -r skills/dist/claude/medo-propose-options ~/.claude/skills/
 cp -r skills/dist/claude/medo-grow-prfaq ~/.claude/skills/
 ```
 
-- [ ] **Step 6: Skillをagyに配置**
+- [ ] **Step 3: Skillをagyに配置**
 
 `skills/dist/agy/*.md` をagyのワークフロー参照場所に置き、リポジトリのAGENTS.md(なければ作成)に次を追記:
 
@@ -3441,7 +2772,7 @@ cp -r skills/dist/claude/medo-grow-prfaq ~/.claude/skills/
 - PRFAQ育成: skills/dist/agy/medo-grow-prfaq.md の手順に従う
 ```
 
-- [ ] **Step 7: 実案件1件でWhat/Why縦切りを通す(受け入れテスト)**
+- [ ] **Step 4: 実案件1件でWhat/Why縦切りを通す(受け入れテスト)**
 
 1. Claude Codeで `medo-hearing` を起動し、実案件の課題を入力 → 背景・理念(principles)・課題(challenges)込みで要件保存(`saved: v1` を確認)
 2. `medo-propose-options` → 市場・国策・業界動向ファクトが出典付きで保存され(`medo facts list` で確認)、フェルミ推定が `fermi-v1` として保存され、打ち手2〜3案のミニPRFAQ候補セットが `--options`・`--cites-facts`・`--cites` 付きで保存されることを確認
@@ -3451,7 +2782,7 @@ cp -r skills/dist/claude/medo-grow-prfaq ~/.claude/skills/
 6. 課題を1項目追加して再保存(v2)→ `medo status` が `regenerate-stale-artifacts` を返し、`medo requirements diff` が陳腐化した生成物を報告することを確認
 7. `medo fermi calc --from-artifact fermi-v1` で再計算できることを確認
 
-- [ ] **Step 8: セットアップ手順を docs/setup.md に記録してコミット**
+- [ ] **Step 5: セットアップ手順を docs/setup.md に記録してコミット**
 
 スモークで実際に使ったコマンド・環境変数・ハマりどころを `docs/setup.md` に記録する(内容はスモーク結果に依存するため、実行時に書く。「GCP前提」「ナレッジ洗練(フェーズ2)」「Skill配置(Claude Code/agy)」「What/Why縦切りの流れ」の4節を含めること)。
 
@@ -3466,5 +2797,5 @@ git commit -m "docs: フェーズ1セットアップ手順とスモーク結果"
 
 - **スペック対応**: What/Why縦切りMVPの構成要素(要件拡張=background/principles/challenges、市場ファクト=kind別出典検証+180日stale、フェルミ=決定論計算+再計算、生成物=mini-prfaq候補セット/grown_from付きprfaq、status=引用根拠込み陳腐化判定、Skill 3本、)はTask 1〜10で網羅
 - **フェーズ1対象外(意図的)**: make-slides・build-mock・propose-architecture(詳細)・pricing計算機・decision-roadmap・knowledge-digest・Webアプリ・Scheduler自動化はフェーズ2以降、compare-awsはバックログ(スペックのフェーズ計画どおり)
-- **型整合**: `Fact.fact_id`=`fact-<n>`、`KnowledgeEntry.entry_id`=`{service}__{feature}`、生成物ID=`{type}-v{n}`、`GrownFrom{artifact, option}`、`ConfidenceItem{text, confidence}` を core / CLI / Skill 間で共通使用。日付はISO文字列で統一
+- **型整合**: `Fact.fact_id`=`fact-<n>`、`KnowledgeEntry.entry_id`=`{kind}-<n>`(旧`{service}__{feature}`から変更。`docs/superpowers/plans/2026-07-30-knowledge-layer.md` Task1参照)、生成物ID=`{type}-v{n}`、`GrownFrom{artifact, option}`、`ConfidenceItem{text, confidence}` を core / CLI / Skill 間で共通使用。日付はISO文字列で統一
 - **契約変更の扱い**: Task 6b(要件スキーマ)・6c/6e(CLI新コマンド)・6d(生成物スキーマ)は人間レビュー対象としてGlobal Constraintsに明記
