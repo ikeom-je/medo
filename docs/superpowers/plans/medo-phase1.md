@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(GCPカタログ根拠付き)が Claude Code と agy の両ホストで通る What/Why縦切りMVP(core + 最小ETL + `medo` CLI + Skill 3本)を作る。
+**Goal:** 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(技術ナレッジ根拠付き)が Claude Code と agy の両ホストで通る What/Why縦切りMVP(core + `medo` CLI + Skill 3本)を作る。
 
-**Architecture:** ホスト非依存の `medo_core`(要件・カタログ・生成物・ストレージ)を中心に、`medo` CLI が決定論的な事実と計算を提供し、Skill(ホストLLMが実行する手順書)が生成的な部分を担う。ETLはリリースノートBQ公開データセットとBilling Catalog APIからカタログを更新し、Gemini Flashは構造化専任。
+**Architecture:** ホスト非依存の `medo_core`(要件・ナレッジ・生成物・ストレージ)を中心に、`medo` CLI が決定論的な事実と計算を提供し、Skill(ホストLLMが実行する手順書)が生成的な部分を担う。
 
 **Tech Stack:** Python 3.12+ / uv workspace / pydantic v2 / typer / pytest / google-cloud-firestore / google-cloud-bigquery / google-cloud-billing / google-genai / PyYAML / Marp(フェーズ2)
 
@@ -13,9 +13,8 @@
 - Python >= 3.12、パッケージ管理は uv(uv workspace モノレポ)
 - pydantic >= 2.7、typer >= 0.12、pytest >= 8
 - 数値・ステータス(料金、launch_stage、last_verified)の通り道にLLMを挟まない
-- カタログエントリは `sources`(出典URL)必須。出典なしエントリはバリデーションで拒否
+- ナレッジエントリは `sources`(出典URL)必須。出典なしエントリはバリデーションで拒否
 - 鮮度契約: `last_verified` が30日超なら `stale: true` を全レスポンスに付与
-- ETLはバリデーション通過分のみコミット(壊れた更新で既存カタログを上書きしない)
 - CLI失敗時は非ゼロ終了+構造化エラー。推測で補完しない
 - ストレージパスは Firestore 互換(document = 偶数セグメント、collection = 奇数セグメント)
 - コミットメッセージ末尾に Co-Authored-By: Claude Fable 5 <noreply@anthropic.com> を付ける(セッションのgit規約)
@@ -39,7 +38,7 @@ medo/
 │   │   ├── config.py            # バックエンド選択(env: MEDO_BACKEND, MEDO_HOME)
 │   │   ├── storage.py           # Storage Protocol + LocalJsonStorage + FirestoreStorage
 │   │   ├── requirements.py      # RequirementsDoc + RequirementsStore(バージョン管理・diff)
-│   │   ├── catalog.py           # CatalogEntry + CatalogStore(鮮度判定・検索)
+│   │   │   ├── knowledge.py         # KnowledgeEntry + KnowledgeStore / ProjectKnowledgeEntry
 │   │   ├── facts.py             # Fact + FactStore(kind別出典検証・180日stale)(Task 6c)
 │   │   ├── artifacts.py         # Artifact + ArtifactStore(mini-prfaq/prfaq/fermi、引用ファクト)(Task 6d拡張)
 │   │   ├── fermi.py             # フェルミ推定の決定論計算(Task 6e)
@@ -47,7 +46,7 @@ medo/
 │   └── tests/
 │       ├── test_storage.py
 │       ├── test_requirements.py
-│       ├── test_catalog.py
+│       ├── test_knowledge.py
 │       ├── test_facts.py
 │       ├── test_artifacts.py
 │       ├── test_fermi.py
@@ -56,18 +55,8 @@ medo/
 │   ├── pyproject.toml           # medo-cli パッケージ(console_script: medo)
 │   ├── src/medo_cli/
 │   │   ├── __init__.py
-│   │   └── main.py              # typer app: requirements / facts / fermi / catalog / artifacts / status / etl
+│   │   │   └── main.py              # typer app: requirements / facts / fermi / knowledge / artifacts / status
 │   └── tests/test_cli.py
-├── etl/
-│   ├── pyproject.toml           # medo-etl パッケージ
-│   ├── services.yaml            # 対象サービスリスト(AI/ML重点)
-│   ├── src/medo_etl/
-│   │   ├── __init__.py
-│   │   ├── release_notes.py     # BQ公開データセットからの取得
-│   │   ├── structure.py         # Gemini Flashによる構造化(注入可能なgenerate関数)
-│   │   ├── skus.py              # Billing Catalog APIからのSKUスナップショット
-│   │   └── pipeline.py          # 取得→構造化→バリデーション→upsert→差分レポート
-│   └── tests/
 │       ├── test_release_notes.py
 │       ├── test_structure.py
 │       ├── test_skus.py
@@ -75,7 +64,7 @@ medo/
 └── skills/
     ├── src/
     │   ├── hearing.md           # 業界・課題・経営思想/方針の構造化(共通md、frontmatter付き)
-    │   ├── propose-options.md   # 市場ファクト+フェルミ+カタログ根拠→打ち手ミニPRFAQ候補セット
+    │   ├── propose-options.md   # 市場ファクト+フェルミ+ナレッジ根拠→打ち手ミニPRFAQ候補セット
     │   └── grow-prfaq.md        # 合意案を完全版PRFAQへ育成
     ├── build.py                 # dist/claude/<name>/SKILL.md と dist/agy/<name>.md を生成
     └── tests/test_build.py
@@ -84,7 +73,6 @@ medo/
 ```
 
 **設計メモ(スペックとの対応):**
-- カタログの論理IDは `{service}/{feature}` だが、ストレージ上は `catalog/{service}__{feature}`(2セグメント)に平坦化する。Firestoreのコレクション一覧・ローカルのファイル一覧の両方で `list("catalog")` が単純に動くため。
 - SKUスナップショットは `sku_snapshots/{service}` に1サービス1ドキュメントで保存(フェーズ2のpricing計算機が消費)。
 - 生成物の実体(markdown)はフェーズ1ではドキュメント内にインライン保存(GCSはフェーズ2)。
 
@@ -96,13 +84,12 @@ medo/
 - Create: `pyproject.toml`(ルート)
 - Create: `core/pyproject.toml`, `core/src/medo_core/__init__.py`
 - Create: `cli/pyproject.toml`, `cli/src/medo_cli/__init__.py`
-- Create: `etl/pyproject.toml`, `etl/src/medo_etl/__init__.py`
-- Create: `.gitignore`
+- - Create: `.gitignore`
 - Test: `core/tests/test_smoke.py`
 
 **Interfaces:**
 - Consumes: なし
-- Produces: `medo_core` / `medo_cli` / `medo_etl` パッケージがimport可能な uv workspace。以降の全タスクは `uv run pytest` でテストを実行する
+- Produces: `medo_core` / `medo_cli` パッケージがimport可能な uv workspace。以降の全タスクは `uv run pytest` でテストを実行する
 
 - [x] **Step 1: ルート pyproject.toml を作成**
 
@@ -114,7 +101,7 @@ description = "Medo(目処) — Google Cloud上流工程Agent"
 requires-python = ">=3.12"
 
 [tool.uv.workspace]
-members = ["core", "cli", "etl"]
+members = ["core", "cli"]
 
 [tool.uv.sources]
 medo-core = { workspace = true }
@@ -123,7 +110,7 @@ medo-core = { workspace = true }
 dev = ["pytest>=8", "ruff>=0.5"]
 
 [tool.pytest.ini_options]
-testpaths = ["core/tests", "cli/tests", "etl/tests", "skills/tests"]
+testpaths = ["core/tests", "cli/tests", "skills/tests"]
 
 [tool.ruff]
 line-length = 100
@@ -169,7 +156,7 @@ packages = ["src/medo_core"]
 `core/src/medo_core/__init__.py`:
 
 ```python
-"""Medo core: 要件・カタログ・生成物のドメインロジック(決定論層)。"""
+"""Medo core: 要件・ナレッジ・生成物のドメインロジック(決定論層)。"""
 ```
 
 - [x] **Step 4: cli パッケージを作成**
@@ -203,57 +190,6 @@ packages = ["src/medo_cli"]
 """medo CLI: 事実と計算をホストLLMに提供する決定論的インターフェース。"""
 ```
 
-- [x] **Step 5: etl パッケージを作成**
-
-`etl/pyproject.toml`:
-
-```toml
-[project]
-name = "medo-etl"
-version = "0.1.0"
-requires-python = ">=3.12"
-dependencies = [
-    "medo-core",
-    "google-cloud-bigquery>=3.25",
-    "google-cloud-billing>=1.13",
-    "google-genai>=1.0",
-]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/medo_etl"]
-```
-
-`etl/src/medo_etl/__init__.py`:
-
-```python
-"""Medo ETL: 公式ソースからカタログを更新する。Gemini Flashは構造化専任。"""
-```
-
-- [x] **Step 6: スモークテストを書く**
-
-`core/tests/test_smoke.py`:
-
-```python
-def test_packages_importable():
-    import medo_core  # noqa: F401
-```
-
-- [x] **Step 7: 依存解決とテスト実行**
-
-Run: `cd /home/pi/develop/medo && uv sync --all-packages && uv run pytest core/tests/test_smoke.py -v`
-Expected: PASS(1 passed)
-
-- [x] **Step 8: コミット**
-
-```bash
-git add pyproject.toml .gitignore core/ cli/ etl/ uv.lock
-git commit -m "feat: uv workspaceモノレポ土台(core/cli/etl)"
-```
-
 ---
 
 ### Task 2: Storage(Protocol + ローカルJSON + Firestore)
@@ -284,21 +220,21 @@ from medo_core.storage import FirestoreStorage, LocalJsonStorage
 
 def test_local_put_get_roundtrip(tmp_path: Path):
     s = LocalJsonStorage(tmp_path)
-    s.put("catalog/vertex-ai__context-caching", {"service": "vertex-ai"})
-    assert s.get("catalog/vertex-ai__context-caching") == {"service": "vertex-ai"}
+    s.put("facts/fact-1", {"value": 100})
+    assert s.get("facts/fact-1") == {"value": 100}
 
 
 def test_local_get_missing_returns_none(tmp_path: Path):
     s = LocalJsonStorage(tmp_path)
-    assert s.get("catalog/nothing") is None
+    assert s.get("facts/nothing") is None
 
 
 def test_local_list_returns_document_paths(tmp_path: Path):
     s = LocalJsonStorage(tmp_path)
-    s.put("catalog/a__x", {"v": 1})
-    s.put("catalog/b__y", {"v": 2})
+    s.put("facts/a__x", {"v": 1})
+    s.put("facts/b__y", {"v": 2})
     s.put("projects/p1/requirements/v1", {"v": 3})
-    assert sorted(s.list("catalog")) == ["catalog/a__x", "catalog/b__y"]
+    assert sorted(s.list("facts")) == ["facts/a__x", "facts/b__y"]
     assert s.list("projects/p1/requirements") == ["projects/p1/requirements/v1"]
     assert s.list("empty") == []
 
@@ -314,10 +250,10 @@ def test_firestore_storage_delegates_to_client():
     client.collection.return_value.list_documents.return_value = [doc_ref]
 
     s = FirestoreStorage(client)
-    assert s.get("catalog/a__x") == {"service": "vertex-ai"}
-    s.put("catalog/a__x", {"service": "v"})
+    assert s.get("facts/a__x") == {"v": 1}
+    s.put("facts/a__x", {"v": 2})
     client.document.return_value.set.assert_called_once_with({"service": "v"})
-    assert s.list("catalog") == ["catalog/a__x"]
+    assert s.list("facts") == ["facts/a__x"]
 
 
 def test_firestore_get_missing_returns_none():
@@ -325,7 +261,7 @@ def test_firestore_get_missing_returns_none():
     snap = MagicMock()
     snap.exists = False
     client.document.return_value.get.return_value = snap
-    assert FirestoreStorage(client).get("catalog/none") is None
+    assert FirestoreStorage(client).get("facts/none") is None
 ```
 
 - [x] **Step 2: テストが失敗することを確認**
@@ -634,180 +570,9 @@ git commit -m "feat(core): 要件ドキュメントのバージョン管理とdi
 
 ---
 
-### Task 4: カタログ(CatalogEntry + CatalogStore)
+### Task 4: Knowledge層(技術ナレッジ + 案件固有ナレッジ)
 
-**Files:**
-- Create: `core/src/medo_core/catalog.py`
-- Test: `core/tests/test_catalog.py`
-
-**Interfaces:**
-- Consumes: `Storage`(Task 2)
-- Produces:
-  - `CatalogEntry(service, feature, launch_stage: Literal["GA","Preview","Deprecated"], since: str|None, summary, pricing_refs=[], caveats=[], sources: list[str](1件以上必須), last_verified: str)` — 日付はISO文字列(`YYYY-MM-DD`)
-  - `CatalogEntry.entry_id` プロパティ → `"{service}__{feature}"`
-  - `CatalogEntry.is_stale(today: date | None = None, threshold_days: int = 30) -> bool`
-  - `CatalogStore(storage)`:
-    - `upsert(entry: CatalogEntry) -> None`(パス `catalog/{entry_id}`)
-    - `get(service: str, feature: str) -> CatalogEntry | None`
-    - `search(query: str = "", service: str | None = None, limit: int = 10) -> list[CatalogEntry]`(feature/summary/caveatsの部分一致・大文字小文字無視)
-
-- [x] **Step 1: 失敗するテストを書く**
-
-`core/tests/test_catalog.py`:
-
-```python
-from datetime import date
-from pathlib import Path
-
-import pytest
-from medo_core.catalog import CatalogEntry, CatalogStore
-from medo_core.storage import LocalJsonStorage
-from pydantic import ValidationError
-
-
-def _entry(**kw) -> CatalogEntry:
-    base = dict(
-        service="vertex-ai",
-        feature="context-caching",
-        launch_stage="GA",
-        since="2025-11-01",
-        summary="プロンプトの共通部分をキャッシュして入力コストを削減する",
-        sources=["https://cloud.google.com/vertex-ai/docs/release-notes"],
-        last_verified="2026-07-01",
-    )
-    base.update(kw)
-    return CatalogEntry(**base)
-
-
-@pytest.fixture
-def store(tmp_path: Path) -> CatalogStore:
-    return CatalogStore(LocalJsonStorage(tmp_path))
-
-
-def test_entry_id():
-    assert _entry().entry_id == "vertex-ai__context-caching"
-
-
-def test_sources_required():
-    with pytest.raises(ValidationError):
-        _entry(sources=[])
-
-
-def test_stale_when_older_than_30_days():
-    e = _entry(last_verified="2026-05-01")
-    assert e.is_stale(today=date(2026, 7, 5)) is True
-    assert _entry(last_verified="2026-06-20").is_stale(today=date(2026, 7, 5)) is False
-
-
-def test_upsert_and_get(store: CatalogStore):
-    store.upsert(_entry())
-    got = store.get("vertex-ai", "context-caching")
-    assert got is not None and got.launch_stage == "GA"
-    assert store.get("vertex-ai", "nashi") is None
-
-
-def test_search_matches_feature_summary_caveats(store: CatalogStore):
-    store.upsert(_entry())
-    store.upsert(
-        _entry(
-            feature="batch-prediction",
-            summary="バッチ推論",
-            caveats=["リージョン制限あり"],
-        )
-    )
-    store.upsert(_entry(service="cloud-run", feature="gpu", summary="GPUサポート"))
-
-    assert [e.feature for e in store.search("caching")] == ["context-caching"]
-    assert [e.feature for e in store.search("リージョン")] == ["batch-prediction"]
-    assert {e.service for e in store.search("", service="vertex-ai")} == {"vertex-ai"}
-    assert len(store.search("")) == 3
-    assert len(store.search("", limit=2)) == 2
-```
-
-- [x] **Step 2: テストが失敗することを確認**
-
-Run: `uv run pytest core/tests/test_catalog.py -v`
-Expected: FAIL(ModuleNotFoundError: medo_core.catalog)
-
-- [x] **Step 3: 実装**
-
-`core/src/medo_core/catalog.py`:
-
-```python
-"""鮮度メタデータ付きカタログ。出典必須・金額は焼き込まない(SKU参照のみ)。"""
-
-from datetime import date
-from typing import Literal
-
-from pydantic import BaseModel, Field
-
-from medo_core.storage import Storage
-
-STALE_THRESHOLD_DAYS = 30
-
-LaunchStage = Literal["GA", "Preview", "Deprecated"]
-
-
-class CatalogEntry(BaseModel):
-    service: str
-    feature: str
-    launch_stage: LaunchStage
-    since: str | None = None
-    summary: str
-    pricing_refs: list[str] = Field(default_factory=list)
-    caveats: list[str] = Field(default_factory=list)
-    sources: list[str] = Field(min_length=1)
-    last_verified: str
-
-    @property
-    def entry_id(self) -> str:
-        return f"{self.service}__{self.feature}"
-
-    def is_stale(self, today: date | None = None, threshold_days: int = STALE_THRESHOLD_DAYS) -> bool:
-        today = today or date.today()
-        verified = date.fromisoformat(self.last_verified)
-        return (today - verified).days > threshold_days
-
-
-class CatalogStore:
-    def __init__(self, storage: Storage):
-        self._storage = storage
-
-    def upsert(self, entry: CatalogEntry) -> None:
-        self._storage.put(f"catalog/{entry.entry_id}", entry.model_dump(mode="json"))
-
-    def get(self, service: str, feature: str) -> CatalogEntry | None:
-        raw = self._storage.get(f"catalog/{service}__{feature}")
-        return CatalogEntry.model_validate(raw) if raw else None
-
-    def search(self, query: str = "", service: str | None = None, limit: int = 10) -> list[CatalogEntry]:
-        q = query.lower()
-        results: list[CatalogEntry] = []
-        for path in self._storage.list("catalog"):
-            raw = self._storage.get(path)
-            entry = CatalogEntry.model_validate(raw)
-            if service and entry.service != service:
-                continue
-            haystack = " ".join([entry.feature, entry.summary, *entry.caveats]).lower()
-            if q and q not in haystack:
-                continue
-            results.append(entry)
-            if len(results) >= limit:
-                break
-        return results
-```
-
-- [x] **Step 4: テストが通ることを確認**
-
-Run: `uv run pytest core/tests/test_catalog.py -v`
-Expected: PASS(5 passed)
-
-- [x] **Step 5: コミット**
-
-```bash
-git add core/src/medo_core/catalog.py core/tests/test_catalog.py
-git commit -m "feat(core): 鮮度判定付きカタログストア"
-```
+詳細は `docs/superpowers/plans/2026-07-30-knowledge-layer.md` の Task 1〜3 を参照。
 
 ---
 
@@ -820,7 +585,7 @@ git commit -m "feat(core): 鮮度判定付きカタログストア"
 **Interfaces:**
 - Consumes: `Storage`(Task 2)、`RequirementsStore.latest_version`(Task 3)
 - Produces:
-  - `Artifact(project, type: Literal["architecture","slides","mock","comparison"], version=1, requirements_version: int, cited_catalog_entries: list[str]=[], generated_by: Literal["claude","gemini"]|None=None, content: str)`
+  - `Artifact(project, type: Literal["architecture","slides","mock","comparison"], version=1, requirements_version: int, cited_knowledge: list[str]=[], generated_by: Literal["claude","gemini"]|None=None, content: str)`
   - `ArtifactStore(storage)`:
     - `save(project_id: str, artifact: Artifact) -> str`(type別にversion自動採番。保存パス `projects/{id}/artifacts/{type}-v{n}`。返り値は `"{type}-v{n}"`)
     - `get(project_id: str, artifact_id: str) -> Artifact | None`
@@ -849,7 +614,7 @@ def _artifact(**kw) -> Artifact:
         project="yoyaku",
         type="architecture",
         requirements_version=1,
-        cited_catalog_entries=["vertex-ai__context-caching"],
+        cited_knowledge=["tech-1"],
         generated_by="claude",
         content="# アーキ案A\n...",
     )
@@ -889,7 +654,7 @@ Expected: FAIL(ModuleNotFoundError: medo_core.artifacts)
 `core/src/medo_core/artifacts.py`:
 
 ```python
-"""生成物。必ず要件バージョンと引用カタログエントリに紐づく(なぜこの提案かを追跡可能)。"""
+"""生成物。必ず要件バージョンと引用ナレッジエントリに紐づく(なぜこの提案かを追跡可能)。"""
 
 from __future__ import annotations
 
@@ -907,7 +672,7 @@ class Artifact(BaseModel):
     type: ArtifactType
     version: int = 1
     requirements_version: int
-    cited_catalog_entries: list[str] = Field(default_factory=list)
+    cited_knowledge: list[str] = Field(default_factory=list)
     generated_by: Literal["claude", "gemini"] | None = None
     content: str
 
@@ -968,20 +733,20 @@ git commit -m "feat(core): 要件バージョン紐づけ付き生成物スト�
 
 ---
 
-### Task 6: medo CLI(requirements / catalog / artifacts)
+### Task 6: medo CLI(requirements / knowledge / artifacts)
 
 **Files:**
 - Create: `cli/src/medo_cli/main.py`
 - Test: `cli/tests/test_cli.py`
 
 **Interfaces:**
-- Consumes: `get_storage()`(Task 2)、`RequirementsStore`(Task 3)、`CatalogStore`(Task 4)、`ArtifactStore`(Task 5)
+- Consumes: `get_storage()`(Task 2)、`RequirementsStore`(Task 3)、`KnowledgeStore`(Task 4)、`ArtifactStore`(Task 5)
 - Produces: console script `medo`。Skillが呼ぶコマンド群:
   - `medo requirements save --project <id> --file <yaml>` → `saved: v<n>` を出力
   - `medo requirements get --project <id> [--version n] [--format json|digest]`
   - `medo requirements diff --project <id>`(要件差分+陳腐化した生成物一覧をJSONで出力)
-  - `medo catalog search <query> [--service s] [--limit n] [--format json|digest]`(各行/各要素に `stale` フラグ)
-  - `medo catalog get <service> <feature> [--format json|digest]`
+  - `medo knowledge search <query> [--service s] [--limit n] [--format json|digest]`(各行/各要素に `stale` フラグ)
+  - `medo knowledge get <service> <feature> [--format json|digest]`
   - `medo artifacts save --project <id> --type <t> --file <md> --cites a,b [--generated-by claude|gemini] --requirements-version <n>` → `saved: <artifact_id>`
   - `medo artifacts list --project <id>`
   - エラー時: stderrに `error: <理由>`、終了コード1
@@ -1064,30 +829,30 @@ def test_requirements_get_missing_project_fails(medo_home: Path):
     assert "error:" in result.output
 
 
-def test_catalog_search_marks_stale(medo_home: Path):
-    from medo_core.catalog import CatalogEntry, CatalogStore
+def test_knowledge_search_marks_stale(medo_home: Path):
+    from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
     from medo_core.storage import LocalJsonStorage
 
-    CatalogStore(LocalJsonStorage(medo_home)).upsert(CatalogEntry(**ENTRY))
-    result = runner.invoke(app, ["catalog", "search", "caching", "--format", "json"])
+    KnowledgeStore(LocalJsonStorage(medo_home)).upsert(KnowledgeEntry(**ENTRY))
+    result = runner.invoke(app, ["knowledge", "search", "caching", "--format", "json"])
     assert result.exit_code == 0
     items = json.loads(result.output)
     assert items[0]["entry"]["feature"] == "context-caching"
     assert items[0]["stale"] is True
 
 
-def test_catalog_get_digest_and_json_format(medo_home: Path):
-    from medo_core.catalog import CatalogEntry, CatalogStore
+def test_knowledge_get_digest_and_json_format(medo_home: Path):
+    from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
     from medo_core.storage import LocalJsonStorage
 
-    CatalogStore(LocalJsonStorage(medo_home)).upsert(CatalogEntry(**ENTRY))
+    KnowledgeStore(LocalJsonStorage(medo_home)).upsert(KnowledgeEntry(**ENTRY))
 
-    result = runner.invoke(app, ["catalog", "get", "vertex-ai", "context-caching", "--format", "digest"])
+    result = runner.invoke(app, ["knowledge", "get", "vertex-ai", "context-caching", "--format", "digest"])
     assert result.exit_code == 0
     assert "vertex-ai__context-caching" in result.output
     assert "[STALE]" in result.output
 
-    result = runner.invoke(app, ["catalog", "get", "vertex-ai", "context-caching", "--format", "json"])
+    result = runner.invoke(app, ["knowledge", "get", "vertex-ai", "context-caching", "--format", "json"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["entry"]["feature"] == "context-caching"
@@ -1107,8 +872,8 @@ def test_requirements_save_invalid_yaml_fails(medo_home: Path):
     assert "error:" in result.output
 
 
-def test_catalog_get_missing_entry_fails(medo_home: Path):
-    result = runner.invoke(app, ["catalog", "get", "vertex-ai", "nashi"])
+def test_knowledge_get_missing_entry_fails(medo_home: Path):
+    result = runner.invoke(app, ["knowledge", "get", "vertex-ai", "nashi"])
     assert result.exit_code == 1
     assert "error:" in result.output
 
@@ -1190,16 +955,16 @@ from typing import Literal
 import typer
 import yaml
 from medo_core.artifacts import Artifact, ArtifactStore
-from medo_core.catalog import CatalogStore
+from medo_core.knowledge import KnowledgeStore
 from medo_core.config import get_storage
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 
 app = typer.Typer(no_args_is_help=True, help="Medo(目処) — Google Cloud上流工程Agent CLI")
 requirements_app = typer.Typer(no_args_is_help=True)
-catalog_app = typer.Typer(no_args_is_help=True)
+knowledge_app = typer.Typer(no_args_is_help=True)
 artifacts_app = typer.Typer(no_args_is_help=True)
 app.add_typer(requirements_app, name="requirements", help="要件ドキュメント(バージョン管理)")
-app.add_typer(catalog_app, name="catalog", help="鮮度メタ付きカタログ照会")
+app.add_typer(knowledge_app, name="knowledge", help="鮮度メタ付きナレッジ照会")
 app.add_typer(artifacts_app, name="artifacts", help="生成物の保存・一覧")
 
 
@@ -1267,14 +1032,14 @@ def _entry_payload(entry) -> dict:
     return {"entry": entry.model_dump(mode="json"), "stale": entry.is_stale()}
 
 
-@catalog_app.command("search")
-def catalog_search(
+@knowledge_app.command("search")
+def knowledge_search(
     query: str = typer.Argument(""),
     service: str | None = typer.Option(None),
     limit: int = typer.Option(10),
     format: Literal["json", "digest"] = typer.Option("digest"),
 ):
-    entries = CatalogStore(get_storage()).search(query, service=service, limit=limit)
+    entries = KnowledgeStore(get_storage()).search(query, service=service, limit=limit)
     if format == "json":
         typer.echo(json.dumps([_entry_payload(e) for e in entries], ensure_ascii=False, indent=2))
         return
@@ -1286,15 +1051,15 @@ def catalog_search(
         typer.echo(f"{e.entry_id} [{e.launch_stage}]{stale} {e.summary[:60]}")
 
 
-@catalog_app.command("get")
-def catalog_get(
+@knowledge_app.command("get")
+def knowledge_get(
     service: str,
     feature: str,
     format: Literal["json", "digest"] = typer.Option("json"),
 ):
-    entry = CatalogStore(get_storage()).get(service, feature)
+    entry = KnowledgeStore(get_storage()).get(service, feature)
     if entry is None:
-        _fail(f"カタログに {service}/{feature} が見つかりません")
+        _fail(f"ナレッジに {service}/{feature} が見つかりません")
     if format == "json":
         typer.echo(json.dumps(_entry_payload(entry), ensure_ascii=False, indent=2))
         return
@@ -1307,7 +1072,7 @@ def artifacts_save(
     project: str = typer.Option(...),
     artifact_type: str = typer.Option(..., "--type"),
     file: Path = typer.Option(..., exists=True, readable=True),
-    cites: str = typer.Option("", help="引用カタログエントリID(カンマ区切り)"),
+    cites: str = typer.Option("", help="引用ナレッジエントリID(カンマ区切り)"),
     generated_by: str | None = typer.Option(None),
     requirements_version: int = typer.Option(...),
 ):
@@ -1316,7 +1081,7 @@ def artifacts_save(
             project=project,
             type=artifact_type,
             requirements_version=requirements_version,
-            cited_catalog_entries=[c for c in cites.split(",") if c],
+            cited_knowledge=[c for c in cites.split(",") if c],
             generated_by=generated_by,
             content=file.read_text(encoding="utf-8"),
         )
@@ -1340,25 +1105,25 @@ if __name__ == "__main__":
     app()
 ```
 
-**設計メモ(実装時のレビューで追加した箇所)**: `--format` は `Literal["json", "digest"]` でtyperのChoiceとして検証し、不正値はUsageエラー(exit 2)で拒否する。`catalog get` は `catalog search` と同じdigest整形を持つ。`requirements save` のYAML読み込みはパース失敗・非マッピング・スキーマ不正のすべてを`try`内で捕捉して`error:`契約を満たす。`artifacts_save` の内部パラメータ名は `artifact_type`(CLIフラグは `--type` のまま)でbuiltin shadowingを避ける。
+**設計メモ(実装時のレビューで追加した箇所)**: `--format` は `Literal["json", "digest"]` でtyperのChoiceとして検証し、不正値はUsageエラー(exit 2)で拒否する。`knowledge get` は `knowledge search` と同じdigest整形を持つ。`requirements save` のYAML読み込みはパース失敗・非マッピング・スキーマ不正のすべてを`try`内で捕捉して`error:`契約を満たす。`artifacts_save` の内部パラメータ名は `artifact_type`(CLIフラグは `--type` のまま)でbuiltin shadowingを避ける。
 
 **テストfixtureの見直し(PR#11レビュー対応)**: 当初のfixtureは「飲食店の予約システム」という汎用プレースホルダーだったが、MedoのAI/ML中心のGCPアーキ提案という価値提案を反映していないという指摘を受け、agyによる設計ドキュメント調査(product.md・medo-design.md)を踏まえ「多言語対応AI自動音声予約(電話応対の自動化・ノーショウ予測)」という、実際にVertex AIのcontext-caching/batch-prediction的な機能が根拠として効くシナリオに更新した(Task 3/5で既に確定した`project: yoyaku`のIDと`vertex-ai__context-caching`エントリは踏襲し、既存テストとの一貫性を保っている)。
 
 - [x] **Step 4: テストが通ることを確認**
 
 Run: `uv run pytest cli/tests/test_cli.py -v`
-Expected: PASS(10 passed。契約の網羅性向上のためcatalog get digest/json・不正format・不正YAML・catalog get未登録・requirements diff未登録・artifacts list空/保存後のテストをレビューで追加)
+Expected: PASS(10 passed。契約の網羅性向上のためknowledge get digest/json・不正format・不正YAML・knowledge get未登録・requirements diff未登録・artifacts list空/保存後のテストをレビューで追加)
 
 - [x] **Step 5: インストール済みコマンドとしての動作確認**
 
 Run: `uv run medo --help`
-Expected: `requirements` / `catalog` / `artifacts` サブコマンドが表示される
+Expected: `requirements` / `knowledge` / `artifacts` サブコマンドが表示される
 
 - [x] **Step 6: コミット**
 
 ```bash
 git add cli/src/medo_cli/main.py cli/tests/test_cli.py
-git commit -m "feat(cli): medoコマンド(requirements/catalog/artifacts)"
+git commit -m "feat(cli): medoコマンド(requirements/knowledge/artifacts)"
 ```
 
 ---
@@ -1859,7 +1624,7 @@ class Artifact(BaseModel):
     type: ArtifactType
     version: int = 1
     requirements_version: int
-    cited_catalog_entries: list[str] = Field(default_factory=list)
+    cited_knowledge: list[str] = Field(default_factory=list)
     cited_facts: list[str] = Field(default_factory=list)
     options: list[OptionMeta] = Field(default_factory=list)  # mini-prfaq: 打ち手候補メタ
     grown_from: GrownFrom | None = None  # prfaq: 育成元
@@ -1886,7 +1651,7 @@ def artifacts_save(
     project: str = typer.Option(...),
     artifact_type: str = typer.Option(..., "--type"),
     file: Path = typer.Option(..., exists=True, readable=True),
-    cites: str = typer.Option("", help="引用カタログエントリID(カンマ区切り)"),
+    cites: str = typer.Option("", help="引用ナレッジエントリID(カンマ区切り)"),
     cites_facts: str = typer.Option("", help="引用ファクトID(カンマ区切り)"),
     options: str = typer.Option("", help="mini-prfaq用: name:approach_type をカンマ区切り"),
     grown_from: str = typer.Option("", help="prfaq用: <mini-prfaq-vN>:<打ち手名>"),
@@ -1906,7 +1671,7 @@ def artifacts_save(
             project=project,
             type=artifact_type,
             requirements_version=requirements_version,
-            cited_catalog_entries=[c for c in cites.split(",") if c],
+            cited_knowledge=[c for c in cites.split(",") if c],
             cited_facts=[c for c in cites_facts.split(",") if c],
             options=option_metas,
             grown_from=gf,
@@ -2299,10 +2064,10 @@ git commit -m "feat(core): フェルミ推定の決定論計算と再計算可�
 - Test: `core/tests/test_status.py`、`cli/tests/test_cli.py`(追記)
 
 **Interfaces:**
-- Consumes: `RequirementsStore`(Task 3/6b)、`CatalogStore`(Task 4)、`FactStore`(Task 6c)、`ArtifactStore`(Task 6d)
+- Consumes: `RequirementsStore`(Task 3/6b)、`KnowledgeStore`(Task 4)、`FactStore`(Task 6c)、`ArtifactStore`(Task 6d)
 - Produces:
   - `project_status(storage, project_id, today=None) -> dict` — requirements / facts / artifacts(typeごと最新のみ・type昇順)/ next_step を決定論的に返す
-  - 陳腐化判定: `requirements_version` が古い、または引用ファクト(180日)・引用カタログエントリ(30日)にstale/欠落がある場合
+  - 陳腐化判定: `requirements_version` が古い、または引用ファクト(180日)・引用ナレッジエントリ(30日)にstale/欠落がある場合
   - `next_step`(優先順): 要件なし→`"hearing"` / 最新生成物に陳腐化→`"regenerate-stale-artifacts"` / mini-prfaqなし→`"propose-options"` / prfaqなし→`"grow-prfaq"` / それ以外→`"up-to-date"`
   - `stale_artifact_ids(storage, project_id, today=None) -> list[str]`(requirements diff CLIが使用)
   - CLI: `medo status --project <id>` がJSONで現在地を出力(要件未作成はエラーではなく `next_step: "hearing"`)
@@ -2315,7 +2080,7 @@ git commit -m "feat(core): フェルミ推定の決定論計算と再計算可�
 from datetime import date
 
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom
-from medo_core.catalog import CatalogEntry, CatalogStore
+from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
 from medo_core.facts import Fact, FactStore
 from medo_core.requirements import ConfidenceItem, FunctionalRequirement, RequirementsDoc, RequirementsStore
 from medo_core.status import project_status, stale_artifact_ids
@@ -2399,14 +2164,14 @@ def test_stale_cited_fact_triggers_regenerate(tmp_path):
     assert stale_artifact_ids(s, "yoyaku", today=TODAY) == ["mini-prfaq-v1"]
 
 
-def test_stale_cited_catalog_entry_triggers_regenerate(tmp_path):
+def test_stale_cited_knowledge_entry_triggers_regenerate(tmp_path):
     s = LocalJsonStorage(tmp_path)
     RequirementsStore(s).save("yoyaku", _doc())
-    CatalogStore(s).upsert(CatalogEntry(
+    KnowledgeStore(s).upsert(KnowledgeEntry(
         service="vertex-ai", feature="context-caching", launch_stage="GA",
         summary="x", sources=["https://cloud.google.com/"], last_verified="2020-01-01",
     ))
-    ArtifactStore(s).save("yoyaku", _mini(cited_catalog_entries=["vertex-ai__context-caching"]))
+    ArtifactStore(s).save("yoyaku", _mini(cited_knowledge=["tech-1"]))
     assert project_status(s, "yoyaku", today=TODAY)["next_step"] == "regenerate-stale-artifacts"
 
 
@@ -2439,14 +2204,14 @@ from __future__ import annotations
 from datetime import date
 
 from medo_core.artifacts import Artifact, ArtifactStore
-from medo_core.catalog import CatalogStore
+from medo_core.knowledge import KnowledgeStore
 from medo_core.facts import Fact, FactStore
 from medo_core.requirements import RequirementsStore
 from medo_core.storage import Storage
 
 
-def _catalog_entry_stale(store: CatalogStore, entry_id: str, today: date | None) -> bool:
-    """引用カタログエントリがstaleまたは欠落ならTrue。"""
+def _knowledge_entry_stale(store: KnowledgeStore, entry_id: str, today: date | None) -> bool:
+    """引用ナレッジエントリがstaleまたは欠落ならTrue。"""
     if "__" not in entry_id:
         return True
     service, feature = entry_id.split("__", 1)
@@ -2458,7 +2223,7 @@ def _artifact_stale(
     artifact: Artifact,
     current_version: int,
     facts_by_id: dict[str, Fact],
-    cat_store: CatalogStore,
+    knowledge_store: KnowledgeStore,
     today: date | None,
 ) -> bool:
     if artifact.requirements_version < current_version:
@@ -2468,8 +2233,8 @@ def _artifact_stale(
         if fact is None or fact.is_stale(today=today):
             return True
     return any(
-        _catalog_entry_stale(cat_store, entry_id, today)
-        for entry_id in artifact.cited_catalog_entries
+        _knowledge_entry_stale(knowledge_store, entry_id, today)
+        for entry_id in artifact.cited_knowledge
     )
 
 
@@ -2492,7 +2257,7 @@ def project_status(storage: Storage, project_id: str, today: date | None = None)
 
     facts = FactStore(storage).list(project_id)
     facts_by_id = {f.fact_id: f for f in facts}
-    cat_store = CatalogStore(storage)
+    knowledge_store = KnowledgeStore(storage)
 
     # typeごとの最新バージョンのみを対象にする(旧版のstaleに引きずられて
     # 再生成後も up-to-date に到達できない事態を防ぐ)。type昇順で決定論的に返す
@@ -2506,7 +2271,7 @@ def project_status(storage: Storage, project_id: str, today: date | None = None)
             "id": f"{a.type}-v{a.version}",
             "type": a.type,
             "requirements_version": a.requirements_version,
-            "stale": _artifact_stale(a, version, facts_by_id, cat_store, today),
+            "stale": _artifact_stale(a, version, facts_by_id, knowledge_store, today),
         }
         for a in sorted(latest_by_type.values(), key=lambda a: a.type)
     ]
@@ -2600,7 +2365,7 @@ Expected: 全件PASS(既存の `test_artifacts_save_and_diff_flow` も引き続�
 Medoは「ビジネスの打ち手に目処をつける」上流工程を支援する。作業は次のステージを進む:
 
     課題 ──(medo-hearing)──▶ 要件v1(背景・理念・課題)
-      ──(medo-propose-options)──▶ 市場ファクト+フェルミ推定+カタログ根拠
+      ──(medo-propose-options)──▶ 市場ファクト+フェルミ推定+ナレッジ根拠
                                    → 打ち手候補のミニPRFAQ候補セット
       ──(比較・Q&A・合意)──▶ (medo-grow-prfaq)──▶ 完全版PRFAQ(How+効果+ロードマップ)
                   ▲                                    │
@@ -2618,7 +2383,7 @@ Medoは「ビジネスの打ち手に目処をつける」上流工程を支援�
 | `hearing` | 要件が未作成 | ホストで medo-hearing Skill を実行 |
 | `propose-options` | 要件はあるが打ち手候補がない | medo-propose-options Skill を実行 |
 | `grow-prfaq` | 候補セットはあるが完全版PRFAQがない | 合意した打ち手を medo-grow-prfaq で育成 |
-| `regenerate-stale-artifacts` | 要件更新・引用ファクト/カタログの鮮度切れで生成物が陳腐化 | `medo requirements diff` で確認→再生成 |
+| `regenerate-stale-artifacts` | 要件更新・引用ファクト/ナレッジの鮮度切れで生成物が陳腐化 | `medo requirements diff` で確認→再生成 |
 | `up-to-date` | 最新要件・鮮度に生成物が追従 | フェーズ1のゴール到達(フェーズ2でスライド等に続く) |
 
 ## ステージとコマンドの対応
@@ -2626,8 +2391,8 @@ Medoは「ビジネスの打ち手に目処をつける」上流工程を支援�
 | ステージ | Skill | 主なCLI |
 |---|---|---|
 | 課題・方針の構造化 | medo-hearing | `medo requirements save/get` |
-| 打ち手候補の提案 | medo-propose-options | `medo facts save/list`、`medo fermi calc`、`medo catalog search`、`medo artifacts save --type mini-prfaq` |
-| PRFAQ育成 | medo-grow-prfaq | `medo artifacts get`、`medo catalog search`、`medo artifacts save --type prfaq` |
+| 打ち手候補の提案 | medo-propose-options | `medo facts save/list`、`medo fermi calc`、`medo knowledge search`、`medo artifacts save --type mini-prfaq` |
+| PRFAQ育成 | medo-grow-prfaq | `medo artifacts get`、`medo knowledge search`、`medo artifacts save --type prfaq` |
 | 見直し | (どこからでも) | `medo requirements diff`、`medo status`、`medo fermi calc --from-artifact` |
 ```
 
@@ -2649,19 +2414,19 @@ git commit -m "feat(core): medo status(引用根拠込みの陳腐化判定とne
 - Test: `etl/tests/test_release_notes.py`, `etl/tests/test_structure.py`
 
 **Interfaces:**
-- Consumes: `CatalogEntry`(Task 4)
+- Consumes: `KnowledgeEntry`(Task 4)
 - Produces:
   - `ReleaseNote(product_name: str, description: str, release_note_type: str, published_at: str)`
   - `fetch_release_notes(bq_client, product_names: list[str], since: str) -> list[ReleaseNote]`
   - `load_services(path: Path) -> list[ServiceConfig]`(`ServiceConfig(slug, product_name, release_notes_url)`)
-  - `structure_notes(service: ServiceConfig, notes: list[ReleaseNote], generate: Callable[[str], str], today: str) -> tuple[list[CatalogEntry], list[str]]` — `generate` はプロンプト→JSON文字列を返す注入可能関数(本番はGemini Flash)。返り値は(検証通過エントリ, 検証エラーメッセージ)。**LLM出力は必ずpydanticで検証し、通過分のみ返す**
+  - `structure_notes(service: ServiceConfig, notes: list[ReleaseNote], generate: Callable[[str], str], today: str) -> tuple[list[KnowledgeEntry], list[str]]` — `generate` はプロンプト→JSON文字列を返す注入可能関数(本番はGemini Flash)。返り値は(検証通過エントリ, 検証エラーメッセージ)。**LLM出力は必ずpydanticで検証し、通過分のみ返す**
 
 - [ ] **Step 1: services.yaml を作成**
 
 `etl/services.yaml`:
 
 ```yaml
-# カタログ対象サービス。AI/ML重点+アプリ構築定番。
+# ナレッジ対象サービス。AI/ML重点+アプリ構築定番。
 services:
   - slug: vertex-ai
     product_name: "Vertex AI"
@@ -2884,11 +2649,11 @@ Expected: FAIL(ModuleNotFoundError: medo_etl.structure)
 import json
 from typing import Callable
 
-from medo_core.catalog import CatalogEntry
+from medo_core.catalog import KnowledgeEntry
 from medo_etl.release_notes import ReleaseNote, ServiceConfig
 
 PROMPT_TEMPLATE = """\
-あなたはGoogle Cloudのリリースノートを機能カタログに構造化する係です。
+あなたはGoogle Cloudのリリースノートを機能ナレッジに構造化する係です。
 以下のリリースノート群から、アーキテクチャ検討に有用な「機能」単位のエントリを抽出し、
 JSON配列のみを出力してください。各要素のスキーマ:
 {{"feature": "kebab-case-slug", "launch_stage": "GA|Preview|Deprecated",
@@ -2911,7 +2676,7 @@ def structure_notes(
     notes: list[ReleaseNote],
     generate: Callable[[str], str],
     today: str,
-) -> tuple[list[CatalogEntry], list[str]]:
+) -> tuple[list[KnowledgeEntry], list[str]]:
     notes_text = "\n".join(
         f"- [{n.release_note_type}] ({n.published_at}) {n.description}" for n in notes
     )
@@ -2923,12 +2688,12 @@ def structure_notes(
     except json.JSONDecodeError as e:
         return [], [f"{service.slug}: LLM出力がJSONとして不正: {e}"]
 
-    entries: list[CatalogEntry] = []
+    entries: list[KnowledgeEntry] = []
     errors: list[str] = []
     for item in items:
         try:
             entries.append(
-                CatalogEntry(
+                KnowledgeEntry(
                     service=service.slug,
                     feature=item.get("feature", ""),
                     launch_stage=item.get("launch_stage"),
@@ -2985,12 +2750,12 @@ git commit -m "feat(etl): リリースノート取得とGemini構造化(検証�
 - Test: `etl/tests/test_skus.py`, `etl/tests/test_pipeline.py`
 
 **Interfaces:**
-- Consumes: `fetch_release_notes` / `structure_notes` / `load_services`(Task 7)、`CatalogStore`(Task 4)、`Storage`(Task 2)
+- Consumes: `fetch_release_notes` / `structure_notes` / `load_services`(Task 7)、`KnowledgeStore`(Task 4)、`Storage`(Task 2)
 - Produces:
   - `fetch_skus(billing_client, service_display_name: str) -> list[dict]`(各dict: `{"sku_id", "description", "category"}`)
   - `save_sku_snapshot(storage, service_slug: str, skus: list[dict], fetched_at: str) -> None`(パス `sku_snapshots/{service_slug}`)
   - `run_pipeline(storage, services, notes_by_service: dict[str, list[ReleaseNote]], generate, today: str, dry_run: bool) -> PipelineReport`(`PipelineReport(upserted: list[str], errors: list[str], skipped: int)`)
-  - CLI: `medo etl run --since YYYY-MM-DD [--services slug,slug] [--dry-run]` / `medo etl skus --service <slug>`
+  - CLI: `medo (不採用) etl run --since YYYY-MM-DD [--services slug,slug] [--dry-run]` / `medo (不採用) etl skus --service <slug>`
 
 - [ ] **Step 1: 失敗するテストを書く(skus)**
 
@@ -3053,7 +2818,7 @@ Expected: FAIL(ModuleNotFoundError: medo_etl.skus)
 `etl/src/medo_etl/skus.py`:
 
 ```python
-"""Billing Catalog APIからのSKUスナップショット。金額はカタログに焼き込まず、ここに保存する。"""
+"""Billing Catalog APIからのSKUスナップショット。金額はナレッジに焼き込まず、ここに保存する。"""
 
 from medo_core.storage import Storage
 
@@ -3095,7 +2860,7 @@ Expected: PASS(3 passed)
 ```python
 import json
 
-from medo_core.catalog import CatalogStore
+from medo_core.knowledge import KnowledgeStore
 from medo_core.storage import LocalJsonStorage
 from medo_etl.release_notes import ReleaseNote, ServiceConfig
 from medo_etl.pipeline import run_pipeline
@@ -3129,14 +2894,14 @@ def test_pipeline_upserts_validated_entries(tmp_path):
     report = run_pipeline(storage, [SERVICE], NOTES, _generate, today="2026-07-05", dry_run=False)
     assert report.upserted == ["vertex-ai__context-caching"]
     assert report.errors == []
-    assert CatalogStore(storage).get("vertex-ai", "context-caching") is not None
+    assert KnowledgeStore(storage).get("vertex-ai", "context-caching") is not None
 
 
 def test_pipeline_dry_run_does_not_write(tmp_path):
     storage = LocalJsonStorage(tmp_path)
     report = run_pipeline(storage, [SERVICE], NOTES, _generate, today="2026-07-05", dry_run=True)
     assert report.upserted == ["vertex-ai__context-caching"]
-    assert CatalogStore(storage).get("vertex-ai", "context-caching") is None
+    assert KnowledgeStore(storage).get("vertex-ai", "context-caching") is None
 
 
 def test_pipeline_collects_errors_without_aborting(tmp_path):
@@ -3163,7 +2928,7 @@ from typing import Callable
 
 from pydantic import BaseModel, Field
 
-from medo_core.catalog import CatalogStore
+from medo_core.knowledge import KnowledgeStore
 from medo_core.storage import Storage
 from medo_etl.release_notes import ReleaseNote, ServiceConfig
 from medo_etl.structure import structure_notes
@@ -3184,7 +2949,7 @@ def run_pipeline(
     dry_run: bool,
 ) -> PipelineReport:
     report = PipelineReport()
-    catalog = CatalogStore(storage)
+    catalog = KnowledgeStore(storage)
     for service in services:
         notes = notes_by_service.get(service.slug, [])
         if not notes:
@@ -3228,7 +2993,7 @@ medo-etl = { workspace = true }
 
 ```python
 etl_app = typer.Typer(no_args_is_help=True)
-app.add_typer(etl_app, name="etl", help="カタログ更新パイプライン(手動実行)")
+app.add_typer(etl_app, name="etl", help="ナレッジ更新パイプライン(手動実行)")
 
 
 @etl_app.command("run")
@@ -3393,12 +3158,12 @@ description: 業界・ビジネス状況・課題・経営思想/方針をヒア
 ```markdown
 ---
 name: medo-propose-options
-description: 要件ドキュメント(課題・方針)を起点に、市場・国策・業界動向ファクトとフェルミ推定に裏づけられた打ち手候補(2〜3案)を生成し、ミニPRFAQ候補セットとして保存する。事実はCLIが検証・保存した出典付きファクトとカタログ値に縛る。
+description: 要件ドキュメント(課題・方針)を起点に、市場・国策・業界動向ファクトとフェルミ推定に裏づけられた打ち手候補(2〜3案)を生成し、ミニPRFAQ候補セットとして保存する。事実はCLIが検証・保存した出典付きファクトとナレッジ値に縛る。
 ---
 
 # medo-propose-options: 打ち手候補をミニPRFAQで比較可能にする
 
-要件ドキュメントを入力に、ビジネスの打ち手候補を2〜3案生成する。発想は自由に、事実はファクトとカタログに縛る。
+要件ドキュメントを入力に、ビジネスの打ち手候補を2〜3案生成する。発想は自由に、事実はファクトとナレッジに縛る。
 
 ## 進め方
 
@@ -3428,15 +3193,15 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
    - 仮定(assume)は明示し、計算は自分でしない(CLIのコードが計算する)
    - 将来予測は policy/trend ファクトを成長率等の根拠に使う
 
-4. Howの目処のためカタログを検索する(複数回実行してよい):
+4. Howの目処のためナレッジを検索する(複数回実行してよい):
 
-       medo catalog search "<キーワード>" --format json
+       medo knowledge search "<キーワード>" --format json
 
 5. 打ち手候補を2〜3案作る。切り口: **既存の解決 / 破壊的業務改革 / 新規市場開拓** × **スコープ / 立ち位置 / 根本治療vs対症療法**。各案のミニPRFAQに必ず含めること:
    - 打ち手の宣言(顧客に届いた未来のプレスリリース1段落)
    - 価値仮説(What/Why)。**principles(理念・方針)との整合を明記**
    - 効果の桁感(フェルミ推定の生成物IDと結果を引用)
-   - Howの目処(カタログ根拠の要点。launch_stageと引用エントリID)
+   - Howの目処(ナレッジ根拠の要点。launch_stageと引用エントリID)
    - 主要リスク・open_questions
 
 6. 全案を1つのmarkdown(候補セット)にまとめて保存する:
@@ -3451,8 +3216,8 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
 
 ## 契約(必ず守る)
 
-- 引用する市場数値・国策・業界動向は `medo facts` に保存済みの出典付きファクトのみ。launch_stage・GCP機能の有無はカタログ値のみ
-- ファクト・カタログに `"stale": true` が付いたものを使う場合、文中に「(情報が古い可能性: <取得日/last_verified>)」と必ず注記する
+- 引用する市場数値・国策・業界動向は `medo facts` に保存済みの出典付きファクトのみ。launch_stage・GCP機能の有無はナレッジ値のみ
+- ファクト・ナレッジに `"stale": true` が付いたものを使う場合、文中に「(情報が古い可能性: <取得日/last_verified>)」と必ず注記する
 - フェルミ推定の計算をLLM(自分)で行わない。必ず `medo fermi calc` の結果を使う
 - assumed/open の課題・要件に依存する判断には「要確認」の印を付ける
 - CLIが失敗したら推測で補完せずエラー内容を報告する
@@ -3465,7 +3230,7 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
 ```markdown
 ---
 name: medo-grow-prfaq
-description: 合意した打ち手を完全版PRFAQ(技術的背景・workflow改善見込み・効果・ロードマップ付き)に育成して保存する。技術的背景はGCPカタログ根拠に縛り、育成元(grown_from)を記録する。
+description: 合意した打ち手を完全版PRFAQ(技術的背景・workflow改善見込み・効果・ロードマップ付き)に育成して保存する。技術的背景はGCPナレッジ根拠に縛り、育成元(grown_from)を記録する。
 ---
 
 # medo-grow-prfaq: 合意した打ち手を完全版PRFAQに育てる
@@ -3485,7 +3250,7 @@ description: 合意した打ち手を完全版PRFAQ(技術的背景・workflow�
        medo artifacts get --project <project-id> --id <mini-prfaq-vN>
        medo requirements get --project <project-id> --format json
 
-4. 技術的背景を深めるためカタログを検索し(`medo catalog search`)、必要に応じてファクトを追加保存する。
+4. 技術的背景を深めるためナレッジを検索し(`medo knowledge search`)、必要に応じてファクトを追加保存する。
 5. 完全版PRFAQを作る。ミニPRFAQの内容に加えて:
    - 技術的背景(GCP構成の要点。launch_stage・引用エントリID付きで、絵に描いた餅にしない)
    - workflow改善見込み(現状業務がどう変わるか)
@@ -3504,8 +3269,8 @@ description: 合意した打ち手を完全版PRFAQ(技術的背景・workflow�
 
 ## 契約(必ず守る)
 
-- launch_stage・鮮度・機能の有無はカタログ値のみ。市場数値は保存済みファクトのみを引用する
-- stale なファクト・カタログエントリを使う場合は必ず注記する
+- launch_stage・鮮度・機能の有無はナレッジ値のみ。市場数値は保存済みファクトのみを引用する
+- stale なファクト・ナレッジエントリを使う場合は必ず注記する
 - 打ち手の選択(合意)を自分で行わない。ユーザーの確認を必ず取る
 - `--grown-from` に育成元の候補セットIDと打ち手名を必ず記録する
 - CLIが失敗したら推測で補完せずエラー内容を報告する
@@ -3626,7 +3391,7 @@ git commit -m "feat(skills): hearing/propose-options/grow-prfaq Skillとビル�
 
 **Interfaces:**
 - Consumes: これまでの全タスク
-- Produces: フェーズ1完了の定義「実案件1件で 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(GCPカタログ根拠付き) が両ホストで通る」の確認記録
+- Produces: フェーズ1完了の定義「実案件1件で 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(技術ナレッジ根拠付き) が両ホストで通る」の確認記録
 
 このタスクは人間(利用者本人)との共同作業。GCP認証・課金・実案件の意思決定が絡むため自動化しない。
 
@@ -3638,21 +3403,21 @@ gcloud config get-value project         # 課金有効なプロジェクトが�
 export GOOGLE_CLOUD_PROJECT=$(gcloud config get-value project)
 ```
 
-注: BigQuery公開データセットのクエリとGemini API(`google-genai` はADC/Vertex経由または `GEMINI_API_KEY`)、Billing Catalog APIが使えること。
+注: BigQuery公開データセットのクエリとGemini API(`google-genai` はADC/Vertex経由または `GEMINI_API_KEY`)、(不採用)Billing Catalog APIが使えること。
 
-- [ ] **Step 2: ローカルバックエンドでETLをdry-run**
+- [ ] **Step 2: (不採用)ローカルバックエンドでETLをdry-run**
 
-Run: `MEDO_BACKEND=local uv run medo etl run --since 2026-06-01 --services vertex-ai --dry-run`
+Run: `MEDO_BACKEND=local uv run medo (不採用) etl run --since 2026-06-01 --services vertex-ai --dry-run`
 Expected: upserted にエントリID群、errors が空(または少数。errorsの内容を確認)
 
-- [ ] **Step 3: 本実行してカタログを確認**
+- [ ] **Step 3: 本実行してナレッジを確認**
 
-Run: `MEDO_BACKEND=local uv run medo etl run --since 2026-04-01 --services vertex-ai,cloud-run && uv run medo catalog search "" --limit 20`
-Expected: 鮮度付きカタログエントリが一覧表示される
+Run: `MEDO_BACKEND=local uv run medo (不採用) etl run --since 2026-04-01 --services vertex-ai,cloud-run && uv run medo knowledge search "" --limit 20`
+Expected: 鮮度付きナレッジエントリが一覧表示される
 
 - [ ] **Step 4: SKUスナップショットを取得**
 
-Run: `MEDO_BACKEND=local uv run medo etl skus --service vertex-ai`
+Run: `MEDO_BACKEND=local uv run medo (不採用) etl skus --service vertex-ai`
 Expected: `saved: sku_snapshots/vertex-ai (<N> SKUs)`
 
 - [ ] **Step 5: SkillをClaude Codeに配置**
@@ -3688,7 +3453,7 @@ cp -r skills/dist/claude/medo-grow-prfaq ~/.claude/skills/
 
 - [ ] **Step 8: セットアップ手順を docs/setup.md に記録してコミット**
 
-スモークで実際に使ったコマンド・環境変数・ハマりどころを `docs/setup.md` に記録する(内容はスモーク結果に依存するため、実行時に書く。「GCP前提」「ETL実行」「Skill配置(Claude Code/agy)」「What/Why縦切りの流れ」の4節を含めること)。
+スモークで実際に使ったコマンド・環境変数・ハマりどころを `docs/setup.md` に記録する(内容はスモーク結果に依存するため、実行時に書く。「GCP前提」「ナレッジ洗練(フェーズ2)」「Skill配置(Claude Code/agy)」「What/Why縦切りの流れ」の4節を含めること)。
 
 ```bash
 git add docs/setup.md
@@ -3699,7 +3464,7 @@ git commit -m "docs: フェーズ1セットアップ手順とスモーク結果"
 
 ## 自己レビュー結果
 
-- **スペック対応**: What/Why縦切りMVPの構成要素(要件拡張=background/principles/challenges、市場ファクト=kind別出典検証+180日stale、フェルミ=決定論計算+再計算、生成物=mini-prfaq候補セット/grown_from付きprfaq、status=引用根拠込み陳腐化判定、Skill 3本、最小ETL)はTask 1〜10で網羅
+- **スペック対応**: What/Why縦切りMVPの構成要素(要件拡張=background/principles/challenges、市場ファクト=kind別出典検証+180日stale、フェルミ=決定論計算+再計算、生成物=mini-prfaq候補セット/grown_from付きprfaq、status=引用根拠込み陳腐化判定、Skill 3本、)はTask 1〜10で網羅
 - **フェーズ1対象外(意図的)**: make-slides・build-mock・propose-architecture(詳細)・pricing計算機・decision-roadmap・knowledge-digest・Webアプリ・Scheduler自動化はフェーズ2以降、compare-awsはバックログ(スペックのフェーズ計画どおり)
-- **型整合**: `Fact.fact_id`=`fact-<n>`、`CatalogEntry.entry_id`=`{service}__{feature}`、生成物ID=`{type}-v{n}`、`GrownFrom{artifact, option}`、`ConfidenceItem{text, confidence}` を core / CLI / Skill 間で共通使用。日付はISO文字列で統一
+- **型整合**: `Fact.fact_id`=`fact-<n>`、`KnowledgeEntry.entry_id`=`{service}__{feature}`、生成物ID=`{type}-v{n}`、`GrownFrom{artifact, option}`、`ConfidenceItem{text, confidence}` を core / CLI / Skill 間で共通使用。日付はISO文字列で統一
 - **契約変更の扱い**: Task 6b(要件スキーマ)・6c/6e(CLI新コマンド)・6d(生成物スキーマ)は人間レビュー対象としてGlobal Constraintsに明記
