@@ -95,3 +95,13 @@ def test_diff_with_single_version(store: RequirementsStore):
     d = store.diff("yoyaku")
     assert d["from"] == 0 and d["to"] == 1
     assert d["functional_added"] == []
+
+
+def test_knowledge_backend_defaults_to_markdown():
+    doc = RequirementsDoc(project="yoyaku")
+    assert doc.knowledge_backend == "markdown"
+
+
+def test_knowledge_backend_accepts_sqlite():
+    doc = RequirementsDoc(project="yoyaku", knowledge_backend="sqlite")
+    assert doc.knowledge_backend == "sqlite"

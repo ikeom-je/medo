@@ -28,7 +28,7 @@ class Artifact(BaseModel):
     type: ArtifactType
     version: int = 1
     requirements_version: int
-    cited_catalog_entries: list[str] = Field(default_factory=list)
+    cited_knowledge: list[str] = Field(default_factory=list)
     cited_facts: list[str] = Field(default_factory=list)
     options: list[OptionMeta] = Field(default_factory=list)
     grown_from: GrownFrom | None = None

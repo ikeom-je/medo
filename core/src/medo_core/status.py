@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 from medo_core.artifacts import Artifact, ArtifactStore
-from medo_core.catalog import CatalogStore
 from medo_core.facts import Fact, FactStore
+from medo_core.knowledge import KnowledgeStore
 from medo_core.requirements import RequirementsStore
 from medo_core.storage import Storage
 
 
-def _catalog_entry_stale(store: CatalogStore, entry_id: str, today: date | None) -> bool:
-    """引用カタログエントリがstaleまたは欠落ならTrue。"""
-    if "__" not in entry_id:
+def _knowledge_entry_stale(store: KnowledgeStore, entry_id: str, today: date | None) -> bool:
+    """引用ナレッジエントリがstaleまたは欠落ならTrue。"""
+    if "-" not in entry_id:
         return True
-    service, feature = entry_id.split("__", 1)
-    entry = store.get(service, feature)
+    kind, _ = entry_id.rsplit("-", 1)
+    entry = store.get(kind, entry_id)
     return entry is None or entry.is_stale(today=today)
 
 
@@ -24,7 +25,7 @@ def _artifact_stale(
     artifact: Artifact,
     current_version: int,
     facts_by_id: dict[str, Fact],
-    cat_store: CatalogStore,
+    knowledge_store: KnowledgeStore,
     today: date | None,
 ) -> bool:
     if artifact.requirements_version < current_version:
@@ -34,12 +35,14 @@ def _artifact_stale(
         if fact is None or fact.is_stale(today=today):
             return True
     return any(
-        _catalog_entry_stale(cat_store, entry_id, today)
-        for entry_id in artifact.cited_catalog_entries
+        _knowledge_entry_stale(knowledge_store, entry_id, today)
+        for entry_id in artifact.cited_knowledge
     )
 
 
-def project_status(storage: Storage, project_id: str, today: date | None = None) -> dict:
+def project_status(
+    storage: Storage, project_id: str, knowledge_root: Path, today: date | None = None
+) -> dict:
     req_store = RequirementsStore(storage)
     version = req_store.latest_version(project_id)
     if version == 0:
@@ -58,10 +61,8 @@ def project_status(storage: Storage, project_id: str, today: date | None = None)
 
     facts = FactStore(storage).list(project_id)
     facts_by_id = {f.fact_id: f for f in facts}
-    cat_store = CatalogStore(storage)
+    knowledge_store = KnowledgeStore(knowledge_root)
 
-    # typeごとの最新バージョンのみを対象にする(旧版のstaleに引きずられて
-    # 再生成後も up-to-date に到達できない事態を防ぐ)。type昇順で決定論的に返す
     latest_by_type: dict[str, Artifact] = {}
     for a in ArtifactStore(storage).list(project_id):
         current = latest_by_type.get(a.type)
@@ -72,7 +73,7 @@ def project_status(storage: Storage, project_id: str, today: date | None = None)
             "id": f"{a.type}-v{a.version}",
             "type": a.type,
             "requirements_version": a.requirements_version,
-            "stale": _artifact_stale(a, version, facts_by_id, cat_store, today),
+            "stale": _artifact_stale(a, version, facts_by_id, knowledge_store, today),
         }
         for a in sorted(latest_by_type.values(), key=lambda a: a.type)
     ]
@@ -103,6 +104,8 @@ def project_status(storage: Storage, project_id: str, today: date | None = None)
     }
 
 
-def stale_artifact_ids(storage: Storage, project_id: str, today: date | None = None) -> list[str]:
-    report = project_status(storage, project_id, today=today)
+def stale_artifact_ids(
+    storage: Storage, project_id: str, knowledge_root: Path, today: date | None = None
+) -> list[str]:
+    report = project_status(storage, project_id, knowledge_root, today=today)
     return [row["id"] for row in report["artifacts"] if row["stale"]]

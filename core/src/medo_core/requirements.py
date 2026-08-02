@@ -30,6 +30,7 @@ class RequirementsDoc(BaseModel):
     non_functional: dict[str, str] = Field(default_factory=dict)
     open_questions: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
+    knowledge_backend: Literal["markdown", "sqlite"] = "markdown"
 
 
 class RequirementsStore:
