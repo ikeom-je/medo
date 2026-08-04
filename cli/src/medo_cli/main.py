@@ -280,7 +280,7 @@ def artifacts_save(
     project: str = typer.Option(...),
     artifact_type: str = typer.Option(..., "--type"),
     file: Path = typer.Option(..., exists=True, readable=True),
-    cites: str = typer.Option("", help="引用カタログエントリID(カンマ区切り)"),
+    cites: str = typer.Option("", help="引用ナレッジエントリID(カンマ区切り)"),
     cites_facts: str = typer.Option("", help="引用ファクトID(カンマ区切り)"),
     options: str = typer.Option("", help="mini-prfaq用: name:approach_type をカンマ区切り"),
     grown_from: str = typer.Option("", help="prfaq用: <mini-prfaq-vN>:<打ち手名>"),
