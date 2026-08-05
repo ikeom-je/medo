@@ -4,16 +4,18 @@
 
 現行の `workflow.md` Section 3(実行主体の使い分け)は「Claude Code + Codex + agy が揃っている」前提で担当表を定義しており、不変条件として「最終判断・検証・merge・コミットの統制は常にClaude(オーケストレーター)」と明記している。
 
-しかし実際の利用環境は一定ではなく、Claude Codeが使えずCodex単体・agy単体で作業する状況が起こり得る。その場合でも同じ `git.md`/`workflow.md` の手順に従って、Issue→worktree→PR→マージのサイクルを一人称で回せる必要がある。あわせて、Skill配布物(`skills/dist/`)がCodexのネイティブ形式と噛み合っていない技術的な不整合も見つかった。
+しかし実際の利用環境は一定ではなく、Claude Codeが使えずCodex単体・agy単体で作業する状況が起こり得る。その場合でも同じ `git.md`/`workflow.md` の手順に従って、Issue→worktree→PR→マージのサイクルを一人称で回せる必要がある。
+
+あわせて、Skill配布の実装調査で次が判明した: **Claude Code・Codex・agyの3ツールはいずれも同一のSkill形式(`<name>/SKILL.md`、YAML frontmatter + 本文)をネイティブサポートしている**。agyはプロジェクトルート直下の`.agents/skills/<name>/SKILL.md`を自動検出する(`~/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md`のCustomization Discovery節で確認)。Codexは`~/.codex/skills/<name>/SKILL.md`(`config.toml`の`[features] skills = true`)。これまでの想定(「agyはfrontmatterなしの平文形式が必要」)は誤りで、**3ツールとも同一ビルド出力をそのまま配置場所にコピーするだけで動く**。この発見により、Skill配布は「ホストごとに異なる形式へ変換する」のではなく「単一形式を複数の配置先にコピーする」問題に単純化される。
 
 本設計は、**現行の「全員揃っている場合の分担」は変更せず**、それに加えて「利用可能なエージェントの組み合わせが変わる環境」に対応するための拡張を定義する。エージェント専用pluginの模倣(例: Claude Codeの`Task`ツールをCodex/agyに再現する等)は行わない。
 
 ## スコープ
 
 1. `workflow.md` Section 3への「エージェント可用性プロファイル」表の追加
-2. `AGENTS.md` の記述をクラウド非依存の現行スコープに同期し、Codex向けSkill参照先を修正
-3. `skills/build.py` にCodexネイティブ形式(`dist/codex/<name>/SKILL.md`)の出力を追加
-4. `tech.md` のSkill配布コマンド例にCodex向けコピー手順を追加
+2. `AGENTS.md` の記述をクラウド非依存の現行スコープに同期し、Skill参照先を統一形式に修正
+3. `skills/build.py` を「ホスト別に異なる形式へ変換」から「単一形式を1箇所に出力」に簡素化
+4. `tech.md` のSkill配布コマンド例を3ホスト分のコピー手順(うちagyはプロジェクトスコープ)に更新
 
 対象外(やらない): git.md/workflow.md自体を新規Skillとしてパッケージ化すること、実行時に読み込む機械可読な設定ファイル(例: `.claude/agents.yaml`)の新設、Claude Code以外のホストへの`Task`的なサブエージェント機構の移植。
 
@@ -36,34 +38,39 @@
 
 **プロファイルの決定方法**: 各セッション開始時、当該ツール(Claude Code / Codex CLI / agy)は自分がどのプロファイルに該当するかを、利用可能な他ツールの有無(MCP接続・CLI呼び出し可否)から自己判断する。判断に迷う場合はユーザーに確認する。
 
-### 2. AGENTS.mdの同期・修正
+### 2. Skill配布形式の統一(build.py・ディレクトリ構成)
 
-- 冒頭の説明文を CLAUDE.md と同じクラウド非依存の文言(「クラウド非依存の上流工程Agentケイパビリティ...実装手段としてGCPを選ぶ案件が多い想定」)に更新する
-- 「Medo Skills」セクションの参照先を分離する:
-  - agy向け: 引き続き `skills/dist/agy/*.md`(frontmatter除去済みの平文。ホスト側にネイティブなSkillフォルダ機構がないため、手順書として直接読ませる)
-  - codex向け: `skills/dist/codex/*/SKILL.md`(後述。Claude Codeと同一のfrontmatter付きフォルダ形式)を新たに案内する
+`skills/src/` を現行の「1ファイル=1 Skill(`<name>.md`)」から「1フォルダ=1 Skill(`<name>/SKILL.md`)」に変更する。これが3ホスト共通のネイティブ形式そのものであるため、以後は変換ではなくコピーだけで配布できる。
 
-### 3. skills/build.pyへのCodex向け出力追加
+- `skills/build.py`: frontmatter必須項目(`name`・`description`)の検証を行った上で、`skills/src/<name>/SKILL.md` を `skills/dist/<name>/SKILL.md` にコピーする単純な処理に簡素化する(ホスト別分岐・frontmatter除去ロジックを削除)
+- `skills/tests/test_build.py`: 「`dist/<name>/SKILL.md`が生成され、frontmatterの`name`が一致する」ことを検証する形に書き換える(旧・claude/agy二形式テストは不要になる)
 
-CodexのネイティブSkill機構(`~/.codex/skills/<name>/SKILL.md`、`config.toml`の`[features] skills = true`)は、Claude Codeの`dist/claude/<name>/SKILL.md`と同一のフォルダ+frontmatter形式である。そのため `build()` 関数に、`dist/claude/`と同一内容を`dist/codex/`にも書き出す処理を追加する(実質的にコピー。将来Codex固有の差分が必要になった場合のための独立出力とする)。
+### 3. 配置先(deploy)
 
-`skills/tests/test_build.py`に、`dist/codex/<name>/SKILL.md`の存在と内容(`dist/claude/`と同一)を検証するケースを追加する。
-
-### 4. tech.mdのコマンド例更新
+ビルド出力は3箇所にコピーする。Claude Code・Codexはホームディレクトリ配下(マシン単位、コピーが必要)、agyはプロジェクトルート直下(リポジトリ単位)。
 
 ```bash
 python skills/build.py
-cp -r skills/dist/claude/* ~/.claude/skills/     # Claude Code
-cp -r skills/dist/codex/* ~/.codex/skills/       # Codex CLI
-# agy: skills/dist/agy/*.md をAGENTS.mdから参照
+cp -r skills/dist/* ~/.claude/skills/   # Claude Code(ユーザーレベル)
+cp -r skills/dist/* ~/.codex/skills/    # Codex CLI(ユーザーレベル)
+cp -r skills/dist/* .agents/skills/     # agy(プロジェクトレベル。リポジトリ直下から自動検出)
 ```
+
+`.agents/skills/` は `skills/dist/` 同様ビルド成果物のため `.gitignore` に追加し、コミットしない(利用者が配布コマンドを実行して都度生成する運用を3ホストで統一する)。
+
+### 4. AGENTS.mdの同期・修正
+
+- 冒頭の説明文を CLAUDE.md と同じクラウド非依存の文言(「クラウド非依存の上流工程Agentケイパビリティ...実装手段としてGCPを選ぶ案件が多い想定」)に更新する
+- 「Medo Skills」セクションを、ホスト別の形式差の説明ではなく「`python skills/build.py`後、上記3コマンドのいずれかで自ホストに配置する」という単一の案内に統一する
 
 ## テスト方針
 
-- `skills/tests/test_build.py`: `dist/codex/<name>/SKILL.md`が生成され、`dist/claude/<name>/SKILL.md`と同一内容であることを確認するテストケースを追加(既存の`test_build_generates_claude_and_agy_dist`を拡張または新規テスト関数を追加)
+- `skills/tests/test_build.py`: 新フォルダ構成(`skills/src/<name>/SKILL.md`)に対応した単一形式の生成テストに書き換える
 - workflow.md/AGENTS.mdの変更はドキュメントのみのためユニットテスト対象外。`uv run pytest`全体が引き続きパスすることを確認する
 
 ## 影響範囲
 
-- `docs/superpowers/plans/medo-phase1.md`: Task 9の完了条件に「Codex向けdist出力」が含まれていなかったため、本設計の実装後に軽微な追記が必要
-- 既存の3 Skill本文(`skills/src/*.md`)自体の変更は不要(ビルド出力の追加のみ)
+- `skills/src/{hearing,propose-options,grow-prfaq}.md` を `skills/src/{medo-hearing,medo-propose-options,medo-grow-prfaq}/SKILL.md` にリネーム・移動する(既存本文の内容は変更不要)
+- `.gitignore`: `.agents/skills/` を追加
+- `docs/superpowers/plans/medo-phase1.md`: Task 9の完了条件(build.pyの出力形式)が変わるため、本設計の実装後に軽微な追記が必要
+- `.claude/steering/structure.md` Section 4(`skills/`ディレクトリ構成の説明)を新フォルダ構成に同期
