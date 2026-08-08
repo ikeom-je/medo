@@ -16,7 +16,7 @@ def validate(src_text: str, name: str) -> None:
     fm = m.group(1)
     if not re.search(r"^name:\s*\S+", fm, re.MULTILINE):
         raise ValueError(f"{name}: frontmatterにnameがありません")
-    if not re.search(r"^description:", fm, re.MULTILINE):
+    if not re.search(r"^description:\s*\S", fm, re.MULTILINE):
         raise ValueError(f"{name}: frontmatterにdescriptionがありません")
 
 

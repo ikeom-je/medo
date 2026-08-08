@@ -93,9 +93,10 @@ uv run medo status --project <id>   # 現在地(要件・ファクト・生成�
 
 # Skillビルドと配布(3ホスト共通のSKILL.md形式)
 python skills/build.py
+mkdir -p ~/.claude/skills ~/.codex/skills .agents/skills
 cp -r skills/dist/* ~/.claude/skills/   # Claude Code(ユーザーレベル)
 cp -r skills/dist/* ~/.codex/skills/    # Codex CLI(ユーザーレベル)
-cp -r skills/dist/* .agents/skills/     # agy(プロジェクトレベル。リポジトリ直下から自動検出)
+cp -r skills/dist/* .agents/skills/     # agy(プロジェクトレベル。リポジトリ直下から自動検出。.gitignore対象)
 ```
 
 ---

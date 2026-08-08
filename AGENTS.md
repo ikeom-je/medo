@@ -25,7 +25,7 @@
 
 ## Medo Skills(フェーズ1 Task 9 のビルド後に有効)
 
-`python skills/build.py` を実行後、自ホストの配置先にコピーすると利用可能になる(`tech.md` セクション6のコマンド例参照)。agyはプロジェクトルート直下の `.agents/skills/` を自動検出するため、`cp -r skills/dist/* .agents/skills/` を実行すればよい。
+`python skills/build.py` を実行後、自ホストの配置先にコピーすると利用可能になる(`tech.md` セクション6のコマンド例参照)。agyはプロジェクトルート直下の `.agents/skills/` を自動検出するため、`mkdir -p .agents/skills && cp -r skills/dist/* .agents/skills/` を実行すればよい。
 
 - 課題・方針の構造化: `medo-hearing` Skillの手順に従う
 - 打ち手候補の提案: `medo-propose-options` Skillの手順に従う

@@ -63,9 +63,9 @@ Medo の開発では実行主体を作業領域ごとに分担する。**Claude�
 2. 相互レビューの「作ったモデル≠レビューするモデル」原則。レビューの組み合わせを変えたい場合は担当表ではなく正本 `docs/superpowers/specs/cross-review-design.md` の改訂(設計サイクル)として扱う
 3. プロダクト設計原則(`.claude/steering/product.md`。数値・事実の通り道にLLMを挟まない等)
 
-なお、本Section下部の運用注記(Codexサンドボックスのネットワーク遮断・agyのモデル方針・GCPガード等)は**現在の担当構成に固有の制約**であり、担当表を変更した場合は合わせて見直す。
+なお、本Section下部の運用注記(Codexサンドボックスのネットワーク遮断・agyのモデル方針・GCPガード等)は**「全員揃う」プロファイルにおける、現在の担当構成に固有の制約**であり、担当表を変更した場合は合わせて見直す。単体プロファイルでは、以下の「Claude」をそのプロファイルのオーケストレータに読み替える。
 
-- **レビューは従来通り3者が担う**(組み合わせは相互レビュープロトコルのマトリクスに従う: Claude作→Codex+agy両方、Codex/agy作→Claude)
+- **レビューは「全員揃う」プロファイルでは3者が担う**(組み合わせは相互レビュープロトコルのマトリクスに従う: Claude作→Codex+agy両方、Codex/agy作→Claude。単体プロファイルでの扱いは上記「エージェント可用性プロファイル」表を参照)
 - 判断の最終権限と結果検証は常にClaudeが持つ。Codex/agyの出力を無検証で正としない。**Codexサンドボックスはネットワーク遮断のため、依存解決とテスト実行の最終確認(`uv run pytest` / `uv run ruff check .`)は必ずClaudeが自環境で行う**
 - **agyのモデル方針**: 基本は Gemini 3.5 Flash。深い設計レビュー・複雑な調査ではClaudeの判断で Gemini Pro に引き上げてよい(引き上げた場合はコミット本文の `review:` 行に使用モデルを明記し、PRへは既存ルール通り転記)。Gemini quotaが切れた場合はagy経由の Claude Sonnet 系(現状4.6。Sonnet 5がagyで利用可能になり次第そちら)に切り替えて**調査を継続する**。ただし別モデル原則により: **Claude系代替モデルはClaude作生成物のレビュアーとして数えず**(Codex単独レビュー+記録)、**Claude系代替モデルで作成したagy生成物の相互レビューはCodexが担う**。**Geminiホストとしての Skill 実行・eval・`generated_by: gemini` 比較はGeminiモデル稼働時のみ**とし、quota切れ中はClaude単独実行で開発を進行してよい(Gemini側のeval・比較はフェーズ完了までに復旧後追実施)。agy自体が利用不可の場合、調査はClaudeが自身の検索ツールで代替し、**レビューは実施可能なレビュアー(Codex単独)で行う**。いずれもコミット本文・PR本文にその旨を記録する
 - **GCP環境調査のガード**: agyのCloud Logging等の調査は読み取り専用・対象プロジェクト明示で行う。ログに含まれ得る機密・PIIは伏字・プレースホルダーにマスクした上で技術情報(エラーメッセージ・スタックトレース)のみを転記するか、ログURI参照のみを成果物・Issue・PRに記録する
@@ -77,7 +77,7 @@ Medo の開発では実行主体を作業領域ごとに分担する。**Claude�
 中間生成物(スペック・実装計画・実装diff)は最小単位で相互レビューする。
 **正本: `docs/superpowers/specs/cross-review-design.md`**(詳細な手段・裁定ルールはそちらを参照)。
 
-- 原則: **作ったモデル ≠ レビューするモデル**。Claude作の生成物(スペック・計画・diff)は Codex + agy の両方が、agy/Codex作のdiffは Claude がレビューする。Claudeが最終裁定者で、指摘も無検証で採用しない
+- 原則(「全員揃う」プロファイル): **作ったモデル ≠ レビューするモデル**。Claude作の生成物(スペック・計画・diff)は Codex + agy の両方が、agy/Codex作のdiffは Claude がレビューする。Claudeが最終裁定者で、指摘も無検証で採用しない。単体プロファイルでは自己レビューに緩和する(Section 3「エージェント可用性プロファイル」参照)
 - **上限2ラウンド**(指摘往復のみに適用)。早期終了は重大指摘ゼロ+コードは pytest/ruff パス。テスト・リントパスは裁定でも免除されない絶対条件
 - **記録**: コミット本文に `review: <レビュアー(+区切り)> <n>R / 重大<n>件解消 / 未解決<n>` を1行残す。PRを経由する変更(git.mdセクション1)は同じ記録をPR本文にも転記する
 
@@ -147,8 +147,8 @@ Claude 5世代以降のモデルは判断力が高く、過剰な制約列挙は
 # カタログ更新(手動・週次目安)
 MEDO_BACKEND=local uv run medo etl run --since <前回実行日> --services vertex-ai,cloud-run
 
-# Skill更新後の再配布
-python skills/build.py && cp -r skills/dist/claude/* ~/.claude/skills/
+# Skill更新後の再配布(3ホスト共通形式。詳細はtech.mdセクション6)
+python skills/build.py && cp -r skills/dist/* ~/.claude/skills/
 ```
 
 フェーズ3でETLはCloud Scheduler+Cloud Run Jobに自動化し、Monitoringアラートを追加する(それまで監視ワークフローは持たない)。
