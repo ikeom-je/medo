@@ -70,17 +70,17 @@ cli/
 
 ```
 skills/
-├── src/                 # 共通md(frontmatter付き)。1ファイル=1 Skill
-│   ├── hearing.md            # 業界・ビジネス状況・課題・経営思想/方針の構造化
-│   ├── propose-options.md    # 市場ファクト+フェルミ+技術ナリッジ根拠→打ち手候補のミニPRFAQ候補セット化
-│   └── grow-prfaq.md         # 合意案を完全版PRFAQへ育成(技術ナリッジ根拠)
-├── build.py             # dist/claude/<name>/SKILL.md と dist/agy/<name>.md を生成
+├── src/                       # 共通Skill(frontmatter付き)。1フォルダ=1 Skill
+│   ├── medo-hearing/SKILL.md            # 業界・ビジネス状況・課題・経営思想/方針の構造化
+│   ├── medo-propose-options/SKILL.md    # 市場ファクト+フェルミ+技術ナリッジ根拠→打ち手候補のミニPRFAQ候補セット化
+│   └── medo-grow-prfaq/SKILL.md         # 合意案を完全版PRFAQへ育成(技術ナリッジ根拠)
+├── build.py             # dist/<name>/SKILL.md を生成(3ホスト共通形式・変換なし)
 ├── tests/
 └── dist/                # ビルド出力(.gitignored)
 ```
 
-- Skill本文は `src/` の1箇所で管理し、ホスト形式へは `build.py` の薄い変換のみ
-- Claude Code へは `~/.claude/skills/` にコピー、agy へは `dist/agy/*.md` をAGENTS.mdから参照
+- Skill本文は `src/<name>/SKILL.md` の1箇所で管理し、`build.py` はfrontmatter検証付きコピーのみ行う(ホスト別変換は不要。3ホストとも同一のSKILL.md形式をネイティブサポートするため)
+- 配布先: Claude Codeは `~/.claude/skills/`、Codexは `~/.codex/skills/`(いずれもユーザーレベル、コピーが必要)。agyはプロジェクトルート直下の `.agents/skills/` を自動検出する(プロジェクトレベル)
 
 ---
 
@@ -133,7 +133,7 @@ document=偶数セグメント、collection=奇数セグメント。LocalJsonSto
 |---|---|
 | 新しいドメイン概念(スキーマ+ストア) | `core/src/medo_core/<name>.py` + `core/tests/test_<name>.py` |
 | 新しいCLIサブコマンド | `cli/src/medo_cli/main.py`(肥大化したら `commands/<name>.py` に分割) |
-| 新しいSkill | `skills/src/<name>.md`(frontmatter必須) → `build.py` が自動で両形式に変換 |
+| 新しいSkill | `skills/src/<name>/SKILL.md`(frontmatter必須) → `build.py` が検証付きでコピー |
 | 設計変更 | 正本 `docs/superpowers/specs/` を更新 → `.claude/steering/` と `.claude/specs/` の要約を同期 |
 | 人間向け説明・手順 | `docs/`(例: `docs/setup.md`) |
 | Agent向け規約・要約 | `.claude/steering/` または `.claude/specs/<phase>/` |

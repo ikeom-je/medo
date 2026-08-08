@@ -91,10 +91,11 @@ uv run medo knowledge search "<キーワード>"        # 案件横断の技術�
 uv run medo knowledge save --project <id> --statement "..." --source "..."  # 案件固有ナレッジ(単一案件スコープ・出典URL不要)
 uv run medo status --project <id>   # 現在地(要件・ファクト・生成物・next_step)
 
-# Skillビルドと配布
+# Skillビルドと配布(3ホスト共通のSKILL.md形式)
 python skills/build.py
-cp -r skills/dist/claude/* ~/.claude/skills/     # Claude Code
-# agy: skills/dist/agy/*.md をAGENTS.mdから参照
+cp -r skills/dist/* ~/.claude/skills/   # Claude Code(ユーザーレベル)
+cp -r skills/dist/* ~/.codex/skills/    # Codex CLI(ユーザーレベル)
+cp -r skills/dist/* .agents/skills/     # agy(プロジェクトレベル。リポジトリ直下から自動検出)
 ```
 
 ---
