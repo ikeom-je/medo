@@ -1,11 +1,11 @@
 [project]
 name = "medo-workspace"
 version = "0.1.0"
-description = "Medo(目処) — Google Cloud上流工程Agent"
+description = "Medo(目処) — クラウド非依存の上流工程Agent"
 requires-python = ">=3.12"
 
 [tool.uv.workspace]
-members = ["core", "cli", "etl"]
+members = ["core", "cli"]
 
 [tool.uv.sources]
 medo-core = { workspace = true }
@@ -14,7 +14,7 @@ medo-core = { workspace = true }
 dev = ["pytest>=8", "ruff>=0.5"]
 
 [tool.pytest.ini_options]
-testpaths = ["core/tests", "cli/tests", "etl/tests", "skills/tests"]
+testpaths = ["core/tests", "cli/tests", "skills/tests"]
 
 [tool.ruff]
 line-length = 100
