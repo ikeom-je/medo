@@ -6,15 +6,15 @@
 
 **Architecture:** ホスト非依存の `medo_core`(要件・ナレッジ・生成物・ストレージ)を中心に、`medo` CLI が決定論的な事実と計算を提供し、Skill(ホストLLMが実行する手順書)が生成的な部分を担う。
 
-**Tech Stack:** Python 3.12+ / uv workspace / pydantic v2 / typer / pytest / google-cloud-firestore / google-cloud-bigquery / google-cloud-billing / google-genai / PyYAML / Marp(フェーズ2)
+**Tech Stack:** Python 3.12+ / uv workspace / pydantic v2 / typer / pytest / google-cloud-firestore(Firestoreを本番ストレージに選ぶ場合のみ) / PyYAML / Marp(フェーズ2)
 
 ## Global Constraints
 
 - Python >= 3.12、パッケージ管理は uv(uv workspace モノレポ)
 - pydantic >= 2.7、typer >= 0.12、pytest >= 8
-- 数値・ステータス(料金、launch_stage、last_verified)の通り道にLLMを挟まない
-- ナレッジエントリは `sources`(出典URL)必須。出典なしエントリはバリデーションで拒否
-- 鮮度契約: `last_verified` が30日超なら `stale: true` を全レスポンスに付与
+- 数値・技術ナレッジ・鮮度の通り道にLLMを挟まない
+- 技術ナレッジ・ファクトは `source`(出典)必須。出典なしエントリはバリデーションで拒否
+- 鮮度契約: `retrieved` が閾値(技術ナレッジ30日・他180日)超なら `stale: true` を全レスポンスに付与
 - CLI失敗時は非ゼロ終了+構造化エラー。推測で補完しない
 - ストレージパスは Firestore 互換(document = 偶数セグメント、collection = 奇数セグメント)
 - コミットメッセージ末尾に Co-Authored-By: Claude Fable 5 <noreply@anthropic.com> を付ける(セッションのgit規約)
@@ -55,25 +55,20 @@ medo/
 │   ├── pyproject.toml           # medo-cli パッケージ(console_script: medo)
 │   ├── src/medo_cli/
 │   │   ├── __init__.py
-│   │   │   └── main.py              # typer app: requirements / facts / fermi / knowledge / artifacts / status
+│   │   └── main.py              # typer app: requirements / facts / fermi / knowledge / artifacts / status
 │   └── tests/test_cli.py
-│       ├── test_release_notes.py
-│       ├── test_structure.py
-│       ├── test_skus.py
-│       └── test_pipeline.py
 └── skills/
     ├── src/
-    │   ├── hearing.md           # 業界・課題・経営思想/方針の構造化(共通md、frontmatter付き)
-    │   ├── propose-options.md   # 市場ファクト+フェルミ+ナレッジ根拠→打ち手ミニPRFAQ候補セット
-    │   └── grow-prfaq.md        # 合意案を完全版PRFAQへ育成
-    ├── build.py                 # dist/claude/<name>/SKILL.md と dist/agy/<name>.md を生成
+    │   ├── medo-hearing/SKILL.md            # 業界・課題・経営思想/方針の構造化(1フォルダ=1 Skill)
+    │   ├── medo-propose-options/SKILL.md    # 市場ファクト+フェルミ+ナレッジ根拠→打ち手ミニPRFAQ候補セット
+    │   └── medo-grow-prfaq/SKILL.md         # 合意案を完全版PRFAQへ育成
+    ├── build.py                 # dist/<name>/SKILL.md を生成(Claude Code/Codex/agy共通形式)
     └── tests/test_build.py
 
 (docs/usage.md も Task 6b で作成: 人間用の全体フローとステージ/コマンド対応表)
 ```
 
 **設計メモ(スペックとの対応):**
-- SKUスナップショットは `sku_snapshots/{service}` に1サービス1ドキュメントで保存(フェーズ2のpricing計算機が消費)。
 - 生成物の実体(markdown)はフェーズ1ではドキュメント内にインライン保存(GCSはフェーズ2)。
 
 ---
@@ -2417,6 +2412,8 @@ GCP専用ETL(BigQuery公開データセットからのリリースノート取�
 
 
 ### Task 9: Skill 3本(hearing / propose-options / grow-prfaq)とビルドスクリプト
+
+> **(実装は差し替え済み)** 以下はknowledge層再設計・マルチエージェント移植性対応より前の当初ドラフトで、`launch_stage`等の旧カタログ由来フィールドや`skills/src/<name>.md`(1ファイル=1 Skill)形式が現行と一致しない。実際のSkill本文・build.pyは `skills/src/<name>/SKILL.md`(1フォルダ=1 Skill)を正としてPR #33・#36で実装済み。
 
 **Files:**
 - Create: `skills/src/hearing.md`
