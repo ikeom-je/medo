@@ -1,6 +1,6 @@
 # Medo(目処) — Agent向けガイド
 
-アイデアから「目処が立つ」までを最速にする、クラウド非依存の上流工程Agentケイパビリティ(Agent + Skill + CLI)。発想は自由に、事実は縛る。実装手段としてGCPを選ぶ案件が多い想定。
+アイデアから「目処が立つ」までを最速にする、クラウド非依存の上流工程Agentケイパビリティ(Agent + Skill + CLI)。発想は自由に、事実は縛る。
 
 このファイルは agy(Antigravity/Gemini)・codex 等、Claude Code 以外のAgentツール向けのエントリポイント。内容は CLAUDE.md と同一の参照体系を持つ。
 

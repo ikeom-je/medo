@@ -1,13 +1,13 @@
 # 技術スタック
 
-このリポジトリの技術選定・アーキテクチャ方針・コマンド一覧。フェーズ1はSkill+CLIの縦切りMVP。Medo自体はクラウド非依存で、実装手段としてGCPを想定する案件が多い(個人利用・無料枠〜数百円/月)。
+このリポジトリの技術選定・アーキテクチャ方針・コマンド一覧。フェーズ1はSkill+CLIの縦切りMVP。Medo自体はクラウド非依存(個人利用・無料枠〜数百円/月)。
 
 ---
 
 ## 1. アーキテクチャ全体像
 
 ```
-[ホスト]   Claude Code / agy (Skill+CLI)        簡易Webアプリ(フェーズ2, Gemini)
+[ホスト]   Claude Code / Codex / agy (Skill+CLI)   簡易Webアプリ(フェーズ2, Gemini)
               │ シェル実行(市場・国策・業界動向・技術ナリッジの検索もホストLLMが担う)
 [CLI/コア] medo CLI ── medo_core(要件/ファクト/フェルミ/knowledge/生成物/ストレージ)
               │
@@ -25,7 +25,7 @@
 | 領域 | 技術 | 備考 |
 |---|---|---|
 | 言語 | Python 3.12+ | |
-| パッケージ管理 | **uv**(uv workspace) | モノレポ: core / cli / etl |
+| パッケージ管理 | **uv**(uv workspace) | モノレポ: core / cli |
 | スキーマ・検証 | pydantic >= 2.7 | 全ドメインモデル。LLM出力の検証にも使う |
 | CLI | typer >= 0.12 | console_script: `medo` |
 | テスト | pytest >= 8 | ルート pyproject.toml の testpaths で全パッケージ横断 |
@@ -34,17 +34,17 @@
 
 ---
 
-## 3. GCP依存(オプション。medo本体はクラウド非依存)
+## 3. 任意のクラウド依存(オプション。medo本体はクラウド非依存)
 
-medo CLI/coreの実行に必須のGCP依存はない(既定バックエンドはローカルJSON)。以下は将来Firestoreを本番ストレージに使う場合・フェーズ2以降でGCPを使う場合の任意依存。
+medo CLI/coreの実行に必須のクラウド依存はない(既定バックエンドはローカルJSON)。以下は将来Firestoreを本番ストレージに使う場合・フェーズ2以降で各サービスを使う場合の任意依存。
 
 | サービス | 用途 | ライブラリ |
 |---|---|---|
 | Firestore | 本番ストレージに選ぶ場合(要件・facts・knowledge・生成物) | google-cloud-firestore >= 2.16 |
 | Gemini API | (フェーズ2)knowledge-digestでの構造化・圧縮に使う場合 | google-genai >= 1.0 |
-| GCS | (フェーズ2)スライド・モック実体 | — |
+| Cloud Storage | (フェーズ2)スライド・モック実体 | — |
 
-認証はADC(`gcloud auth application-default login`)。**フェーズ1のknowledge層は自動ETLを持たず、GCPクライアントへの実行時依存は発生しない**(ホストLLM検索+CLI出典検証のみ)。
+Firestoreを選ぶ場合の認証はADC(`gcloud auth application-default login`)。**フェーズ1のknowledge層は自動ETLを持たず、クラウドクライアントへの実行時依存は発生しない**(ホストLLM検索+CLI出典検証のみ)。
 
 ---
 
@@ -65,7 +65,7 @@ medo CLI/coreの実行に必須のGCP依存はない(既定バックエンドは
 |---|---|---|
 | `MEDO_BACKEND` | `local`(既定) / `firestore` | ストレージバックエンド切替 |
 | `MEDO_HOME` | 既定 `~/.medo` | localバックエンドのルートディレクトリ(knowledge/もこの配下、既定で別gitリポジトリ) |
-| `GOOGLE_CLOUD_PROJECT` | GCPプロジェクトID | Firestoreを使う場合のみ |
+| `GOOGLE_CLOUD_PROJECT` | プロジェクトID | Firestoreを使う場合のみ |
 | `GEMINI_API_KEY` | (ADCを使わない場合) | フェーズ2 knowledge-digestで使う場合のみ |
 
 ---
@@ -110,7 +110,7 @@ cp -r skills/dist/* .agents/skills/     # agy(プロジェクトレベル。リ�
 | pricing計算機(フェーズ2) | 公式Pricing Calculatorとの突合ゴールデンテスト |
 | knowledge-digest(フェーズ2) | LLM構造化はMagicMockまたは注入可能なgenerate関数で分離。LLM実呼び出しをテストに含めない |
 | Skill | 実案件1件のevalケース(同一要件→提案の安定性を目視確認) |
-| 実環境スモーク | フェーズ1 Task 10(手動。Firestoreを使う場合のみGCP認証が絡む) |
+| 実環境スモーク | フェーズ1 Task 10(手動。Firestoreを使う場合のみクラウド認証が絡む) |
 
 CIはフェーズ1では構築しない。ローカルで `uv run pytest` を実行。
 

@@ -8,9 +8,9 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 
-# Medoの実際のユースケース(AI/ML活用によるGCPアーキ提案)をfixtureに反映する。
+# Medoの実際のユースケース(AI/ML活用によるアーキ提案)をfixtureに反映する。
 # 飲食店がインバウンド客の電話予約に対応しきれず、多言語AI音声応対と
-# ノーショウ予測でGCPのAI/ML機能を活用したい、という具体案件を想定する。
+# ノーショウ予測でAI/ML機能を活用したい、という具体案件を想定する。
 REQ_YAML = """\
 project: yoyaku
 goal: 飲食店の多言語対応AI自動音声予約システム
