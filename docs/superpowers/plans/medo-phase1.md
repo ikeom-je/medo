@@ -2741,35 +2741,28 @@ git commit -m "feat(skills): hearing/propose-options/grow-prfaq Skillとビル�
 - Consumes: これまでの全タスク
 - Produces: フェーズ1完了の定義「実案件1件で 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(技術ナレッジ根拠付き) が両ホストで通る」の確認記録
 
-このタスクは人間(利用者本人)との共同作業。実案件の意思決定が絡むため自動化しない。既定のローカルJSONバックエンドではGCP認証は不要(Firestoreを本番ストレージに選ぶ場合のみ`gcloud auth application-default login`が必要)。
+このタスクは人間(利用者本人)との共同作業。実案件の意思決定が絡むため自動化しない。既定のローカルJSONバックエンドではクラウド認証は不要(Firestoreを本番ストレージに選ぶ場合のみ`gcloud auth application-default login`が必要。他バックエンドを選ぶ場合はその認証手順に読み替える)。
 
 - [ ] **Step 1: ホストLLM検索→technical knowledgeを保存できることを確認**
 
 Run: `MEDO_BACKEND=local uv run medo knowledge save --kind tech --statement "<検索で得た技術情報>" --source "<出典URL>" && uv run medo knowledge search "" --limit 20`
 Expected: 出典・鮮度付きの技術ナレッジエントリが一覧表示される
 
-- [ ] **Step 2: SkillをClaude Codeに配置**
+- [ ] **Step 2: Skillを3ホストへ配置**
+
+3ホスト共通のSKILL.md形式(`skills/src/<name>/SKILL.md`)をビルドし、各ホストの配置先へコピーする(詳細: `.claude/steering/tech.md` セクション6)。
 
 ```bash
 python skills/build.py
-mkdir -p ~/.claude/skills
-cp -r skills/dist/claude/medo-hearing ~/.claude/skills/
-cp -r skills/dist/claude/medo-propose-options ~/.claude/skills/
-cp -r skills/dist/claude/medo-grow-prfaq ~/.claude/skills/
+mkdir -p ~/.claude/skills ~/.codex/skills .agents/skills
+cp -r skills/dist/* ~/.claude/skills/   # Claude Code(ユーザーレベル)
+cp -r skills/dist/* ~/.codex/skills/    # Codex CLI(ユーザーレベル)
+cp -r skills/dist/* .agents/skills/     # agy(プロジェクトレベル。リポジトリ直下から自動検出)
 ```
 
-- [ ] **Step 3: Skillをagyに配置**
+agyは`.agents/skills/`を自動検出するため追加設定は不要(`AGENTS.md`に配置コマンドへのポインタが既に記載済み)。
 
-`skills/dist/agy/*.md` をagyのワークフロー参照場所に置き、リポジトリのAGENTS.md(なければ作成)に次を追記:
-
-```markdown
-## Medo Skills
-- 課題・方針の構造化: skills/dist/agy/medo-hearing.md の手順に従う
-- 打ち手候補の提案: skills/dist/agy/medo-propose-options.md の手順に従う
-- PRFAQ育成: skills/dist/agy/medo-grow-prfaq.md の手順に従う
-```
-
-- [ ] **Step 4: 実案件1件でWhat/Why縦切りを通す(受け入れテスト)**
+- [ ] **Step 3: 実案件1件でWhat/Why縦切りを通す(受け入れテスト)**
 
 1. Claude Codeで `medo-hearing` を起動し、実案件の課題を入力 → 背景・理念(principles)・課題(challenges)込みで要件保存(`saved: v1` を確認)
 2. `medo-propose-options` → 市場・国策・業界動向ファクトが出典付きで保存され(`medo facts list` で確認)、フェルミ推定が `fermi-v1` として保存され、打ち手2〜3案のミニPRFAQ候補セットが `--options`・`--cites-facts`・`--cites` 付きで保存されることを確認
@@ -2779,9 +2772,9 @@ cp -r skills/dist/claude/medo-grow-prfaq ~/.claude/skills/
 6. 課題を1項目追加して再保存(v2)→ `medo status` が `regenerate-stale-artifacts` を返し、`medo requirements diff` が陳腐化した生成物を報告することを確認
 7. `medo fermi calc --from-artifact fermi-v1` で再計算できることを確認
 
-- [ ] **Step 5: セットアップ手順を docs/setup.md に記録してコミット**
+- [ ] **Step 4: セットアップ手順を docs/setup.md に記録してコミット**
 
-スモークで実際に使ったコマンド・環境変数・ハマりどころを `docs/setup.md` に記録する(内容はスモーク結果に依存するため、実行時に書く。「GCP前提」「ナレッジ洗練(フェーズ2)」「Skill配置(Claude Code/agy)」「What/Why縦切りの流れ」の4節を含めること)。
+スモークで実際に使ったコマンド・環境変数・ハマりどころを `docs/setup.md` に記録する(内容はスモーク結果に依存するため、実行時に書く。「クラウド非依存構成の前提」「ナレッジ洗練(フェーズ2)」「Skill配置(Claude Code/Codex/agy)」「What/Why縦切りの流れ」の4節を含めること)。
 
 ```bash
 git add docs/setup.md
