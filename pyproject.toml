@@ -3,6 +3,7 @@ name = "medo-workspace"
 version = "0.1.0"
 description = "Medo(目処) — クラウド非依存の上流工程Agent"
 requires-python = ">=3.12"
+license = "MIT"
 
 [tool.uv.workspace]
 members = ["core", "cli"]

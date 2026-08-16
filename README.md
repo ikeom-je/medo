@@ -67,3 +67,7 @@ python skills/build.py       # Skill配布物のビルド(Claude Code/Codex/agy�
 ```
 
 技術スタック: Python 3.12+ / uv workspace / pydantic / typer / Firestore(本番ストレージに選ぶ場合のみ、任意)
+
+## ライセンス
+
+[MIT License](LICENSE)
