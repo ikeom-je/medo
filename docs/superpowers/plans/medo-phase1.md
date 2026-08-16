@@ -2745,7 +2745,7 @@ git commit -m "feat(skills): hearing/propose-options/grow-prfaq Skillとビル�
 
 - [ ] **Step 1: ホストLLM検索→technical knowledgeを保存できることを確認**
 
-Run: `MEDO_BACKEND=local uv run medo knowledge save --kind tech --statement "<検索で得た技術情報>" --source "<出典URL>" && uv run medo knowledge search "" --limit 20`
+Run: `MEDO_BACKEND=local uv run medo knowledge save --kind tech --statement "<検索で得た技術情報>" --source "<出典URL>" && uv run medo knowledge search "" --kind tech`
 Expected: 出典・鮮度付きの技術ナレッジエントリが一覧表示される
 
 - [ ] **Step 2: Skillを3ホストへ配置**
