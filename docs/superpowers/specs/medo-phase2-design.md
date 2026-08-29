@@ -112,7 +112,31 @@ ToBe(confidence: confirmed)= 合意されたあるべき姿
 
 **この確認は自然言語の問いかけだけに依存させず、データとして観測可能にする**(Codex指摘)。Skill本文に「問え」と書いても実行時に問うた保証はなく、自動テストもできない(testing.md)。そこで `to_be_decision` チェックポイント(3.6)を core が持ち、未回答の状態を `medo status` が決定論的に報告する。
 
-**発火条件**: `as_is` の追加・削除・本文/属性の変更があった保存で `pending` を立てる。AsIsが変わらない再保存やID自動採番のみの保存では立てない。
+##### 記録は毎回、問いかけは節目で
+
+保存のたびにSkillが会話を止めて問うと、対話が寸断され確認疲れを招く(agy指摘)。判断3で「穴埋め尋問」を排したのに、別の形で対話を阻害しては本末転倒になる。そこで**記録の層と問いかけの層を分ける**:
+
+| 層 | 発火 | 振る舞い |
+|---|---|---|
+| **記録(データ)** | `as_is` の追加・削除・本文/属性の変更があった**すべての保存** | `to_be_decision.state = "pending"` を立てる。AsIsが変わらない再保存やID自動採番のみでは立てない |
+| **問いかけ(会話)** | **大きな節目**のみ(下記) | Skillが `asis_tobe_loop` を提示して「ToBeを出す/更新するか」を問う。節目でない保存では、CLI出力に現在地を1行添えるに留める |
+
+`pending` は節目でなくても蓄積し続けるため、**問わずに先へ進んだ履歴は残る**。
+
+##### 「大きな節目」の判定(決定論)
+
+節目とは**現実が仮説を押し返した瞬間**である。次のいずれかが直前バージョンとの差分で新たに発生した保存を節目とする:
+
+1. `internal` の AsIs が初めて追加された(0件 → 1件以上)
+2. `Gap(kind="perception")` が新規に追加された(認識GAPが判明)
+3. `Gap(kind="internal_conflict")` が新規に追加された(立場による実態の対立が判明)
+4. `constraints` が新規に追加された
+5. `outcome` が `stalled` / `failed` の `Attempt` が新規に追加された(頓挫理由が判明)
+6. `stance="resistant"` または `is_decision_maker=True` の `Stakeholder` が新規に追加された
+
+いずれも「そのToBeは無理だ」という現実の反応が現れた地点であり、**仮説を見直すべきタイミングとして意味を持つ**。単なる本文の微修正や既存項目の言い換えは節目にしない。
+
+条件2〜6が示すとおり、節目はAsIsの変化だけで決まらない — 制約・組織力学の判明も含む(`reality_evidence` の3軸と対応する)。
 
 これは判断2「順序は固定しない」の具体化でもある。何周するか、いつToBeを出すかは案件ごとに違う。
 
@@ -434,12 +458,17 @@ class ProcessChecks(BaseModel):
 ```python
 class ToBeDecision(BaseModel):
     state: Literal["pending", "generate", "defer"] = "generate"
-    for_requirements_version: int = 0   # どのAsIs改訂に対する判断か
+    for_requirements_version: int = 0   # どの改訂に対する判断か
+    milestone: bool = False             # この改訂が「大きな節目」か
+    pending_since_version: int = 0      # 最後に回答した以降、何版ぶん未回答か
 ```
 
 - `as_is` が変更された保存で core が `state="pending"` と当該バージョンを立てる
+- **その改訂が判断4の節目条件を満たすなら `milestone=True` を立てる**。Skillは真のとき必ず問い、偽のときは現在地の提示に留める
 - ユーザーの回答は明示的なCLI操作(`medo requirements to-be-decision --project <id> --answer generate|defer`)で記録する
-- `medo status` は未回答(`pending`)のチェックポイントを報告する
+- `medo status` は未回答(`pending`)のチェックポイントと `milestone` を報告する
+
+**`pending_since_version` は問わずに進んだ蓄積を可視化する**。節目でない改訂が続いて長く未回答のままなら、節目を待たずに問う判断材料になる。
 
 **二層の担保**: データ層(チェックポイントの解消)は決定論的に検証でき、**自然言語で実際に問いかけたかはeval・手動スモークで確認する**。Skillの会話上の振る舞いは自動テストできない(testing.md)ため、この分離が必要になる。
 
@@ -522,7 +551,8 @@ class Hypothesis(BaseModel):
     "to_be_count": 2,
     "to_be_confidence": {"confirmed": 0, "assumed": 2, "open": 0},
     "unsupported_confirmed_to_be": [],
-    "to_be_decision": {"state": "pending", "for_requirements_version": 3},
+    "to_be_decision": {"state": "pending", "for_requirements_version": 3,
+                       "milestone": true, "pending_since_version": 2},
     "divergence_warning": false
   },
   "empathy_readiness": {
@@ -591,7 +621,7 @@ class Hypothesis(BaseModel):
 | `reality_evidence` | 往復で引き出された**現実の裏づけ**の件数。内部実態AsIsだけでなく `constraints` と抵抗を示すステークホルダーも数える(下記) |
 | `to_be_count` / `to_be_confidence` | ToBeの件数と確度の分布。往復が進むほど `assumed` から `confirmed` へ移る |
 | `unsupported_confirmed_to_be` | **裏づけ無く `confirmed` になっているToBeのID**(判定式は下記) |
-| `to_be_decision` | 「ToBeを出すか」の未回答チェックポイント(3.6) |
+| `to_be_decision` | 「ToBeを出すか」の未回答チェックポイントと、その改訂が節目かどうか(3.6) |
 | `divergence_warning` | 往復が発散している疑いの検出(下記) |
 
 #### 「裏づけあり」の判定式
@@ -860,7 +890,7 @@ rejected_options: list[RejectedOption] = []
 
 | 優先度 | 項目 | 備考 |
 |---|---|---|
-| **1** | 論理構造スキーマ + ID規約 + 移行 + 充足状況の可視化 + **`medo-hearing` の改訂** | ID採番シーケンス(3.1)・型付きリンク・`covered_challenge_ids` を含める。これが無いと2を開始できない。**Skillの受入条件**: (a) `process_checks` を読んで未確認項目をどう扱うか(質問する/明示的に保留する/例外として記録する)の契約、(b) **`as_is` 保存のたびに `asis_tobe_loop` を提示して「ToBeを出す/更新するか」をユーザーに問う**契約(判断4)。スキーマだけ作ってもSkillが使わなければ確認プロセスも往復も起きない |
+| **1** | 論理構造スキーマ + ID規約 + 移行 + 充足状況の可視化 + **`medo-hearing` の改訂** | ID採番シーケンス(3.1)・型付きリンク・`covered_challenge_ids` を含める。これが無いと2を開始できない。**Skillの受入条件**: (a) `process_checks` を読んで未確認項目をどう扱うか(質問する/明示的に保留する/例外として記録する)の契約、(b) **`to_be_decision.milestone` が真のとき `asis_tobe_loop` を提示して「ToBeを出す/更新するか」を問い、偽のときは現在地の1行提示に留める**契約(判断4)。スキーマだけ作ってもSkillが使わなければ確認プロセスも往復も起きない |
 | **2** | 陳腐化のセクション単位化 + カバレッジ判定 + 2段階重大度 | 1と密結合。飛ばすと全生成物が常時stale化して破綻 |
 | **3** | 出典検証の強化(URLフェッチ + 数値突合) | **他と技術的に独立しており並行可能**。Task10で穴を実証済み |
 | **4** | 生成物の依存グラフ + stale伝播 | `make-slides` の前提 |
