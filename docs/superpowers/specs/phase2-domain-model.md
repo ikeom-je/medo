@@ -76,7 +76,18 @@ class Node(BaseModel):
     text: str
     confidence: Confidence = "open" # confirmed | assumed | open
     evidence_refs: list[str] = []   # fact-id / knowledge-id(出典による裏づけ)
+
+class ScopedNode(Node):
+    """診断のスコープ絞り込み対象になるノード。"""
+    scope: Scope = "core"           # core | secondary | out
 ```
+
+**`scope` を持つ型を明示的に限定する**。診断の絞り込み(下記「スコープ属性」)が作用するのは**作業対象になるノード**であり、案件の属性(`Kpi` / `Stakeholder`)には適用しない。
+
+| 基底 | 継承する型 |
+|---|---|
+| `ScopedNode` | `AsIs` / `ToBe` / `Gap` / `Bottleneck` / `Challenge` / `Constraint` / `OpenQuestion` |
+| `Node`(scopeなし) | `Kpi` / `Stakeholder` |
 
 **ID規約**:
 
@@ -86,42 +97,53 @@ class Node(BaseModel):
 **採番と検証のシーケンス**(`RequirementsStore.save` 内で実行):
 
 ```
-1. 直前バージョンを取得(無ければ空として扱う)
+1. 直前バージョンと採番簿(high-water mark)を取得
 2. 入力ドキュメント内のID重複を検証         → 重複はエラー
 3. 非空IDが直前バージョンに存在するか検証   → 存在しないIDはエラー
    (ホストLLMが書き写す際の勝手なリナンバリングを機械的に検出する)
-4. 空IDに採番(プレフィックス+連番。既発番の最大値+1。削除済みIDは再利用しない)
+4. 空IDに採番(プレフィックス別 high-water mark + 1)
 5. 型付きリンクの参照先が採番後の文書内に存在するか検証 → 不明参照はエラー
-6. 保存
+6. 採番簿を更新し、変更manifest(§7)と共に保存
 ```
+
+**採番簿を永続化する**(`projects/{id}/id_watermark`)。直前バージョンの最大ID+1で採番すると、**過去に最大IDのノードを削除した場合にそのIDを再利用してしまい**、「削除済みIDは再利用しない」に違反する。プレフィックス別の high-water mark を保持し、単調増加させる。
+
+Firestoreバックエンドでは採番簿の更新をトランザクションで行う(並行保存時の重複を防ぐ)。
 
 **リンクは型付きにする**(汎用の `links: list[str]` にしない):
 
 ```python
-class AsIs(Node):
+class AsIs(ScopedNode):
     visibility: Literal["public", "internal"]      # 既定値なし(必須)
     # public:   公開情報・市場調査で観測できる姿
     # internal: 対話および顧客提供資料から分かる実態
     source_stakeholder_ids: list[str] = []        # 誰の視点に基づく実態か
     reality_checked: bool = False                 # public用: 現場実態と突合済みか
 
-class ToBe(Node):
-    scope: Scope = "core"                         # core | secondary | out
+class ToBe(ScopedNode):
     evidenced_by: list[str] = []                  # 確度昇格の契機になったノードID(経緯の記録)
+    assumed_risks: list[str] = []                 # この案を採る場合に引き受けるリスク
+    transition_steps: list[str] = []              # 現状からここへ至る過渡期(PoC・暫定運用など)
 
-class Gap(Node):
+class Gap(ScopedNode):
     kind: Literal["perception", "internal_conflict", "goal"] = "goal"
     from_as_is: list[str] = []
     from_to_be: list[str] = []       # goal のみ
 
-class Bottleneck(Node):
+class Bottleneck(ScopedNode):
     gap_ids: list[str] = []          # kind="goal" の gap のみ参照する
     from_hypothesis: str = ""        # 昇格元の仮説ID
 
-class Challenge(Node):
-    scope: Scope = "core"                   # core | secondary | out
+class Challenge(ScopedNode):
     bottleneck_ids: list[str] = []          # 確定した真因
     cause_hypothesis_ids: list[str] = []    # 未検証の真因(検証途上はこちら)
+    cost_of_inaction: str = ""              # 解かずに現状維持した場合の損失
+
+class Constraint(ScopedNode):
+    """予算・期間・体制・法令・既存システム。"""
+
+class OpenQuestion(ScopedNode):
+    """未確定事項。レビュー所見から参照されるためIDを持つ。"""
 ```
 
 **`AsIs.visibility` は既定値を持たない必須項目**とする。既定 `internal` にすると、指定漏れの公開情報まで内部実態として扱われ、認識GAPの検出が壊れる。`as_is` はフェーズ2の新規セクションで既存データが無いため、必須化しても後方互換は損なわれない。
@@ -160,6 +182,18 @@ Scope = Literal["core", "secondary", "out"]
 
 **診断は既定で `core` のみを対象にする**([status契約](phase2-status-contract.md))。要求の優先順位付けは上流工程の必須タスクとして標準的に位置づけられている([BABOK Guide](https://www.iiba.org/standards-and-resources/babok-guide/))。
 
+### 過渡期・リスク・不作為の損失
+
+上流工程の標準(BABOK v3 Strategy Analysis)は、現状と将来状態の接続に**過渡状態(Transition States)の定義**と**リスク評価**を必須タスクとして置いている。当初案は現状から理想への一足飛びの跳躍しか表現できず、次の3つが欠けていた(agy指摘)。
+
+| 追加 | 保持する場所 | 理由 |
+|---|---|---|
+| **過渡期** | `ToBe.transition_steps` | PoCや暫定運用を経ずに理想へ跳べる案件は稀。段階を描けないと実行計画にならない |
+| **採択案のリスク** | `ToBe.assumed_risks` | 却下案のリスク(`RejectedOption.accepted_risk`)は持つのに、**採る案のリスクを持っていなかった**。「トレードオフの誠実な開示」を謳いながら片手落ちだった |
+| **不作為の損失** | `Challenge.cost_of_inaction` | 経営層を動かすには投資対効果と対になる「何もしない場合の損失」が要る |
+
+いずれも自由文で持つ。数値を伴う場合は `evidence_refs` でファクトに紐づける(数値の通り道にLLMを挟まない)。
+
 ---
 
 ## 4. RequirementsDoc
@@ -189,19 +223,14 @@ class RequirementsDoc(BaseModel):
     stakeholders: list[Stakeholder] = []
     gaps: list[Gap] = []
     bottlenecks: list[Bottleneck] = []
-    constraints: list[Node] = []      # 予算・期間・体制・法令・既存システム
+    constraints: list[Constraint] = []
     attempts: list[Attempt] = []      # 既往の取り組みと、なぜ解決に至っていないか
     hypotheses: list[Hypothesis] = []
 ```
 
-**`open_questions` を `list[str]` から ID付きへ変更する**。レビュー所見が未確定事項を参照する必要があるが、文字列のリストでは参照先を指せない。
+**`open_questions` を `list[str]` から ID付きへ変更する**(型定義は §3)。レビュー所見が未確定事項を参照する必要があるが、文字列のリストでは参照先を指せない。
 
-```python
-class OpenQuestion(BaseModel):
-    id: str = ""        # 採番プレフィックス oq-
-    text: str
-    scope: Scope = "core"
-```
+**既存データの移行**: 現行は `list[str]`。読み込み時に**文字列を `OpenQuestion(text=<文字列>, id="")` へ変換する** before-validator を置き、次回保存で core が採番する。この初回採番は意味上の変更として扱わない(§7の変更manifestに `id_only_migration` として記録し、陳腐化を引き起こさない)。
 
 **`challenges` の移行方針**: `Challenge` は `ConfidenceItem` の上位互換。既存JSONは `id` が無い状態で読めるため、**読み込み時に空IDとして扱い、次回保存時に core が採番する**。この初回採番は意味上の変更として扱わない(陳腐化を引き起こさない)。移行対象の実データは1プロジェクト(medo-ops、課題5件)のみ。
 
@@ -236,7 +265,7 @@ class Stakeholder(Node):
 
 **`influence` と `interest` を決裁権限とは別に持つ**。案件を最も頓挫させるのは「決裁権限はないが拒否権を持つ実力者」であり、公式な決裁権だけでは捕捉できない。この2軸はステークホルダー分析の標準([Power-Interest Grid](https://en.wikipedia.org/wiki/Stakeholder_analysis))に対応する。
 
-**`surfaced_by` は発見経路の記録であり、確認プロセスの実施結果ではない**。「Skillが推定した関係者が1人もいない」ことは「探索しなかった」とも「探索したが追加はいなかった」とも解釈できる。確認プロセスの実施は[ワークフローモデル](phase2-workflow-model.md)の `DiscoveryChecks` が保持する。
+**`surfaced_by` は発見経路の記録であり、確認プロセスの実施結果ではない**。「Skillが推定した関係者が1人もいない」ことは「探索しなかった」とも「探索したが追加はいなかった」とも解釈できる。確認プロセスの実施は[ワークフローモデル](phase2-workflow-model.md)の `DiscoveryCheckRecorded` イベントが保持する。
 
 ### 既往の取り組み(Attempt)
 
@@ -291,6 +320,34 @@ class Hypothesis(BaseModel):
     fermi_ref: FermiRef | None = None   # kind="impact" の場合(感度分析の接続点)
 ```
 
-**未検証の真因は `hypotheses(kind="cause")` に一元管理する**。`bottlenecks` は検証・合意済みの真因のみ(`confidence: confirmed`)を持ち、仮説が検証されたら(`status: validated`)`bottlenecks` に昇格させて `from_hypothesis` に元の仮説IDを記録する。二重管理を避けつつ昇格の経緯が追跡できる。
+**未検証の真因は `hypotheses(kind="cause")` に一元管理する**。`bottlenecks` は検証・合意済みの真因のみを持ち、仮説が検証されたら `bottlenecks` に昇格させて `from_hypothesis` に元の仮説IDを記録する。二重管理を避けつつ昇格の経緯が追跡できる。
+
+**保存時の検証**(この不変条件をスキーマだけでは表せないため Store で検証する):
+
+- `Bottleneck.confidence` は `confirmed` のみを許す(既定の `open` のまま保存できない)
+- `from_hypothesis` が非空の場合、参照先が `kind="cause"` かつ `status="validated"` の仮説であること
 
 **`fermi_ref` の検証契約**: 保存時に `artifact_id` が同一プロジェクトに実在し `type == "fermi"` であること、`variable_name` がそのモデルの `variables` に存在することを検証する。検証箇所は Store(Pydantic単体では他Artifactを参照できないため)。
+
+---
+
+## 7. 変更manifest
+
+**要件の版ごとに、何がどう変わったかを不変で保存する**(`projects/{id}/requirements/v{n}/manifest`)。
+
+陳腐化判定は「生成物の要件版から最新版まで」を比較するため、**保存時にしか分からない情報を後から再現できる必要がある**。`change_kind: "editorial"` の宣言やID初回採番は保存時の引数でしかなく、記録しなければプロセス終了後に通常の文言変更と区別できない。
+
+```python
+class ChangeManifest(BaseModel):
+    version: int
+    change_kind: Literal["substantive", "editorial"] = "substantive"
+    changed_sections: list[str] = []      # 変更があったセクション名
+    id_only_migration: bool = False       # 初回ID採番のみで意味変更を伴わない
+    recorded_on: str
+```
+
+- `change_kind: "editorial"` は**保存者が明示的に宣言したときのみ**。既定は `substantive`(安全側に倒す)
+- `id_only_migration: true` の版は陳腐化を引き起こさない
+- 陳腐化判定は、生成物の要件版から最新版までの**全manifestを畳み込んで**評価する。途中に1つでも `substantive` な該当セクションの変更があれば `stale` とする
+
+core は宣言を決定論的に処理するだけで、本文の意味差をLLMや文字列差分から推測しない(設計原則との整合)。

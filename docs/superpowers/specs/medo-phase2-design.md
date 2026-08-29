@@ -65,10 +65,12 @@
 
 | Stage | 主な入力 | 保存するもの | 主なCLI操作 | 次の判断材料 |
 |---|---|---|---|---|
-| **1. Investigate & Draft** | 公開情報・顧客の生の声・提供資料 | `facts` / `RequirementsDoc.as_is` / `research` / `as-is-report` | `facts save` / `requirements save` / `artifacts save` | `model.coverage` |
-| **2. Internal Review** | 最新の `as-is-report` | `AsIsReportReviewed` イベント | `medo review add` | `workflow.review` |
-| **3. Client Dialogue** | `as-is-report` とそのスライド | `slides` / `StakeholderResponded` イベント | `artifacts save` / `medo respond add` | `workflow.responses` |
+| **1. Investigate & Draft** | 公開情報・顧客の生の声・提供資料 | `facts` / `RequirementsDoc.as_is` / `research` / `as-is-report` / **討議用 `slides`** | `facts save` / `requirements save` / `artifacts save` | `model.coverage` |
+| **2. Internal Review** | 最新の `as-is-report` **と討議用スライド** | `AsIsReportReviewed` イベント | `medo review add` | `workflow.review` |
+| **3. Client Dialogue** | レビュー済みの討議用スライド | `StakeholderResponded` イベント | `medo respond add` | `workflow.responses` |
 | **4. Adapt & Decide** | レビュー所見・顧客の反応 | 要件の新版 / `ToBeCheckpointRecorded` イベント | `requirements save` / `medo checkpoint answer` | `readiness` / `actions` |
+
+**討議用スライドはステージ1で作る**。顧客に投影する資料こそリフレーミング規約が課される対象であり、ステージ2の内部レビューを通してから提示する。当初案はステージ3で生成しており、レビューを素通りしていた。
 
 各ステージは `medo status` の該当ブロックだけを読めば進められる(詳細: [status契約](phase2-status-contract.md))。
 
@@ -103,19 +105,31 @@
 
 ## 5. フェーズ2の実装順序
 
-| 優先度 | 項目 | 備考 |
+**依存が閉じる順に並べる**。各項目は先行項目の成果だけで着手できる。
+
+| 優先度 | 項目 | 依存が閉じる理由 |
 |---|---|---|
-| **1** | ドメインモデル + ID規約 + 移行 + `model` 診断 | ID採番シーケンス・型付きリンク・スコープ属性を含む。これが無いと2を開始できない |
-| **2** | 陳腐化のセクション単位化 + カバレッジ + 2段階重大度 | 1と密結合。飛ばすと全生成物が常時stale化して破綻 |
-| **3** | 出典検証の強化(URLフェッチ + 数値突合) | **他と技術的に独立しており並行可能**。フェーズ1 Task10で穴を実証済み |
-| **4** | ワークフローイベント + 収束規則 + `workflow`/`readiness` 診断 | ステージ2〜4の基盤 |
-| **5** | 生成物の依存グラフ + stale伝播 | スライド生成の前提 |
-| **6** | `research` / `as-is-report` 生成物 + Skill 4本 | 標準周回を回せる最小構成 |
-| **7** | スライド生成(AsIs説明 / 最終提案) | 利用者の主要求 |
-| **8a** | ナレッジ来歴スキーマ(`supersedes`・不変保存) | 8bの前提。統合でIDが変わると過去の引用が全滅する |
-| **8b** | `knowledge-digest`(LLMによる統合提案) | 統合後も旧entryを残し、過去の引用が検証可能であること |
-| **9** | `decision-roadmap`(再定義。感度分析と連動) | `Hypothesis.fermi_ref` が前提 |
-| 後続 | `build-mock` / `propose-architecture` / pricing(再定義) / 簡易Webアプリ | 下記の完了定義の改訂が必要 |
+| **1** | ドメインモデル + ID規約 + 採番簿 + 変更manifest + 移行 | 他のすべての土台。単独で着手できる |
+| **2** | 生成物の型定義(`research` / `as-is-report`)+ 依存グラフ + stale伝播 + カバレッジ | 1のmanifestを使う。**イベントが `as-is-report` を対象にするため4より先** |
+| **3** | ワークフローイベント + 収束規則 | 2の `as-is-report` を対象にできる |
+| **4** | `model` / `workflow` / `readiness` / `actions` 診断 | 1〜3のデータが揃って初めて合成できる |
+| **5** | Skill 4本 + 討議用スライド生成 | 4の `actions` を読んで動く。討議用スライドはステージ1の成果物なので同時 |
+| **6** | 最終提案スライド + `phase_signoff` ゲート | 5の後。`prfaq` が前提 |
+| 並行 | 出典検証の強化(URLフェッチ + 数値突合) | **他と技術的に独立**。いつ着手してもよい |
+| 後続 | ナレッジ来歴 / `knowledge-digest` / `decision-roadmap` / `build-mock` / `propose-architecture` / pricing / 簡易Webアプリ | **詳細設計が未了**。下記 |
+
+**当初案は依存が閉じていなかった**。「イベント基盤(4)をSkill(6)より先」は正しいが、**イベントの対象である `as-is-report` の型定義が6に含まれていた**ため、4だけでは収束規則もレビューも実装できなかった。また6を「標準周回を回せる最小構成」としながらスライド生成が7にあり、ステージ3が成立しなかった。
+
+### 詳細設計が未了の項目
+
+次の項目は**実装順序に名前があるだけで詳細正本を持たない**。着手前に設計ドキュメントを起こす。
+
+| 項目 | 未了の内容 |
+|---|---|
+| 出典検証の強化 | URLフェッチの失敗時の扱い、数値突合のアルゴリズム |
+| ナレッジ来歴 / `knowledge-digest` | `supersedes` のスキーマ、旧引用の解決規則、統合提案の入出力 |
+| `decision-roadmap` | 出力形式(生成物typeを新設するか `comparison` を使うか)が未決 |
+| pricing(再定義) | クラウド非依存でのゴールデンデータの持ち方 |
 
 ### 相互レビューで訂正された当初案の誤り
 

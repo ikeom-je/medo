@@ -51,13 +51,21 @@ derived_from: list[str] = []             # 内容依存の親artifact ID(複数)
 
 ### 子type × 親type × 必須性
 
-| 子type | 親type | 必須性 |
-|---|---|---|
-| `as-is-report` | `research` | **その research の内容を使った場合は必須** |
-| `slides` | `as-is-report` | 必須(AsIs説明スライド) |
-| `slides` | `prfaq` | 必須(最終提案スライド) |
+**`slides` は用途を一級フィールドで持つ**。親typeからの推論に頼ると、複数の親を持てる設計では判別が曖昧になる。
 
-`slides` は上記のいずれか一方を必ず持つ。どちらであるかで構成が変わる([スライド設計](phase2-slides-design.md))。
+```python
+slide_kind: Literal["discussion", "final"] | None = None   # slides のみ必須
+```
+
+| 子type | `slide_kind` | 親type | cardinality |
+|---|---|---|---|
+| `as-is-report` | — | `research` | 0または1(その research の内容を使った場合は必須) |
+| `slides` | `discussion` | `as-is-report` | **ちょうど1** |
+| `slides` | `final` | `prfaq` | **ちょうど1** |
+
+`slides` は `slide_kind` に対応する親を**ちょうど1つ**持つ。`discussion` と `final` の親を同時に持つことはできない。
+
+**直接入力する生成物はすべて親に含める**。討議用スライドが `research` の内容を、最終提案スライドが `mini-prfaq` の比較結果を使う場合、それらは親 `as-is-report` / `prfaq` に**取り込まれている**ことを前提とする。取り込まずに直接参照する必要がある場合は、その生成物を親に追加する(cardinalityを緩める)判断をユーザーに確認する。
 
 **依存は再帰的に評価され、連鎖して伝播する**:
 
@@ -93,13 +101,24 @@ slides(さらに継承)
 | `mini-prfaq` | `goal` / `challenges` / `principles` / `constraints` / `to_be` / `kpis` |
 | `prfaq` | 上記 + `as_is` / `gaps` / `bottlenecks` / `hypotheses` / `attempts` / `stakeholders` |
 | `comparison` | `challenges` / `principles` / `constraints` / `kpis` |
-| `slides` | `open_questions`(親が依存しない範囲のみ) |
+| `slides`(`discussion`) | `open_questions` / `to_be` / `kpis`(親 `as-is-report` が依存しない範囲) |
+| `slides`(`final`) | `open_questions`(親 `prfaq` が依存しない範囲) |
 | `architecture` | `functional` / `non_functional` / `constraints` |
 | `mock` | `functional` / `constraints` |
 
 **`research` は要件セクションに依存しない**。調査結果は要件が変わっても陳腐化せず、引用ファクトの鮮度切れでのみ陳腐化する。ループの起点として要件の往復から独立していることを意味する。
 
-**比較の基準**: 直前バージョンではなく、**`artifact.requirements_version` の文書と最新版**を比較する。
+**比較の基準**: 直前バージョンではなく、**`artifact.requirements_version` から最新版までの全変更manifest**([ドメインモデル](phase2-domain-model.md) §7)を畳み込んで評価する。途中に1つでも該当セクションの `substantive` な変更があれば `stale` とする。
+
+### 生成主体の記録
+
+```python
+generated_by: Literal["claude", "codex", "gemini"] | None = None
+```
+
+**`codex` を追加する**。フェーズ2はどのホストからでも生成できる設計であり([Skill構成と移植性](phase2-skill-portability.md))、Codexが生成した成果物を記録できないと来歴が追えない。`fermi` はコードが生成するため `None` のまま。
+
+レビューイベント([ワークフローモデル](phase2-workflow-model.md))も同様に `reviewed_by: Literal["claude", "codex", "gemini", "human"]` を持ち、誰がレビューしたかを追跡できるようにする。
 
 ---
 
@@ -147,7 +166,15 @@ slides(さらに継承)
 
 ## 5. カバレッジ判定
 
-`Artifact` に **`covered_challenge_ids: list[str]`** を持つ。生成時点の要件に存在した課題IDのうち、その生成物が扱ったものを記録する。最新要件の `scope: "core"` な課題ID集合との差分に未対応のものがあれば `stale` とする。
+**カバレッジ判定は課題に応答する生成物にのみ適用する**。全Artifactに要求すると、要件セクションに依存しないはずの `research` / `fermi` まで `challenges` 依存になり、型別依存規則と矛盾する。
+
+| 適用する | 適用しない |
+|---|---|
+| `mini-prfaq` / `prfaq` / `comparison` / `architecture` / `mock` | `research` / `fermi` / `as-is-report` / `slides` |
+
+適用しない型では `covered_challenge_ids` を無視する(保存されていても判定に使わない)。`as-is-report` と `slides` は現状の記述と共有が目的であり、課題への応答ではない。
+
+適用する型は **`covered_challenge_ids: list[str]`** を持つ。生成時点の要件に存在した課題IDのうち、その生成物が扱ったものを記録する。最新要件の `scope: "core"` な課題ID集合との差分に未対応のものがあれば `stale` とする。
 
 - **本文の文字列一致やLLM判定でカバレッジを推定しない**(設計原則に反する)。Skillが保存時に明示的に宣言する
 - **既存Artifact(フィールド未設定)の扱い**: 推測によるバックフィルはしない。未設定の生成物はカバレッジ判定を `outdated`(差分確認推奨)とし、`stale` にはしない

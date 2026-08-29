@@ -64,10 +64,12 @@ Skill Aの出力をSkill Bがコンテキスト越しに受け取る、という
 
 | Skill | ステージ | 主に呼ぶCLI |
 |---|---|---|
-| `medo-investigate` | 1. 調べる・仕立てる | `facts save` / `requirements save` / `artifacts save --type research,as-is-report` |
+| `medo-investigate` | 1. 調べる・仕立てる | `facts save` / `requirements save` / `artifacts save --type research,as-is-report,slides` |
 | `medo-review` | 2. 内部検証 | `medo review add` |
-| `medo-dialogue` | 3. ぶつける・反応を得る | `artifacts save --type slides` / `medo respond add` |
+| `medo-dialogue` | 3. ぶつける・反応を得る | `medo respond add` |
 | `medo-decide` | 4. 振り返る・次へ進む | `requirements save` / `medo checkpoint answer` / `status` |
+
+**討議用スライドの生成は `medo-investigate` が担う**(ステージ1の終盤)。`medo-dialogue` は提示と反応の記録に専念する。顧客に見せる資料は内部レビューを通してから使う。
 
 合意形成後の工程は既存Skillを維持する:
 
@@ -76,7 +78,7 @@ Skill Aの出力をSkill Bがコンテキスト越しに受け取る、という
 | `medo-propose-options` | 打ち手候補のミニPRFAQ候補セット化 |
 | `medo-grow-prfaq` | 合意案を完全版PRFAQへ育成 |
 
-計6本。フェーズ1の `medo-hearing` は `medo-investigate` に統合する(ヒアリングは調べる・仕立てるステージの一部)。
+計6本。フェーズ1の `medo-hearing` は `medo-investigate` に統合する(ヒアリングは調べる・仕立てるステージの一部)。**移行期間中は `medo-hearing` を薄いwrapperとして残し**(本文は `medo-investigate` を案内するだけ)、統合完了後に削除する。
 
 **Skillを増やしすぎない理由**: Skillの選択は `description` frontmatter のマッチングで行われる。似た説明のSkillが並ぶと、モデルによって選択がブレる。ステージ単位が識別しやすい粒度である。
 
@@ -100,7 +102,7 @@ Skill Aの出力をSkill Bがコンテキスト越しに受け取る、という
 
 - ユーザーがagyで調査し、Claudeで整理し、Codexでレビューする、という使い分けが可能
 - サブエージェント機構は一切不要。状態がCLIにあるため、どのホストからでも同じ対象をレビューできる
-- 誰が実行したかは生成物の `generated_by` と、レビューイベントの記録で追跡できる
+- 誰が実行したかは生成物の `generated_by`(`claude` / `codex` / `gemini`)と、レビューイベントの `reviewed_by`(+ `human`)で追跡できる([生成物のライフサイクル](phase2-artifact-lifecycle.md))
 
 **これは制約ではなく強みになる**。同じ状態に対してモデルを変えて実行し、結果を比較できる(フェーズ1の `generated_by` 比較の延長)。
 

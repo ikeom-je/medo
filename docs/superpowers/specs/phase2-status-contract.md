@@ -48,10 +48,10 @@ status
 
 初回ヒアリング直後に全診断を出すと、「未検証」「未突合」「GAP」「not_ready」が一斉に並び、**全部埋めないと動かない**という印象を与える。探索の初期段階では収束に関する警告を出さない。
 
-| 段階 | 判定 | 出す診断 |
+| `diagnostic_phase` | 判定 | 出す診断 |
 |---|---|---|
-| **Discovery**(`to_be` が0件) | 探索中 | `model` のみ。`readiness` は `not_evaluable` |
-| **Convergence**(`to_be` が1件以上) | 収束に向かっている | 全診断 |
+| `discovery`(`to_be` が0件) | 探索中 | `model` と `actions`。`readiness` は `not_evaluable` |
+| `convergence`(`to_be` が1件以上) | 収束に向かっている | 全診断 |
 
 これは発散から収束へ段階的に進むダブルダイヤモンドの考え方に沿う([Design Council](https://www.designcouncil.org.uk/our-resources/the-double-diamond/))。
 
@@ -62,7 +62,7 @@ status
 ```json
 {
   "project": "medo-ops",
-  "stage": "convergence",
+  "diagnostic_phase": "convergence",
   "model": {
     "structure": {
       "as_is":        {"count": 3, "confirmed": 2, "public": 1, "internal": 2},
@@ -107,7 +107,8 @@ status
         {"stakeholder_id": "sh-2", "purpose": "as_is_alignment", "reaction": "objected"}
       ],
       "open_objections": ["ev-7"],
-      "signoff": {"decision_maker": "sh-1", "agreed": false}
+      "go_ahead": {"decision_maker": "sh-1", "agreed": false},
+      "subsumed": []
     },
     "loop": {
       "round_count": 2,
@@ -123,7 +124,7 @@ status
       {"code": "unsupported_confirmed_to_be", "refs": []},
       {"code": "discovery_check_missing", "refs": ["reality_gap", "decision_maker"]},
       {"code": "review_findings_open", "refs": ["gap-1"]},
-      {"code": "decision_maker_signoff_missing", "refs": ["sh-1"]},
+      {"code": "to_be_go_ahead_missing", "refs": ["sh-1"]},
       {"code": "high_influence_objection_open", "refs": ["ev-7"]}
     ]
   },
@@ -133,6 +134,38 @@ status
   ]
 }
 ```
+
+### 診断キーの判定式
+
+各キーの入力と判定を明示する(**すべて `scope: core` に限定**。`--include-scope` で拡張)。
+
+| キー | 判定式 |
+|---|---|
+| `links.challenges_without_cause` | `bottleneck_ids` と `cause_hypothesis_ids` の**両方が空**の課題 |
+| `links.gaps_without_bottleneck` | `kind="goal"` の gap のうち、どの `Bottleneck.gap_ids` からも参照されないもの |
+| `links.to_be_without_kpi` | どの `Kpi.to_be_ids` からも参照されない `to_be` |
+| `links.hypotheses_unvalidated` | `status` が `unvalidated` または `validating` の仮説 |
+| `coverage.public_as_is_without_verification` | `visibility="public"` かつ `reality_checked=False` かつ、その ID を `from_as_is` に含む有効な `perception` Gap が存在しないもの |
+| `coverage.challenges_without_attempt` | どの `Attempt.challenge_ids` からも参照されない課題(`outcome="not_attempted"` の記録があれば確認済みとして除外) |
+| `coverage.artifacts_without_challenge_coverage` | カバレッジ適用型の生成物のうち、最新の core 課題集合に未対応のものがあるもの |
+
+### actions の優先順位
+
+`actions` は下表の順に評価し、該当するものを順に並べる。**`actions[0]` が旧 `next_step` に相当する**。
+
+| 順 | code | 条件 |
+|---|---|---|
+| 1 | `answer_tobe_checkpoint` | 未回答の `MilestoneDetected` がある |
+| 2 | `resolve_objection` | 有効値としての `objected` がある |
+| 3 | `address_review_findings` | 未解決の `changes_requested` がある |
+| 4 | `draft_strawman_to_be` | `to_be` が0件で、`internal` AsIs が1件以上ある |
+| 5 | `generate_as_is_report` | 最新要件版から生成された `as-is-report` が無い |
+| 6 | `run_discovery_check` | `unverified` の check がある |
+| 7 | `regenerate_stale_artifacts` | stale な生成物がある(**往復進行中は順位を下げる**。下記) |
+| 8 | `proceed_to_propose_options` | `readiness.state == "ready"` |
+| 9 | `continue_hearing` | 上記のいずれにも該当しない |
+
+**Discovery段階でも `actions` は必ず何かを返す**(agy指摘)。`readiness` を出さない段階でも、順位4・5・6が「次に何をすべきか」を示す。当初案は Discovery で `readiness` を非表示にする一方で `actions` の生成規則が無く、初日の利用者が立ち往生する状態だった。
 
 ### 理由をコードで返す
 
@@ -158,7 +191,7 @@ medo status --project <id> --include-scope secondary
 medo status --project <id> --format json|digest
 ```
 
-- `--view summary`(既定): `stage` / `readiness` / `workflow.loop.checkpoint` / `workflow.responses.open_objections` / `actions`
+- `--view summary`(既定): `diagnostic_phase` / `readiness` / `workflow.loop.checkpoint` / `workflow.responses.open_objections` / `workflow.review.open_findings` / `actions`
 - `--view full`: 全4階層
 - `--view <枝名>`: その枝のみ
 
@@ -174,4 +207,5 @@ medo status --project <id> --format json|digest
 
 - `next_step` は `actions[0].code` として返し続ける
 - フェーズ1の `artifacts` 配列は `model` 直下に残す(生成物の一覧と stale フラグ)
-- 既存のSkill 3本(`medo-hearing` / `medo-propose-options` / `medo-grow-prfaq`)は `--view summary` で必要な情報を得られる形にする
+- **`--view summary` に後方互換フィールドを含める**: `requirements`(最新版・confidence件数)・`facts`(件数・stale件数)・`artifacts`(型ごと最新版とstaleフラグ)・`next_step`。フェーズ1のSkillはこれらだけで動く
+- `medo-hearing` は `medo-investigate` に統合するが、**フェーズ2の移行期間中は同名のSkillを残す**(本文は `medo-investigate` を呼ぶよう案内するだけの薄いwrapper)。統合完了後に削除する

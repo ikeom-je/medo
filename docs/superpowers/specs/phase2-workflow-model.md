@@ -59,6 +59,8 @@ class AsIsReportReviewed(WorkflowEventBase):
     kind: Literal["asis_review"] = "asis_review"
     outcome: Literal["approved", "changes_requested"]
     finding_refs: list[str] = []   # gap / challenge / open_question のID
+    reviewed_slides_id: str = ""   # 同時にレビューした討議用スライドのID
+    reviewed_by: Literal["claude", "codex", "gemini", "human"] = "human"
 
 class StakeholderResponded(WorkflowEventBase):
     kind: Literal["response"] = "response"
@@ -67,10 +69,35 @@ class StakeholderResponded(WorkflowEventBase):
     reaction: Literal["empathized", "acknowledged", "agreed", "objected", "unclear"]
     note: str = ""
 
+class MilestoneDetected(WorkflowEventBase):
+    kind: Literal["milestone"] = "milestone"
+    condition: MilestoneCondition          # §4の8条件のいずれか
+    round_id: int                          # この節目が属する周回
+    focus_hypothesis_id: str = ""          # この周回で検証する論点(任意)
+
 class ToBeCheckpointRecorded(WorkflowEventBase):
     kind: Literal["tobe_checkpoint"] = "tobe_checkpoint"
     answer: Literal["generate", "defer"]
+    responds_to: str                       # 回答対象の MilestoneDetected のイベントID
 ```
+
+**節目の検出自体をイベントにする**。当初案は `ToBeCheckpointRecorded` が回答しか持たないのに「同イベントの未回答状態が立つ」と説明しており、**未回答状態がどのデータから導かれるのかが定義できていなかった**。節目を `MilestoneDetected` として記録し、回答を `responds_to` で紐づけることで、未回答は「対応する `ToBeCheckpointRecorded` を持たない `MilestoneDetected`」として一意に導ける。
+
+`round_id` と `focus_hypothesis_id` も `MilestoneDetected` が持つ。当初案は索引で `focus_hypothesis_id` に言及しながら保存先が無く、envelope に周回が付くと書きながら周回IDが無かった。
+
+### イベント型ごとの許容target
+
+判別共用体だけでは、すべてのイベントが両方のtargetを取れてしまう。**型ごとに固定する**。
+
+| イベント型 | 許容する target |
+|---|---|
+| `DiscoveryCheckRecorded` | `requirements` |
+| `AsIsReportReviewed` | `artifact`(`as-is-report` のみ) |
+| `StakeholderResponded` | `purpose` により決まる(§3) |
+| `MilestoneDetected` | `requirements` |
+| `ToBeCheckpointRecorded` | `requirements` |
+
+**保存時の検証**: 上表の組み合わせ、および `AsIsReportReviewed(outcome="changes_requested")` の `finding_refs` が非空でその記録時点の要件版に実在すること。
 
 **共通envelopeにしたことで、すべての進行記録に対象・日付・周回が付く**。当初案は `ProcessChecks` と `ToBeDecision` を要件内のスナップショットに、`AsIsReview` と `Confirmation` を外部イベントに、と偶然分裂させていた。意味の似た4概念が保存場所で分かれており、イベント追加時に要件内のチェックポイントをどう更新するかが定義できなかった。
 
@@ -101,10 +128,24 @@ class ToBeCheckpointRecorded(WorkflowEventBase):
 ```python
 class ConvergenceTarget(BaseModel):
     requirements_version: int       # 最新の要件版
-    as_is_report_id: str            # 最新の as-is-report
+    as_is_report_id: str | None     # 最新要件版から生成された as-is-report(無ければ None)
 ```
 
 `medo status` が最新状態から**決定論的に導出する**(保存しない)。
+
+**`as_is_report_id` は「最新要件版から生成された最新の `as-is-report`」に限定する**。要件版とレポートを独立に選ぶと、古い要件から作られたレポートが現在対象になり、両者が食い違う。該当するレポートが存在しない場合は `None` とし、`readiness` は `as_is_report_missing` を返す。
+
+### purpose ごとに対象の種別を固定する
+
+反応がどちらの種別を対象にするかを固定しないと、要件宛てと生成物宛ての反応が混在して畳み込みが壊れる。
+
+| purpose | 許容する target | 意味 |
+|---|---|---|
+| `as_is_alignment` | `artifact`(`as-is-report` のみ) | 共有した現状認識への反応 |
+| `to_be_go_ahead` | `requirements` | この理想像で検討を進めてよい |
+| `phase_signoff` | `requirements` | フェーズを完了して次へ進む承認 |
+
+保存時にこの組み合わせを検証する。
 
 ### 版をまたぐ反応の畳み込み
 
@@ -114,9 +155,34 @@ class ConvergenceTarget(BaseModel):
 
 **祖先を含めるのが要点である**。`as-is-report-v1` への異議は、同じ相手が `as-is-report-v2`(v1の後継)に反応を記録した時点で**superseded** となり、有効値から外れる。当初案は「同一target」に限定していたため、v1で異議が出た後にv2で修正して合意を得ても**v1の異議が永久に残り、収束条件を一生満たせなかった**。
 
-後継関係は生成物の版(`as-is-report-v1` → `v2`)と要件の版で判定する。祖先への反応しか無い場合はそれを有効値とし、現在対象への反応が記録されたら置き換わる。
+**祖先の判定は `requirements_version` の単調性で行う**(生成物の版番号だけでは判定できない — 生成物の版は type別の採番にすぎず、古い要件版から新しい版番号のレポートを作ることを禁止していないため)。
+
+- `artifact` 対象: 同じ `type` の生成物のうち、`requirements_version` が現在対象**以下**のものを祖先とする
+- `requirements` 対象: `version` が現在対象**以下**のものを祖先とする
+
+**畳み込みキーは `(stakeholder_id, purpose)` である**。target種別は purpose で固定されているため、キーに含める必要がない。
 
 **旧版への異議は履歴として残る**。有効値から外れるだけで、削除も改変もしない。
+
+### 祖先への合意は内容が変わったら失効する
+
+祖先への反応を無条件に有効とすると、**v1で得た合意が、v2で内容が大きく変わっても有効なまま残る**(agy指摘)。「古い合意で誤って通る」を防ぐという目的と矛盾する。
+
+> **祖先への `agreed` / `empathized` は、現在対象までの変更がすべて `editorial` の場合にのみ継承する**。途中に `substantive` な変更([ドメインモデル](phase2-domain-model.md) §7 の変更manifest)があれば、その合意は失効し `re_confirmation_required` として報告する。
+
+**`objected` は逆で、内容が変わっても継承する**(解消されたことが確認できるまで残す)。安全側に倒す。
+
+### 上位のpurposeでの合意は下位の異議を包括解消する
+
+`as_is_alignment` に異議を述べた相手が、改訂版を見て `to_be_go_ahead` に合意した場合、**先行の懸念は包括的に解消されたとみなすのが実務の自然な流れ**である。`(stakeholder_id, purpose)` の完全一致だけで畳み込むと、過去の異議が解消されないまま残り続ける。
+
+> **purposeには順序がある**: `as_is_alignment` < `to_be_go_ahead` < `phase_signoff`
+>
+> 同一 `stakeholder_id` について、**より上位の purpose で `agreed` が有効値になっている場合、それより下位の purpose の未解決 `objected` は subsumed(包括解消)として有効値から外す**。
+
+包括解消も履歴には残り、`workflow.responses` で `subsumed_by` として参照できる。
+
+**生成物の保存時に `requirements_version` の単調性を検証する**: 同じ type の既存最新版より古い `requirements_version` での保存を拒否する(祖先判定が壊れるため)。
 
 ---
 
@@ -130,12 +196,20 @@ class ConvergenceTarget(BaseModel):
 
 | 層 | 発火 | 振る舞い |
 |---|---|---|
-| **記録(データ)** | 下記の節目条件が成立した操作 | `ToBeCheckpointRecorded` の未回答状態(`pending`)が立つ |
+| **記録(データ)** | 下記の節目条件が成立した操作 | core が `MilestoneDetected` を記録する |
 | **問いかけ(会話)** | 同じ節目条件 | Skillが `workflow.loop` を提示して問う。節目でない操作ではCLI出力に現在地を1行添えるに留める |
 
-**`pending` は単一の発火規則で決まる**。当初案は「as_isが変更された保存」「節目条件のいずれか」「節目でなくても蓄積」の3つの異なる記述を持ち、実装者が判定できなかった。**節目条件の成立が唯一の発火条件**である。
+**`pending` は単一の規則で導出される**。当初案は「as_isが変更された保存」「節目条件のいずれか」「節目でなくても蓄積」の3つの異なる記述を持ち、実装者が判定できなかった。
 
-`pending` は次の `ToBeCheckpointRecorded`(回答)まで解消しない。節目でない操作が続いても既存の `pending` は残るため、**問わずに先へ進んだ履歴は失われない**。
+> **`pending` の導出**: `MilestoneDetected` のうち、その `id` を `responds_to` に持つ `ToBeCheckpointRecorded` が存在しないものの集合。空でなければ `checkpoint.state = "pending"`。
+
+`pending` は回答が記録されるまで解消しない。節目でない操作が続いても既存の `pending` は残るため、**問わずに先へ進んだ履歴は失われない**。
+
+**発火の判定順序**: 要件保存とイベント記録の2つのストアにまたがるため、共通のカーソルを定める。
+
+- 要件保存による節目(条件1〜6)は、`RequirementsStore.save` の完了後に core が差分から判定して `MilestoneDetected` を記録する(`requirements_version` は保存後の版)
+- イベント記録による節目(条件7〜8)は、そのイベントの記録直後に core が `MilestoneDetected` を記録する(`requirements_version` は記録時点の最新版)
+- 同一の要件保存で複数条件が成立した場合は、**`MilestoneDetected` を1件だけ記録し `condition` に最初に成立した条件を入れる**(1回の保存に対して問いかけは1回でよい)
 
 ### 節目の条件(決定論)
 
@@ -151,16 +225,26 @@ class ConvergenceTarget(BaseModel):
 | 6 | `stance="resistant"` または `is_decision_maker=True` の `Stakeholder` が新規に追加された | 要件保存 |
 | 7 | `AsIsReportReviewed(outcome="changes_requested")` が記録された | **イベント記録** |
 | 8 | `StakeholderResponded(reaction="objected")` が記録された | **イベント記録** |
+| 9 | `Hypothesis.status` が `validated` へ変わった | 要件保存 |
+| 10 | `ToBe.confidence` が `confirmed` へ昇格した | 要件保存 |
 
-**条件7・8は要件保存を伴わずに発生する**。イベントは要件とは独立した追記型ストアに記録されるため、**イベントの記録操作自体が `pending` を立てる**。イベントストアが独立していることで、要件の版を進めずにチェックポイントを更新できる(当初案は要件内のスナップショットを更新しようとして、更新先が定義できなかった)。
+**条件7・8は要件保存を伴わずに発生する**。イベントは要件とは独立した追記型ストアに記録されるため、**イベントの記録操作自体が `MilestoneDetected` を記録する**。イベントストアが独立していることで、要件の版を進めずにチェックポイントを更新できる(当初案は要件内のスナップショットを更新しようとして、更新先が定義できなかった)。
 
-いずれも「そのToBeは無理だ」という現実の反応、または**AsIs自体の不整合が露見した地点**であり、仮説を見直す意味を持つ。単なる本文の微修正や既存項目の言い換えは節目にしない。
+条件1〜8は「そのToBeは無理だ」という現実の反応、または**AsIs自体の不整合が露見した地点**である。
+
+**条件9・10は前向きな前進を捉える**(agy指摘により追加)。当初案は節目を「現実が押し返した瞬間」に限定していたため、**対話が順調に進んで仮説が支持され、ToBeが確定に向かう場合にチェックポイントが発火せず、次のステージへ進むトリガーが作られなかった**。実務上の節目は押し返されたときだけでなく、**仮説が検証されて案が固まったとき**も等しく重大な分岐点である。
+
+単なる本文の微修正や既存項目の言い換えは節目にしない。
 
 **条件2〜8が示すとおり、節目はAsIsの変化だけでは決まらない**。プローブとしてのToBeをぶつけて噴出する暗黙知の大半は、現状そのものではなく**制約と組織力学**である。「そのToBeは無理」の主因は業務フローよりも、法務・親会社の内規や特定部門長の反対であることが実務上多い。
 
 ---
 
 ## 5. AsIsレビュー
+
+**レビュー対象は `as-is-report` と討議用スライドの両方である**(agy指摘)。当初案は対象をレポートのみとし、スライドはステージ3で生成・提示する設計だったが、**顧客との関係破綻リスクが最も高くリフレーミング規約が課されているのはスライドの方**である。レポート本文が安全でも、Marpスライドへ要約する過程で攻撃的な見出しが生成されうる。顧客に投影する資料を事前チェックせずに会議へ持ち込む運用は実務では成立しない。
+
+したがって**討議用スライドの生成はステージ1の終盤で行い、ステージ2でレポートと共にレビューする**。`reviewed_slides_id` にレビューしたスライドのIDを記録する。
 
 **毎周のレビュー記録を必須にしない**。少人数の案件で毎回手動記録を義務づけると、中身のない定型入力を量産して形骸化する。
 
@@ -174,7 +258,7 @@ class ConvergenceTarget(BaseModel):
 
 ## 6. 発見プロセスの確認
 
-AsIsに暗黙知が入らないままToBeを確定させると理想の正論に終わる。これを防ぐ3つの確認プロセスをSkillの契約とする。実施結果は `DiscoveryCheckRecorded` イベントに記録する。
+AsIsに暗黙知が入らないままToBeを確定させると理想の正論に終わる。これを防ぐ**4つの確認**をSkillの契約とする。実施結果は `DiscoveryCheckRecorded` イベントに記録する。
 
 | check | 問うこと | 組織防衛を招かない問い方 |
 |---|---|---|
@@ -198,6 +282,10 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 
 `identified` なのに対応レコードが0件、または `confirmed_none` なのに対応レコードが存在する場合は**不整合**として報告する。
 
+**同じ check が複数回記録された場合は、`id` の採番順で最後のものを有効値とする**(反応の畳み込みと同じ規則)。要件が更新されても check は自動的に無効化しない — 実施した事実は残る。
+
+**`inconsistent` が残っていても `readiness` は通す**。不整合は報告であって強制ではない(不変条件6)。`readiness.failed_conditions` には含めず、`workflow.checks.inconsistent` に列挙するに留める。
+
 ---
 
 ## 7. 収束の判定
@@ -216,8 +304,17 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 | 2 | `scope: core` の `to_be` に `confirmed` が1件以上あり、そのすべてが裏づけ済み | `unsupported_confirmed_to_be` |
 | 3 | `DiscoveryCheckRecorded` が4つの check すべてについて存在する | `discovery_check_missing` |
 | 4 | 未解決の `changes_requested` が無い | `review_findings_open` |
-| 5 | 決裁者(`is_decision_maker=True`)から `purpose="phase_signoff"` の `agreed` が得られている | `decision_maker_signoff_missing` |
+| 5 | 決裁者(`is_decision_maker=True`)から `purpose="to_be_go_ahead"` の `agreed` が得られている | `to_be_go_ahead_missing` |
 | 6 | `influence="high"` のステークホルダーに、有効値としての `objected` が残っていない | `high_influence_objection_open` |
+
+**標準周回の出口は `to_be_go_ahead` であり、`phase_signoff` ではない**(agy指摘による訂正)。当初案は収束条件に決裁者の `phase_signoff`(フェーズ完了承認)を要求していたが、**この段階では打ち手も費用感も体制も提示していない**。解決策が無い状態で決裁者が次期投資の正式サインオフを出すことは実務上あり得ず、`decision_maker_signoff_missing` で永久に不合格になり、後続の `propose-options` へ進めなくなる。
+
+| ゲート | 判定 | 必要な承認 | いつ |
+|---|---|---|---|
+| **標準周回の収束**(本表) | `readiness.state = "ready"` | `to_be_go_ahead` の `agreed` | 現状と理想が合意でき、打ち手の検討に進んでよい |
+| **フェーズ完了** | `phase_readiness` | `phase_signoff` の `agreed` | 最終提案スライド(Ask)を提示した後 |
+
+`phase_signoff` は `prfaq` と最終提案スライドが存在することを前提とする別のゲートであり、標準周回の判定には含めない。
 
 **条件2の「裏づけ済み」の判定式**: ToBeと内部実態を結ぶ経路を既存の `Gap(kind="goal")` で定義する。
 
@@ -233,4 +330,25 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 
 **収束の目安**: 新規に得られた実態によってToBeの修正差分が出なくなった状態(飽和)。
 
-`round_count` は `as_is` の変更と `to_be` の変更が交互に起きた回数として、要件バージョンの履歴から決定論的に導く。発散の報告は**停止条件ではない**。
+### round_count の算出
+
+要件バージョンの履歴を古い順に走査し、**`as_is` が変更された版のあと `to_be` が変更された版が現れたら1周とカウントする**。
+
+```
+round = 0
+state = "waiting_as_is"
+各版 v を古い順に:
+    as_is変更 = manifest.changed_sections に "as_is" を含む
+    to_be変更 = manifest.changed_sections に "to_be" を含む
+    if state == "waiting_as_is" and as_is変更:
+        state = "waiting_to_be"
+    if state == "waiting_to_be" and to_be変更:
+        round += 1
+        state = "waiting_as_is"
+```
+
+**同一の保存で `as_is` と `to_be` の両方が変わった場合は1周と数える**(`waiting_as_is` から入って同じ版で `to_be` 変更も成立するため)。`change_kind: "editorial"` の版は走査から除外する。
+
+`round_id` は `MilestoneDetected` に記録され、`round_count` はその最大値としても導ける(両者は一致する)。
+
+発散の報告は**停止条件ではない**。

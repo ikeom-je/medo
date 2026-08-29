@@ -21,12 +21,15 @@
 
 | # | 章 | 内容 | 主な入力 |
 |---|---|---|---|
+| 0 | **本日の検証テーマ** | 今回この場で確かめたいこと(1点) | `focus_hypothesis` |
 | 1 | 現状の全体像 | 何を調べ、何が分かったか | `research` / `as_is` |
 | 2 | 公開情報と現場実態 | 外部から見える姿と実態の対比(**リフレーミング必須**) | `as_is`(public/internal)/ `gaps(perception)` |
 | 3 | 立場による見え方の違い | 認識が分かれている点(**リフレーミング必須・開示制御あり**) | `gaps(internal_conflict)` / `stakeholders` |
 | 4 | 制約と、これまでの取り組み | 動かせない条件と、なぜ今まで解決していないか | `constraints` / `attempts` |
 | 5 | **叩き台の理想像**(ToBeがある場合) | 仮説としてのあるべき姿を2〜3案の振れ幅で提示 | `to_be`(`assumed`)/ `kpis` |
 | 6 | **確認したいこと** | 見立てと選択肢を提示して反論・選択を促す | `open_questions` / `confidence: assumed` の項目 / `focus_hypothesis` |
+
+**章0を冒頭に置く**(agy指摘)。いきなり章2・章3の耳の痛い実態認識から入ると、顧客が防衛的になる。「今日はこれを確かめたい」を最初に宣言することで、資料全体が**詰問ではなく共同作業**の枠組みに入る。その周回の `focus_hypothesis` をそのまま使う。
 
 **章5は往復の中核である**。仮説ToBeを実態を引き出すプローブとして使うのがこの設計の中心思想であるにもかかわらず、当初案では討議用スライドが現状説明5章のみで、**作成したToBeを顧客に見せる枠が存在しなかった**。ステージ4でToBe生成を決断しても投影先がなく、最終提案スライドまで顧客の目に触れない。
 
@@ -110,9 +113,14 @@ class RejectedOption(BaseModel):
     name: str
     reason: str               # なぜ見送ったか
     accepted_risk: str = ""   # 見送りによって受け入れたリスク
+
+# Artifact に追加(所有モデル)
+rejected_options: list[RejectedOption] = []
 ```
 
-**記録するタイミング**: 見送りの判断は打ち手比較の段階で起きるため、`mini-prfaq` と `comparison` で記録できるようにし、`prfaq` がそれを引き継ぐ。
+**`Artifact` のフィールドとして持つ**。許容する型は `mini-prfaq` / `comparison` / `prfaq` の3つで、他の型では無視する。見送りの判断は打ち手比較の段階で起きるため `mini-prfaq` と `comparison` で記録でき、`prfaq` がそれを引き継ぐ。
+
+採択案自身のリスクは `ToBe.assumed_risks`([ドメインモデル](phase2-domain-model.md))が持つ。却下案のリスクだけを持って採択案のリスクを持たないのは片手落ちになる。
 
 これはmedo自身の表現の分担(コードコメント=Why not)と同じ思想である。
 
