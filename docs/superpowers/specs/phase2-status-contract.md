@@ -1,0 +1,177 @@
+# フェーズ2 status契約
+
+`medo status` が返す診断の構造。索引: [medo-phase2-design.md](medo-phase2-design.md)
+
+**診断は報告であって強制ではない**(不変条件6)。未接続・未確認・未解決を検出しても保存を拒否しない。
+
+---
+
+## 1. 4階層の構造
+
+当初案はトップレベルに9ブロックを並べており、同じ事実を複数の視点で返す重複があった(件数を `structure` と `loop` の両方で返す、確認状態を生データと診断の両方で返す等)。**元データと診断を同じ枝に置く4階層**に再編する。
+
+```
+status
+├─ model        案件内容の充足(ドメインモデル由来)
+│  ├─ structure   セクションごとの件数と確度
+│  ├─ links       リンクの接続状況
+│  └─ coverage    個々の対象が処理されているか
+├─ workflow     進行の記録(ワークフローモデル由来)
+│  ├─ checks      発見プロセスの実施状況 + 不整合
+│  ├─ review      AsIsレビューの状況
+│  ├─ responses   ステークホルダーの反応(畳み込み済み)
+│  └─ loop        往復の現在地 + チェックポイント
+├─ readiness    収束判定
+│  ├─ state
+│  └─ failed_conditions
+└─ actions      推奨する次の行動
+```
+
+各ステージは対応する枝だけを読めば進められる:
+
+| Stage | 読む枝 |
+|---|---|
+| 1. Investigate & Draft | `model` |
+| 2. Internal Review | `model.links` / `workflow.review` |
+| 3. Client Dialogue | `workflow.responses` |
+| 4. Adapt & Decide | `readiness` / `actions` |
+
+---
+
+## 2. 診断の対象範囲
+
+**既定では `scope: "core"` の項目のみを診断対象とする**。往復のたびに課題とGAPが蓄積するが、すべてを今回解くわけではない。スコープを絞らないと、重要度の低い項目にまで一律にアラートが出て実務が埋没する。
+
+`--include-scope secondary,out` で範囲を広げられる。
+
+### 段階的に開示する
+
+初回ヒアリング直後に全診断を出すと、「未検証」「未突合」「GAP」「not_ready」が一斉に並び、**全部埋めないと動かない**という印象を与える。探索の初期段階では収束に関する警告を出さない。
+
+| 段階 | 判定 | 出す診断 |
+|---|---|---|
+| **Discovery**(`to_be` が0件) | 探索中 | `model` のみ。`readiness` は `not_evaluable` |
+| **Convergence**(`to_be` が1件以上) | 収束に向かっている | 全診断 |
+
+これは発散から収束へ段階的に進むダブルダイヤモンドの考え方に沿う([Design Council](https://www.designcouncil.org.uk/our-resources/the-double-diamond/))。
+
+---
+
+## 3. JSON契約
+
+```json
+{
+  "project": "medo-ops",
+  "stage": "convergence",
+  "model": {
+    "structure": {
+      "as_is":        {"count": 3, "confirmed": 2, "public": 1, "internal": 2},
+      "to_be":        {"count": 2, "confirmed": 0, "assumed": 2, "open": 0},
+      "kpis":         {"count": 0, "confirmed": 0},
+      "stakeholders": {"count": 2, "confirmed": 2},
+      "gaps":         {"count": 1, "perception": 1, "internal_conflict": 0, "goal": 0},
+      "bottlenecks":  {"count": 0, "confirmed": 0},
+      "constraints":  {"count": 1, "confirmed": 1},
+      "attempts":     {"count": 1, "confirmed": 0},
+      "challenges":   {"count": 5, "confirmed": 4}
+    },
+    "links": {
+      "challenges_without_cause": ["ch-2"],
+      "gaps_without_bottleneck": [],
+      "to_be_without_kpi": ["tb-1"],
+      "hypotheses_unvalidated": ["hyp-1", "hyp-3"]
+    },
+    "coverage": {
+      "public_as_is_without_verification": ["as-1"],
+      "challenges_without_attempt": ["ch-1", "ch-4"],
+      "artifacts_without_challenge_coverage": []
+    }
+  },
+  "workflow": {
+    "checks": {
+      "states": {
+        "reality_gap": "unverified",
+        "past_attempts": "identified",
+        "hidden_stakeholders": "confirmed_none",
+        "decision_maker": "unverified"
+      },
+      "inconsistent": []
+    },
+    "review": {
+      "current_target": "as-is-report-v2",
+      "open_findings": ["gap-1"]
+    },
+    "responses": {
+      "effective": [
+        {"stakeholder_id": "sh-1", "purpose": "as_is_alignment", "reaction": "empathized"},
+        {"stakeholder_id": "sh-2", "purpose": "as_is_alignment", "reaction": "objected"}
+      ],
+      "open_objections": ["ev-7"],
+      "signoff": {"decision_maker": "sh-1", "agreed": false}
+    },
+    "loop": {
+      "round_count": 2,
+      "focus_hypothesis": "hyp-1",
+      "reality_evidence": {"internal_as_is": 2, "constraints": 1, "resistant_stakeholders": 0},
+      "checkpoint": {"state": "pending", "since_version": 2},
+      "divergence_warning": false
+    }
+  },
+  "readiness": {
+    "state": "not_ready",
+    "failed_conditions": [
+      {"code": "unsupported_confirmed_to_be", "refs": []},
+      {"code": "discovery_check_missing", "refs": ["reality_gap", "decision_maker"]},
+      {"code": "review_findings_open", "refs": ["gap-1"]},
+      {"code": "decision_maker_signoff_missing", "refs": ["sh-1"]},
+      {"code": "high_influence_objection_open", "refs": ["ev-7"]}
+    ]
+  },
+  "actions": [
+    {"code": "answer_tobe_checkpoint", "reason": "節目で未回答"},
+    {"code": "resolve_objection", "refs": ["ev-7"]}
+  ]
+}
+```
+
+### 理由をコードで返す
+
+`failed_conditions` は自然文ではなく**理由コード + 参照ID**で返す。自然文だとSkillの契約が文言に依存し、テストが不安定になる。コードは[ワークフローモデル](phase2-workflow-model.md) §7 の肯定条件表と1対1で対応する。
+
+### stale と「今すぐ再生成すべき」は別
+
+**stale が1件でもあれば再生成を最優先する、という挙動を採らない**。早期に生成物を作った後、往復のたびにToBeの確度や本文が変わって生成物がstaleになり、周回ごとに再生成へ誘導されてしまう。
+
+`actions` は複数を返し、**往復が進行中**(`checkpoint.state == "pending"` または `to_be.confirmed == 0`)のあいだは stale生成物の再生成を最優先にしない。「この版で提案を更新する」とユーザーが決めるまでは往復の継続を優先候補として提示する。
+
+---
+
+## 4. projection
+
+**単一コマンドを維持し、返す範囲を絞る**。診断ごとに別コマンドへ分割すると、ホストLLMのシェル呼び出し回数が増え、異なる時点の状態を組み合わせるリスクも生じる。一方でSkillは開始・終了ごとに `status` を呼ぶため、毎回全量をコンテキストへ入れると累積コストになる。
+
+```
+medo status --project <id>                      # 既定 = --view summary
+medo status --project <id> --view full          # 全診断
+medo status --project <id> --view model         # 枝だけ(model|workflow|readiness|actions)
+medo status --project <id> --include-scope secondary
+medo status --project <id> --format json|digest
+```
+
+- `--view summary`(既定): `stage` / `readiness` / `workflow.loop.checkpoint` / `workflow.responses.open_objections` / `actions`
+- `--view full`: 全4階層
+- `--view <枝名>`: その枝のみ
+
+`--view` は単一の値を取り、`summary` / `full` / 枝名のいずれか。**枝名と `full` を同時に指定できない**(排他)。
+
+通常のSkillは `summary` を使い、原因を掘るときだけ `full` または枝名を使う契約とする([Skill構成と移植性](phase2-skill-portability.md))。
+
+---
+
+## 5. 後方互換
+
+フェーズ1の `medo status` はフラットなJSON(`requirements` / `facts` / `artifacts` / `next_step`)を返している。
+
+- `next_step` は `actions[0].code` として返し続ける
+- フェーズ1の `artifacts` 配列は `model` 直下に残す(生成物の一覧と stale フラグ)
+- 既存のSkill 3本(`medo-hearing` / `medo-propose-options` / `medo-grow-prfaq`)は `--view summary` で必要な情報を得られる形にする
