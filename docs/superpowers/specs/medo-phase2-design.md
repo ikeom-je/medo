@@ -13,18 +13,23 @@
 利用者が求める論理連鎖:
 
 ```
-事実調査(出典付き) → 現状(as-is)の共有
+事実調査(出典付き) → 外部から見える現状(as-is: public)
+                          ↕ 認識GAP ← ここに暗黙知と隠れた課題が潜む
+                    ヒアリング → 内部の実態(as-is: internal)
                           ↓
                     あるべき姿(to-be)・成功指標(KPI)の言語化
                           ↓
-                    GAP(状態の乖離) → ボトルネック(真因)
+                    目標GAP(状態の乖離) → ボトルネック(真因)
+                          ↑ 既往の取り組みと頓挫理由(なぜまだ解決していないか)
                           ↓
                     課題(解くべき問い)+ 仮説(検証すべき前提)
-                          ↓        ※制約条件の中で解く
+                          ↓        ※制約条件・ステークホルダーの中で解く
                     優先度・効果の比較
                           ↓
                     共感できるドキュメント → スライド
 ```
+
+**実態のAsIsを可視化せずにToBeを描くと、理想の正論に終わる**。認識GAPと「なぜ解決していないか」の2つが、この失敗を防ぐ要になる(判断4)。
 
 **medoの位置づけ**: 利用者を導く支援ツールであり、判断を代行しない。フレームワークをパターンとして整理し、MECE(漏れなく重複なく)なヒアリングを支える。
 
@@ -62,13 +67,37 @@
 
 初回ヒアリングは `as_is` + 生の声だけで成立し、残りは対話の深化とSkillの下書きで埋まる。
 
-### 判断4: 要素間のリンクは任意にする
+### 判断4: 実態のAsIsを可視化してからToBeへ進む
+
+**AsIsには非公開情報と暗黙知が含まれる。これを可視化せずにToBeを描くと、理想の正論に終わる。** 現実のAsIsを共有・共感して初めて、ToBeとステップbyステップのアクション(実現のための戦略と設計)を検討できる。
+
+この失敗を防ぐため、ヒアリングに以下3つの確認プロセスを**Skillの契約として義務付ける**。いずれも `medo status` が未確認状態を検出できる形で保持する。
+
+#### プロセス1: 外部から見えるAsIs と 内部の実態とのGAPを問う
+
+市場調査・公開情報で観測できる姿(`visibility: public`)と、ヒアリングでしか分からない実態(`visibility: internal`)を**両方記録し、その乖離自体を `Gap(kind="perception")` として保持する**。
+
+この認識GAPが大きい箇所に、外部からは見えない個社・組織のGoalと隠れた課題が潜む。「対外的にはこう見えていますが、実態はいかがですか」という問いが、暗黙知を引き出す最も有効な入口になる。
+
+#### プロセス2: なぜ今まで解決に至っていないのかを問う
+
+課題に対して**既に打たれた施策とその結果**(`attempts`)を確認する。一度も着手していない課題と、3回試して頓挫した課題はまったく別物であり、後者には隠れた制約・力学が潜んでいる。
+
+「その課題に対して、これまで何か取り組まれましたか」「なぜ進まなかったのでしょうか」という問いは、`constraints` と `bottlenecks` の発見に直結する。
+
+#### プロセス3: 隠れたステークホルダーの存在を問う
+
+顧客が最初に挙げるステークホルダーは、たいてい当事者と直属の関係者に限られる。**承認が必要な人、影響を受ける現場、反対しうる部門**は明示的に問わないと出てこない。
+
+「この施策で影響を受ける方、承認が必要な方は他にいらっしゃいますか」を確認プロセスとして義務付け、顧客が挙げた(`stated`)か Skillが推定した(`inferred`)かを区別して記録する。
+
+### 判断5: 要素間のリンクは任意にする
 
 「すべての課題はGAPに紐づく」といった強制はしない。**繋がっていないこと自体を情報として扱う**。
 
 **未接続はエラーにしない**。CLIは「充足していない状態」として報告するだけで、保存を拒否しない。
 
-### 判断5: 解像度は confidence が制御する
+### 判断6: 解像度は confidence が制御する
 
 | confidence | 期待する解像度 |
 |---|---|
@@ -77,7 +106,7 @@
 
 **空欄はペナルティではなく「まだ聞けていない/まだ下書きしていない」という情報**。
 
-### 判断6: GAP(現象)とボトルネック(真因)を分離する
+### 判断7: GAP(現象)とボトルネック(真因)を分離する
 
 現象の差分をそのまま課題と呼ぶと対症療法しか出ない(agy指摘)。
 
@@ -85,7 +114,7 @@
 to_be − as_is = gap(現象) → bottleneck(真因) → challenge(解くべき問い)
 ```
 
-### 判断7: 未検証の真因は hypotheses に一元管理する
+### 判断8: 未検証の真因は hypotheses に一元管理する
 
 `bottlenecks` と `hypotheses(kind="cause")` の責務重複を解消する。
 
@@ -130,18 +159,28 @@ class Node(BaseModel):
 **リンクは型付きにする**(汎用の `links: list[str]` にしない):
 
 ```python
+class AsIs(Node):
+    visibility: Literal["public", "internal"] = "internal"
+    # public:   市場調査・公開情報で観測できる姿(evidence_refs に market/trend fact)
+    # internal: ヒアリングでしか分からない実態(evidence_refs に company fact)
+
 class Gap(Node):
-    from_as_is: list[str] = []
-    from_to_be: list[str] = []
+    kind: Literal["perception", "goal"] = "goal"
+    # perception: 外部から見える姿 と 内部の実態 の乖離(隠れた課題の在り処)
+    # goal:       あるべき姿 と 現状 の乖離(打ち手の対象)
+    from_as_is: list[str] = []       # perception では public/internal 両方を並べる
+    from_to_be: list[str] = []       # goal のみ
 
 class Bottleneck(Node):
     gap_ids: list[str] = []
-    from_hypothesis: str = ""        # 昇格元の仮説ID(判断7)
+    from_hypothesis: str = ""        # 昇格元の仮説ID(判断8)
 
 class Challenge(Node):
     bottleneck_ids: list[str] = []          # 確定した真因
     cause_hypothesis_ids: list[str] = []    # 未検証の真因(検証途上はこちら)
 ```
+
+**`Gap.kind` は2種類のGAPを区別する**(レビュー指摘により追加)。従来は「あるべき姿 − 現状」の目標GAPしか扱えなかったが、**「外部認識 − 内部実態」の認識GAP**を保持しないと、暗黙知が可視化されないままToBeが理想の正論に終わる(判断4 プロセス1)。
 
 **`Challenge.cause_hypothesis_ids` は相互レビュー(agy)の指摘により追加**。真因がまだ仮説段階にある健全な検証途上で、CLIが「未リンク」を警告し続けてしまう問題を防ぐ。未リンク警告は**両方が空のときのみ**出す。
 
@@ -166,13 +205,14 @@ class RequirementsDoc(BaseModel):
     challenges: list[Challenge] = []  # ConfidenceItem から Challenge へ
 
     # --- 追加 ---
-    as_is: list[Node] = []
+    as_is: list[AsIs] = []            # visibility で public / internal を区別
     to_be: list[Node] = []
     kpis: list[Kpi] = []
     stakeholders: list[Stakeholder] = []
-    gaps: list[Gap] = []
+    gaps: list[Gap] = []              # kind で perception / goal を区別
     bottlenecks: list[Bottleneck] = []
     constraints: list[Node] = []      # 予算・期間・体制・法令・既存システム
+    attempts: list[Attempt] = []      # 既往の取り組みと、なぜ解決に至っていないか
     hypotheses: list[Hypothesis] = []
 ```
 
@@ -194,7 +234,34 @@ class Kpi(Node):
 class Stakeholder(Node):
     role: str = ""
     pains: list[str] = []
+    stance: Literal["unknown", "supportive", "neutral", "resistant"] = "unknown"
+    is_decision_maker: bool = False       # 承認・決裁の権限を持つか
+    surfaced_by: Literal["stated", "inferred"] = "stated"
+    # stated:   顧客が自ら挙げた
+    # inferred: Skillが推定して確認を求めた(隠れたステークホルダーの発見)
 ```
+
+**`stance` / `is_decision_maker` / `surfaced_by` はレビュー指摘により追加**(判断4 プロセス3)。顧客が最初に挙げるのは当事者と直属の関係者に限られ、承認者・影響を受ける現場・反対しうる部門は明示的に問わないと出てこない。`surfaced_by` により「顧客が挙げた」と「Skillが推定して確認した」を区別し、確認プロセスが実行されたかを追跡できる。
+
+### 3.4 既往の取り組み(Attempt)
+
+**「なぜ今まで解決に至っていないのか」を保持する**(判断4 プロセス2。レビュー指摘により追加)。一度も着手していない課題と、複数回試して頓挫した課題はまったく別物であり、後者には隠れた制約・力学が潜んでいる。
+
+```python
+class Attempt(BaseModel):
+    id: str = ""
+    challenge_ids: list[str] = []
+    gap_ids: list[str] = []
+    description: str                      # 何をやったか
+    outcome: Literal["not_attempted", "in_progress", "stalled", "failed", "partial", "succeeded"]
+    blocker: str = ""                     # なぜ進まなかった/失敗したか
+    confidence: Confidence = "open"
+    evidence_refs: list[str] = []
+```
+
+`outcome` が `stalled` / `failed` の `blocker` は、`constraints` と `bottlenecks` の最有力の発見源になる。Skillは blocker から真因仮説を下書きして確認する。
+
+**`not_attempted` を明示的に持つ理由**: 「取り組んでいない」という記録と「まだ聞いていない」という空欄を区別するため。前者は確認済みの事実であり、後者は未確認。この区別がないと確認プロセスが実行されたか追跡できない。
 
 **現状値を `float` で直接持たず `fact` を参照する理由**: KPIの現状値は観測された事実であり、設計原則「数値・事実の通り道にLLMを挟まない」の対象。`kind: company` のファクト(ヒアリング由来・URL不要)として保存し、`current_fact_id` で参照する。これにより出典・取得日・stale判定が自動的に効く。
 
@@ -202,7 +269,7 @@ class Stakeholder(Node):
 
 `stakeholders.pains` は Section 6 の共感要素②の入力になる。**保存先は要件ドキュメント**とする(顧客個人名ではなく役割と痛みを記録する運用とし、個人特定情報は書かない)。
 
-### 3.4 仮説(Hypothesis)
+### 3.5 仮説(Hypothesis)
 
 `confidence` は「今どれだけ確からしいか」、`Hypothesis` は「何を検証すれば確定するか」を持つ。
 
@@ -228,18 +295,21 @@ class Hypothesis(BaseModel):
 
 ## 4. 充足状況の可視化(MECEの担保)
 
-`medo status` を拡張し、**漏れ**を決定論的に返す。**未接続はエラーではなく報告**(判断4)。
+`medo status` を拡張し、**漏れ**を決定論的に返す。**未接続はエラーではなく報告**(判断5)。
 
 ```json
 {
   "structure": {
-    "as_is":        {"count": 3, "confirmed": 2, "empty": false},
+    "as_is":        {"count": 3, "confirmed": 2, "empty": false,
+                     "public": 1, "internal": 2},
     "to_be":        {"count": 0, "confirmed": 0, "empty": true},
     "kpis":         {"count": 0, "confirmed": 0, "empty": true},
     "stakeholders": {"count": 2, "confirmed": 2, "empty": false},
-    "gaps":         {"count": 0, "confirmed": 0, "empty": true},
+    "gaps":         {"count": 0, "confirmed": 0, "empty": true,
+                     "perception": 0, "goal": 0},
     "bottlenecks":  {"count": 0, "confirmed": 0, "empty": true},
     "constraints":  {"count": 1, "confirmed": 1, "empty": false},
+    "attempts":     {"count": 0, "confirmed": 0, "empty": true},
     "challenges":   {"count": 5, "confirmed": 4, "empty": false}
   },
   "unlinked": {
@@ -247,11 +317,28 @@ class Hypothesis(BaseModel):
     "gaps_without_bottleneck": [],
     "to_be_without_kpi": ["tb-1"],
     "hypotheses_unvalidated": ["hyp-1", "hyp-3"]
+  },
+  "unverified_process": {
+    "as_is_without_public_counterpart": ["as-2", "as-3"],
+    "challenges_without_attempt": ["ch-1", "ch-4", "ch-5"],
+    "no_decision_maker_identified": true,
+    "stakeholders_all_stated": true
   }
 }
 ```
 
 `challenges_without_cause` は `bottleneck_ids` と `cause_hypothesis_ids` の**両方が空**の課題のみを列挙する(3.1参照)。
+
+### `unverified_process`: 3つの確認プロセスの未実施を検出する
+
+判断4 の確認プロセスが実行されたかを、CLIが決定論的に返す。**これは「漏れの指摘」であって強制ではない**(判断5と同じく、未実施でも保存は拒否しない)。
+
+| キー | 意味 | 対応するプロセス |
+|---|---|---|
+| `as_is_without_public_counterpart` | `internal` の現状に対し、対になる `public` の記述も認識GAPも無いもの。外部視点との突合が未実施 | プロセス1 |
+| `challenges_without_attempt` | 既往の取り組みが1件も記録されていない課題。`outcome: not_attempted` の記録があれば確認済みとして除外する | プロセス2 |
+| `no_decision_maker_identified` | `is_decision_maker: true` のステークホルダーが1人もいない | プロセス3 |
+| `stakeholders_all_stated` | 全ステークホルダーが `surfaced_by: stated`。Skillが隠れた関係者を推定・確認した形跡がない | プロセス3 |
 
 **重複(MECEのE)の検知はフェーズ2後半**とし、`knowledge-digest` と同じLLM注入方式(fake generate でテスト可能)で**提案専用機能**として実装する。決定論では意味的重複を判定できないため、検出は提案に留め、統合の判断は利用者が行う。
 
@@ -278,7 +365,9 @@ class Hypothesis(BaseModel):
 
 | 対象 | `stale`(要再生成) | `outdated`(差分確認推奨) |
 |---|---|---|
-| Node系(as_is/to_be/gaps/bottlenecks/constraints/challenges/stakeholders) | 追加・削除、`confidence` 変更、リンク変更、`evidence_refs` 変更 | `text` のみの変更 |
+| Node系(as_is/to_be/gaps/bottlenecks/constraints/challenges/stakeholders) | 追加・削除、`confidence` 変更、リンク変更、`evidence_refs` 変更、`AsIs.visibility` / `Gap.kind` の変更 | `text` のみの変更 |
+| `Stakeholder` | 上記 + `is_decision_maker` / `stance` の変更 | `role` / `pains` の変更 |
+| `Attempt` | 追加・削除、`outcome` / `challenge_ids` / `gap_ids` の変更 | `description` / `blocker` の変更 |
 | `Kpi` | 追加・削除、`current_fact_id` / `target_value` / `target_text` / `unit` / `to_be_ids` の変更 | `name` のみの変更 |
 | `Hypothesis` | 追加・削除、`status` / `fermi_ref` / `challenge_ids` の変更 | `statement` / `validation_method` の変更 |
 | `principles` / `functional`(ConfidenceItem) | 追加・削除、`confidence` 変更 | `text` のみの変更 |
@@ -297,7 +386,7 @@ class Hypothesis(BaseModel):
 |---|---|---|
 | `fermi` | なし(facts と assume のみ) | — |
 | `mini-prfaq` | `goal` / `challenges` / `principles` / `constraints` / `to_be` / `kpis` | — |
-| `prfaq` | 上記 + `as_is` / `gaps` / `bottlenecks` / `hypotheses` | `grown_from`(候補選択の来歴。伝播対象外) |
+| `prfaq` | 上記 + `as_is` / `gaps` / `bottlenecks` / `hypotheses` / `attempts` / `stakeholders` | `grown_from`(候補選択の来歴。伝播対象外) |
 | `comparison` | `challenges` / `principles` / `constraints` / `kpis` | — |
 | `slides` | `open_questions`(親が依存しない範囲のみ) | **`derived_from` の親に依存し、staleを継承する** |
 | `architecture` | `functional` / `non_functional` / `constraints` | — |
@@ -348,13 +437,16 @@ derived_from: str | None = None   # 親artifact ID(例: "prfaq-v3")
 
 ## 6. 「共感できるドキュメント」の定義
 
-Codex と agy が**独立に**「論理の一貫性は必要条件だが十分条件ではない」と指摘した(確度が高い)。
+Codex と agy が**独立に**「論理の一貫性は必要条件だが十分条件ではない」と指摘した(確度が高い)。以下の4要素として定義する。
 
 | 要素 | 内容 | 検証方法 |
 |---|---|---|
-| ①論理の一貫性 | as-is → to-be/KPI → gap → 真因 → 課題 → 打ち手 が繋がっている | **自動**(構造の充足とリンクで判定可能。ただし未接続はエラーにせず報告のみ) |
-| ②読み手の痛みとBefore/After | `stakeholders.pains` に紐づく具体的な痛み、変化後の体験 | 人間評価(スキーマが入力を保証) |
-| ③トレードオフの誠実な開示 | 不確実性・リスク・**採らなかった選択肢とその理由** | 人間評価(`hypotheses` の未検証項目 + `rejected_options`) |
+| ①**実態の共有** | 外部から見える姿ではなく**内部の実態**が言語化され、なぜ今まで解決していないかが共有されている | 半自動(`unverified_process` が確認プロセスの未実施を検出) |
+| ②論理の一貫性 | as-is → to-be/KPI → gap → 真因 → 課題 → 打ち手 が繋がっている | **自動**(構造の充足とリンクで判定可能。ただし未接続はエラーにせず報告のみ) |
+| ③読み手の痛みとBefore/After | `stakeholders.pains` に紐づく具体的な痛み、変化後の体験 | 人間評価(スキーマが入力を保証) |
+| ④トレードオフの誠実な開示 | 不確実性・リスク・**採らなかった選択肢とその理由** | 人間評価(`hypotheses` の未検証項目 + `rejected_options`) |
+
+**①を先頭に置く**(レビュー指摘により追加)。実態が共有されないまま論理だけを整えても、受け手には「理想の正論」としか映らず共感は生まれない。共感の起点は論理ではなく、現実の直視である。
 
 ### 見送った案の理由を保持する
 
@@ -385,8 +477,8 @@ rejected_options: list[RejectedOption] = []
 | # | 章 | 内容 | 主な入力 |
 |---|---|---|---|
 | 1 | SCQAエグゼクティブサマリー | Situation-Complication-Question-Answer | `as_is` / `challenges` / 採択案 |
-| 2 | As-Is vs To-Be 対比 | 現状と理想の対比、KPIの現状値→目標値 | `as_is` / `to_be` / `kpis` |
-| 3 | GAPと真因 | 状態の乖離と、その裏にある真因 | `gaps` / `bottlenecks` |
+| 2 | As-Is vs To-Be 対比 | 現状と理想の対比、KPIの現状値→目標値。**外部から見える姿と内部の実態を並べる**(認識GAPの可視化) | `as_is`(public/internal) / `to_be` / `kpis` |
+| 3 | GAPと真因 | 状態の乖離と、その裏にある真因。**なぜ今まで解決に至っていないか**(既往の取り組みと頓挫理由) | `gaps` / `bottlenecks` / `attempts` |
 | 4 | 打ち手比較と選定理由 | Impact × Feasibility マトリクス + **なぜ他案を落としたか** | `mini-prfaq` / `rejected_options` |
 | 5 | 推奨ソリューション詳細 | 選定案の具体像(How・Workflow Before/After)。**複数枚に展開してよい** | `prfaq` の技術的背景・workflow改善見込み |
 | 6 | ロードマップ | 段階と、各段階がどの仮説の検証に依存するか | `hypotheses` / `decision-roadmap` |
