@@ -13,9 +13,11 @@
 利用者が求める論理連鎖:
 
 ```
-事実調査(出典付き) → 外部から見える現状(as-is: public)
-                          ↕ 認識GAP ← ここに暗黙知と隠れた課題が潜む
-                    ヒアリング → 内部の実態(as-is: internal)
+事実調査(出典付き) → 公開情報から見える現状(as-is: public)
+                          │
+                          │ 認識GAP を契機に実態を掘る(暗黙知の発見)
+                          ▼
+                    ヒアリング → 現場の実態(as-is: internal)
                           ↓
                     あるべき姿(to-be)・成功指標(KPI)の言語化
                           ↓
@@ -28,6 +30,8 @@
                           ↓
                     共感できるドキュメント → スライド
 ```
+
+**認識GAPと目標GAPは連鎖上の役割が違う**。認識GAPは実態を発見するための**契機**であり、打ち手のパイプライン(真因→課題→打ち手)に直接流さない。パイプラインに流れるのは、発見された実態から導かれた目標GAPである(3.1参照)。
 
 **実態のAsIsを可視化せずにToBeを描くと、理想の正論に終わる**。認識GAPと「なぜ解決していないか」の2つが、この失敗を防ぐ要になる(判断4)。
 
@@ -71,25 +75,44 @@
 
 **AsIsには非公開情報と暗黙知が含まれる。これを可視化せずにToBeを描くと、理想の正論に終わる。** 現実のAsIsを共有・共感して初めて、ToBeとステップbyステップのアクション(実現のための戦略と設計)を検討できる。
 
-この失敗を防ぐため、ヒアリングに以下3つの確認プロセスを**Skillの契約として義務付ける**。いずれも `medo status` が未確認状態を検出できる形で保持する。
+この失敗を防ぐため、ヒアリングに以下3つの確認プロセスを**Skillの契約として義務付ける**。実施結果は `process_checks`(3.5)に記録し、`medo status` が未実施を検出する。
 
-#### プロセス1: 外部から見えるAsIs と 内部の実態とのGAPを問う
+**前提となる姿勢: 暗黙知は「問う」だけでは出てこない**
 
-市場調査・公開情報で観測できる姿(`visibility: public`)と、ヒアリングでしか分からない実態(`visibility: internal`)を**両方記録し、その乖離自体を `Gap(kind="perception")` として保持する**。
+相互レビュー(agy)の指摘により明文化する。暗黙知は直接問われても出てこない。顧客自身が言語化できない場合と、警戒して建前しか答えない場合の両方で対話が止まる。
 
-この認識GAPが大きい箇所に、外部からは見えない個社・組織のGoalと隠れた課題が潜む。「対外的にはこう見えていますが、実態はいかがですか」という問いが、暗黙知を引き出す最も有効な入口になる。
+したがって3プロセスすべてに共通して、**Skillが公開情報・技術ナレッジから粗い仮説(Strawman)を先に下書きし、顧客に反論・修正させる**アプローチを取る。「ここは実際には手作業で転記されていませんか」と当てて初めて「実は…」と実態が出る。これは判断3の「Skillが下書きして確認する」を `as_is` にも適用することを意味する。
+
+#### プロセス1: 公開情報から見える姿を、現場実態と突き合わせる
+
+市場調査・公開情報で観測できる姿(`visibility: public`)と、ヒアリングでしか分からない実態(`visibility: internal`)を両方記録し、乖離を `Gap(kind="perception")` として保持する。
+
+**確認の方向は「public起点」とする**(相互レビューでCodex・agyが独立に指摘)。内部実態のすべてに公開情報の対応物があるわけではない — 伝票転記の手間や例外処理にIR開示は存在しない。全 `internal` に `public` の対応物を求めると偽陽性が大量発生し、警告が形骸化する。
+
+したがって検証は逆向きに行う: **調査・登録した `public` の記述それぞれについて、現場実態との突合が行われたか**を確認する。
+
+**組織防衛を招かない問い方をする**(agy指摘。最重要):
+
+標榜していること(公約)と現場の実態の乖離を不用意に突くと、組織は自己防衛のために隠蔽・反発に走り対話が閉じる(Argyrisの組織防衛論)。「対外的にはこう見えていますが実態は」という問いは告発・尋問と受け取られやすい。
+
+**非難を伴わない協調的探索の問いに変換する**ことをSkill契約とする:
+
+| 避ける問い方 | 用いる問い方 |
+|---|---|
+| 「対外的にはこう見えていますが、実態は違いますよね」 | 「目標達成に向けて、現場で直面している想定外の制約は何でしょうか」 |
+| 「公約と実態が乖離していませんか」 | 「外部環境の変化に対して、現場の仕組みの追随はどこまで進んでいますか」 |
 
 #### プロセス2: なぜ今まで解決に至っていないのかを問う
 
-課題に対して**既に打たれた施策とその結果**(`attempts`)を確認する。一度も着手していない課題と、3回試して頓挫した課題はまったく別物であり、後者には隠れた制約・力学が潜んでいる。
+課題に対して**既に打たれた施策とその結果**(`attempts`)を確認する。一度も着手していない課題と、複数回試して頓挫した課題はまったく別物であり、後者には隠れた制約・力学が潜んでいる。
 
-「その課題に対して、これまで何か取り組まれましたか」「なぜ進まなかったのでしょうか」という問いは、`constraints` と `bottlenecks` の発見に直結する。
+`blocker`(頓挫理由)は自由文だけでなく**類型を併記する**(agy指摘)。自由文のみだと表面的な言い訳(「多忙だった」「予算がなかった」)をそのまま記録して完了扱いになり、真因への深掘りが起きない。類型により、Skillがどの方向に掘るかを判断できる(`politics_incentive` ならステークホルダーの利害、`technical` ならアーキテクチャ制約)。
 
 #### プロセス3: 隠れたステークホルダーの存在を問う
 
 顧客が最初に挙げるステークホルダーは、たいてい当事者と直属の関係者に限られる。**承認が必要な人、影響を受ける現場、反対しうる部門**は明示的に問わないと出てこない。
 
-「この施策で影響を受ける方、承認が必要な方は他にいらっしゃいますか」を確認プロセスとして義務付け、顧客が挙げた(`stated`)か Skillが推定した(`inferred`)かを区別して記録する。
+特に案件を頓挫させるのは「決裁権限はないが拒否権を持つ実力者」である(agy指摘)。公式な決裁権と非公式な影響力は別物として捉える必要があるため、`influence`(影響力)と `interest`(関心度)を決裁権限とは別に持つ。
 
 ### 判断5: 要素間のリンクは任意にする
 
@@ -141,8 +164,8 @@ class Node(BaseModel):
 
 **ID規約**:
 
-- **プロジェクト内でグローバル一意**。セクション別プレフィックス(`as-` / `tb-` / `kpi-` / `sh-` / `gap-` / `bn-` / `ch-` / `cs-` / `hyp-`)
-- **採番対象**: Node系全セクション + `Hypothesis`
+- **プロジェクト内でグローバル一意**。セクション別プレフィックス(`as-` / `tb-` / `kpi-` / `sh-` / `gap-` / `bn-` / `ch-` / `cs-` / `at-` / `hyp-`)
+- **採番対象**: Node系全セクション + `Attempt` + `Hypothesis`(IDを持つ全モデル)
 
 **採番と検証のシーケンス**(Codex指摘により明文化。`RequirementsStore.save` 内で実行):
 
@@ -160,19 +183,20 @@ class Node(BaseModel):
 
 ```python
 class AsIs(Node):
-    visibility: Literal["public", "internal"] = "internal"
-    # public:   市場調査・公開情報で観測できる姿(evidence_refs に market/trend fact)
-    # internal: ヒアリングでしか分からない実態(evidence_refs に company fact)
+    visibility: Literal["public", "internal"]      # 既定値なし(必須)
+    # public:   公開情報・市場調査で観測できる姿
+    # internal: ヒアリングでしか分からない実態
+    source_stakeholder_ids: list[str] = []        # 誰の視点に基づく実態か
 
 class Gap(Node):
     kind: Literal["perception", "goal"] = "goal"
-    # perception: 外部から見える姿 と 内部の実態 の乖離(隠れた課題の在り処)
+    # perception: 公開情報から見える姿 と 現場実態 の乖離(実態発見の契機)
     # goal:       あるべき姿 と 現状 の乖離(打ち手の対象)
-    from_as_is: list[str] = []       # perception では public/internal 両方を並べる
+    from_as_is: list[str] = []
     from_to_be: list[str] = []       # goal のみ
 
 class Bottleneck(Node):
-    gap_ids: list[str] = []
+    gap_ids: list[str] = []          # kind="goal" の gap のみ参照する
     from_hypothesis: str = ""        # 昇格元の仮説ID(判断8)
 
 class Challenge(Node):
@@ -180,7 +204,26 @@ class Challenge(Node):
     cause_hypothesis_ids: list[str] = []    # 未検証の真因(検証途上はこちら)
 ```
 
-**`Gap.kind` は2種類のGAPを区別する**(レビュー指摘により追加)。従来は「あるべき姿 − 現状」の目標GAPしか扱えなかったが、**「外部認識 − 内部実態」の認識GAP**を保持しないと、暗黙知が可視化されないままToBeが理想の正論に終わる(判断4 プロセス1)。
+**`Gap.kind` は2種類のGAPを区別する**。従来は「あるべき姿 − 現状」の目標GAPしか扱えなかったが、**「公開情報から見える姿 − 現場実態」の認識GAP**を保持しないと、暗黙知が可視化されないままToBeが理想の正論に終わる(判断4 プロセス1)。
+
+**2つのGAPは下流での役割が異なる**(agy指摘により明文化)。目標GAPの解消は「打ち手の導入」だが、認識GAPの解消は「実態の直視」であり、解くべき問いの性質が違う。同じパイプラインに流すと真因分析と打ち手選定で議論が混濁する。
+
+| GAP種別 | 下流での役割 |
+|---|---|
+| `goal` | `bottleneck` → `challenge` → 打ち手のパイプラインに流す |
+| `perception` | **隠れた `AsIs(internal)` を発見・確定するための契機**。直接パイプラインに流さない。乖離そのものが解くべき問題なら、判明した実態を `AsIs(internal)` として記録し、そこから目標GAPを導出する |
+
+**保存時の検証**(Codex指摘により明文化):
+
+- `kind="perception"` の `from_as_is` は `visibility="public"` と `visibility="internal"` を**それぞれ1件以上**参照する(片側だけでは対応関係が成立しないため)
+- `kind="perception"` の `from_to_be` は空でなければならない
+- `Bottleneck.gap_ids` が参照できるのは `kind="goal"` の gap のみ
+
+**`AsIs.visibility` は既定値を持たない必須項目**とする(Codex指摘)。既定 `internal` にすると、指定漏れの公開情報まで内部実態として扱われ、認識GAPの検出が壊れる。
+
+**`AsIs.source_stakeholder_ids` は誰の視点かを保持する**(agy指摘)。経営層の考える「実態」と現場オペレーターの「実態」は乖離する。単一の客観事実として記録すると、声の大きいステークホルダーの主観が実態として固定化される。
+
+**`evidence_refs` と `visibility` の関係は推奨であって強制ではない**(Codex指摘により明確化)。現行 `Fact.kind`(market/policy/trend/company)は**対象領域の分類であって公開性の分類ではない** — `policy`(国策)は公開情報だが、`company` は非公開とは限らない。したがって「publicなら market/trend fact」という機械的な強制はしない。出典を伴うことは推奨するが、`visibility` の正しさは出典からは保証されない。
 
 **`Challenge.cause_hypothesis_ids` は相互レビュー(agy)の指摘により追加**。真因がまだ仮説段階にある健全な検証途上で、CLIが「未リンク」を警告し続けてしまう問題を防ぐ。未リンク警告は**両方が空のときのみ**出す。
 
@@ -214,6 +257,7 @@ class RequirementsDoc(BaseModel):
     constraints: list[Node] = []      # 予算・期間・体制・法令・既存システム
     attempts: list[Attempt] = []      # 既往の取り組みと、なぜ解決に至っていないか
     hypotheses: list[Hypothesis] = []
+    process_checks: ProcessChecks = ProcessChecks()   # 判断4の3確認プロセスの実施結果
 ```
 
 **`challenges` の移行方針**: `Challenge` は `ConfidenceItem` の上位互換。既存JSONは `id` が無い状態で読めるため、**読み込み時に空IDとして扱い、次回保存時に core が採番する**。この初回採番は意味上の変更として扱わない(陳腐化を引き起こさない)。移行対象の実データは1プロジェクト(medo-ops、課題5件)のみ。
@@ -235,33 +279,69 @@ class Stakeholder(Node):
     role: str = ""
     pains: list[str] = []
     stance: Literal["unknown", "supportive", "neutral", "resistant"] = "unknown"
-    is_decision_maker: bool = False       # 承認・決裁の権限を持つか
+    is_decision_maker: bool = False       # 公式な承認・決裁の権限を持つか
+    influence: Literal["high", "medium", "low"] = "medium"   # 非公式な影響力
+    interest: Literal["high", "medium", "low"] = "medium"    # この案件への関心度
     surfaced_by: Literal["stated", "inferred"] = "stated"
     # stated:   顧客が自ら挙げた
     # inferred: Skillが推定して確認を求めた(隠れたステークホルダーの発見)
 ```
 
-**`stance` / `is_decision_maker` / `surfaced_by` はレビュー指摘により追加**(判断4 プロセス3)。顧客が最初に挙げるのは当事者と直属の関係者に限られ、承認者・影響を受ける現場・反対しうる部門は明示的に問わないと出てこない。`surfaced_by` により「顧客が挙げた」と「Skillが推定して確認した」を区別し、確認プロセスが実行されたかを追跡できる。
+**`influence` と `interest` を決裁権限とは別に持つ**(agy指摘)。案件を最も頓挫させるのは「決裁権限はないが拒否権を持つ実力者」や「現場でサボタージュする利用部門長」であり、公式な決裁権(`is_decision_maker`)だけでは捕捉できない。この2軸はステークホルダー分析の標準(Power-Interest Matrix)に対応し、エンゲージメント方針の決定に使う。
+
+**`surfaced_by` は発見経路の記録であり、確認プロセスの実施結果ではない**(Codex指摘により役割を限定)。「Skillが推定した関係者が1人もいない」ことは「探索しなかった」とも「探索したが追加はいなかった」とも解釈でき、両者を区別できない。確認プロセスの実施は `process_checks`(3.5)が保持する。
 
 ### 3.4 既往の取り組み(Attempt)
 
 **「なぜ今まで解決に至っていないのか」を保持する**(判断4 プロセス2。レビュー指摘により追加)。一度も着手していない課題と、複数回試して頓挫した課題はまったく別物であり、後者には隠れた制約・力学が潜んでいる。
 
 ```python
+BlockerCategory = Literal[
+    "resource",            # 予算・人材・時間の不足
+    "politics_incentive",  # 部門間の利害対立・インセンティブ不整合
+    "technical",           # 技術的困難・技術負債
+    "governance",          # 承認プロセス・規制・コンプライアンス
+    "priority",            # 他施策に優先度で負けた・タイミング
+]
+
 class Attempt(BaseModel):
-    id: str = ""
-    challenge_ids: list[str] = []
-    gap_ids: list[str] = []
+    id: str = ""                          # 採番プレフィックス at-
+    challenge_ids: list[str] = []         # 既存 Challenge のIDのみ参照可
+    gap_ids: list[str] = []               # 既存 Gap のIDのみ参照可
     description: str                      # 何をやったか
     outcome: Literal["not_attempted", "in_progress", "stalled", "failed", "partial", "succeeded"]
     blocker: str = ""                     # なぜ進まなかった/失敗したか
+    blocker_category: list[BlockerCategory] = []
     confidence: Confidence = "open"
     evidence_refs: list[str] = []
 ```
 
 `outcome` が `stalled` / `failed` の `blocker` は、`constraints` と `bottlenecks` の最有力の発見源になる。Skillは blocker から真因仮説を下書きして確認する。
 
-**`not_attempted` を明示的に持つ理由**: 「取り組んでいない」という記録と「まだ聞いていない」という空欄を区別するため。前者は確認済みの事実であり、後者は未確認。この区別がないと確認プロセスが実行されたか追跡できない。
+**`blocker_category` を併記する**(agy指摘)。自由文だけだと表面的な言い訳(「多忙だった」「予算がなかった」)をそのまま記録して完了扱いになり、真因への深掘りトリガーが働かない。類型により、Skillが掘る方向を判断できる — `politics_incentive` ならステークホルダーの利害、`technical` ならアーキテクチャ制約へ質問を連動させる。
+
+**`not_attempted` を明示的に持つ理由**: 「取り組んでいない」という記録と「まだ聞いていない」という空欄を区別するため。前者は確認済みの事実であり、後者は未確認。
+
+**保存時の検証**(Codex指摘): `outcome` が `stalled` / `failed` の場合は `blocker` を必須とする。`challenge_ids` / `gap_ids` は同一ドキュメント内に実在するIDのみ参照可(存在しないIDで未確認警告を消せてしまうことを防ぐ)。
+
+### 3.5 確認プロセスの実施記録(ProcessChecks)
+
+**「未確認」と「確認したが該当なし」を区別する**(Codex・agyが独立に指摘)。データの形から確認プロセスの実施を推測すると誤判定になる — 推定した関係者を1件置くだけで警告が消え、逆に質問して「他にいない」と確認した正常なケースでは永続的に警告され続ける。
+
+```python
+CheckState = Literal["unverified", "confirmed_none", "identified"]
+# unverified:     まだ確認していない
+# confirmed_none: 確認した結果、該当なし(乖離なし / 過去の取り組みなし / 追加の関係者なし)
+# identified:     確認して該当があった(対応するレコードが存在する)
+
+class ProcessChecks(BaseModel):
+    reality_gap: CheckState = "unverified"          # プロセス1: 公開情報と現場実態の突合
+    past_attempts: CheckState = "unverified"        # プロセス2: 既往の取り組みの確認
+    hidden_stakeholders: CheckState = "unverified"  # プロセス3: 隠れた関係者の探索
+    decision_maker: CheckState = "unverified"       # プロセス3: 決裁者の特定
+```
+
+`RequirementsDoc.process_checks` として持つ。`identified` を記録しながら対応するレコードが1件も無い場合は**不整合**として `medo status` が報告する。
 
 **現状値を `float` で直接持たず `fact` を参照する理由**: KPIの現状値は観測された事実であり、設計原則「数値・事実の通り道にLLMを挟まない」の対象。`kind: company` のファクト(ヒアリング由来・URL不要)として保存し、`current_fact_id` で参照する。これにより出典・取得日・stale判定が自動的に効く。
 
@@ -269,7 +349,7 @@ class Attempt(BaseModel):
 
 `stakeholders.pains` は Section 6 の共感要素②の入力になる。**保存先は要件ドキュメント**とする(顧客個人名ではなく役割と痛みを記録する運用とし、個人特定情報は書かない)。
 
-### 3.5 仮説(Hypothesis)
+### 3.6 仮説(Hypothesis)
 
 `confidence` は「今どれだけ確からしいか」、`Hypothesis` は「何を検証すれば確定するか」を持つ。
 
@@ -318,27 +398,42 @@ class Hypothesis(BaseModel):
     "to_be_without_kpi": ["tb-1"],
     "hypotheses_unvalidated": ["hyp-1", "hyp-3"]
   },
+  "process_checks": {
+    "reality_gap": "unverified",
+    "past_attempts": "identified",
+    "hidden_stakeholders": "confirmed_none",
+    "decision_maker": "unverified"
+  },
   "unverified_process": {
-    "as_is_without_public_counterpart": ["as-2", "as-3"],
-    "challenges_without_attempt": ["ch-1", "ch-4", "ch-5"],
-    "no_decision_maker_identified": true,
-    "stakeholders_all_stated": true
+    "public_as_is_without_verification": ["as-1"],
+    "challenges_without_attempt": ["ch-1", "ch-4"],
+    "inconsistent_checks": []
   }
 }
 ```
 
 `challenges_without_cause` は `bottleneck_ids` と `cause_hypothesis_ids` の**両方が空**の課題のみを列挙する(3.1参照)。
 
-### `unverified_process`: 3つの確認プロセスの未実施を検出する
+### 確認プロセスの実施状況を返す
 
 判断4 の確認プロセスが実行されたかを、CLIが決定論的に返す。**これは「漏れの指摘」であって強制ではない**(判断5と同じく、未実施でも保存は拒否しない)。
 
+**実施の有無は `process_checks`(3.5)を正とし、データの形状から推測しない**(Codex・agyが独立に指摘)。「推定した関係者が1件もない」ことは「探索しなかった」とも「探索したが追加はいなかった」とも読め、区別できない。データ形状から推測すると、推定を1件置くだけで警告が消え、逆に「他にいない」と確認した正常なケースでは永続的に警告され続ける。
+
 | キー | 意味 | 対応するプロセス |
 |---|---|---|
-| `as_is_without_public_counterpart` | `internal` の現状に対し、対になる `public` の記述も認識GAPも無いもの。外部視点との突合が未実施 | プロセス1 |
-| `challenges_without_attempt` | 既往の取り組みが1件も記録されていない課題。`outcome: not_attempted` の記録があれば確認済みとして除外する | プロセス2 |
-| `no_decision_maker_identified` | `is_decision_maker: true` のステークホルダーが1人もいない | プロセス3 |
-| `stakeholders_all_stated` | 全ステークホルダーが `surfaced_by: stated`。Skillが隠れた関係者を推定・確認した形跡がない | プロセス3 |
+| `public_as_is_without_verification` | **登録済みの `public` な現状**のうち、現場実態との突合が行われていないもの(その `public` ノードを参照する有効な `perception` Gap が無い) | プロセス1 |
+| `challenges_without_attempt` | 既往の取り組みが1件も紐づいていない課題。`outcome: not_attempted` の記録があれば確認済みとして除外する | プロセス2 |
+| `inconsistent_checks` | `process_checks` が `identified` を示すのに、対応するレコードが1件も無いもの | 全プロセス |
+
+**プロセス1の検証は `public` 起点で行う**(Codex・agyが独立に指摘した最重要の訂正)。当初案は「`internal` に対応する `public` が無いもの」を検出していたが、これは成立しない:
+
+- 内部実態の大多数には対応する公開情報が存在しない(伝票転記の手間や例外処理にIR開示はない)ため、偽陽性が大量発生して警告が形骸化する
+- `Gap.from_as_is` は単なるIDリストであり、「対になる」という対応関係を機械判定できない(任意の `public` ノードや不完全な `perception` Gap があるだけで警告が消えてしまう)
+
+したがって方向を逆転し、**調査・登録した公開情報それぞれについて、現場実態と突き合わせたか**を検出する。対応関係は「その `public` ノードを `from_as_is` に含み、かつ `internal` ノードも含む有効な `perception` Gap が存在するか」で一意に判定できる(3.1の保存時検証により、`perception` Gap は両方を1件以上参照することが保証される)。
+
+公開情報に対応する実態が原理的に存在しない場合は、`process_checks.reality_gap` を `confirmed_none` にすることで確認済みとして扱う。
 
 **重複(MECEのE)の検知はフェーズ2後半**とし、`knowledge-digest` と同じLLM注入方式(fake generate でテスト可能)で**提案専用機能**として実装する。決定論では意味的重複を判定できないため、検出は提案に留め、統合の判断は利用者が行う。
 
@@ -366,8 +461,9 @@ class Hypothesis(BaseModel):
 | 対象 | `stale`(要再生成) | `outdated`(差分確認推奨) |
 |---|---|---|
 | Node系(as_is/to_be/gaps/bottlenecks/constraints/challenges/stakeholders) | 追加・削除、`confidence` 変更、リンク変更、`evidence_refs` 変更、`AsIs.visibility` / `Gap.kind` の変更 | `text` のみの変更 |
-| `Stakeholder` | 上記 + `is_decision_maker` / `stance` の変更 | `role` / `pains` の変更 |
-| `Attempt` | 追加・削除、`outcome` / `challenge_ids` / `gap_ids` の変更 | `description` / `blocker` の変更 |
+| `Stakeholder` | 上記 + `is_decision_maker` / `stance` / `influence` / `interest` / `surfaced_by` の変更 | `role` / `pains` の変更 |
+| `Attempt` | 追加・削除、`outcome` / `blocker` / `blocker_category` / `challenge_ids` / `gap_ids` / `confidence` / `evidence_refs` の変更 | `description` のみの変更 |
+| `ProcessChecks` | いずれかの `CheckState` の変更 | — |
 | `Kpi` | 追加・削除、`current_fact_id` / `target_value` / `target_text` / `unit` / `to_be_ids` の変更 | `name` のみの変更 |
 | `Hypothesis` | 追加・削除、`status` / `fermi_ref` / `challenge_ids` の変更 | `statement` / `validation_method` の変更 |
 | `principles` / `functional`(ConfidenceItem) | 追加・削除、`confidence` 変更 | `text` のみの変更 |
@@ -377,6 +473,8 @@ class Hypothesis(BaseModel):
 | `background` / `industry` / `sources` | — | 変更 |
 
 `medo status` は両方を返し、`next_step` は `stale` のみを再生成対象とする。
+
+**`Attempt.blocker` を `stale` 側に置く理由**(Codex指摘による訂正): 頓挫理由は「なぜ今まで解決していないか」の核心であり、PRFAQ とスライド章3の記述を実質的に変える。`description`(何をやったか)の言い換えとは重みが違うため、`outdated` では弱すぎる。
 
 ### 5.3 生成物の型ごとの依存セクション
 
@@ -477,7 +575,7 @@ rejected_options: list[RejectedOption] = []
 | # | 章 | 内容 | 主な入力 |
 |---|---|---|---|
 | 1 | SCQAエグゼクティブサマリー | Situation-Complication-Question-Answer | `as_is` / `challenges` / 採択案 |
-| 2 | As-Is vs To-Be 対比 | 現状と理想の対比、KPIの現状値→目標値。**外部から見える姿と内部の実態を並べる**(認識GAPの可視化) | `as_is`(public/internal) / `to_be` / `kpis` |
+| 2 | As-Is vs To-Be 対比 | 現状と理想の対比、KPIの現状値→目標値。外部から見える姿と現場実態を並べる(**下記のリフレーミング規約に従う**) | `as_is`(public/internal) / `to_be` / `kpis` |
 | 3 | GAPと真因 | 状態の乖離と、その裏にある真因。**なぜ今まで解決に至っていないか**(既往の取り組みと頓挫理由) | `gaps` / `bottlenecks` / `attempts` |
 | 4 | 打ち手比較と選定理由 | Impact × Feasibility マトリクス + **なぜ他案を落としたか** | `mini-prfaq` / `rejected_options` |
 | 5 | 推奨ソリューション詳細 | 選定案の具体像(How・Workflow Before/After)。**複数枚に展開してよい** | `prfaq` の技術的背景・workflow改善見込み |
@@ -485,6 +583,21 @@ rejected_options: list[RejectedOption] = []
 | 7 | ネクストアクション(Ask) | **本日合意いただきたい事項**(PoC実施・体制・スコープ・次工程) | `open_questions` / `hypotheses(unvalidated)` |
 
 複雑な図解はMermaidまたは対比テーブルに割り切る(Marpの表現力の範囲内に収める)。
+
+### 認識GAPのリフレーミング規約(章2)
+
+**相互レビュー(agy)の指摘により追加。提案関係の破綻を防ぐための必須規約。**
+
+認識GAP(公開情報から見える姿 と 現場実態 の乖離)をそのまま「言動不一致の暴露」として提示すると、顧客の防衛反応(恥・脅威・責任追及への恐れ)を招き、対話が閉じる。標榜していることと現場実態の乖離を不用意に突くと、組織は自己防衛のために隠蔽・反発に走る(Argyrisの組織防衛論)。
+
+`make-slides` は認識GAPを出力する際、**非難を伴わない表現へ変換する**:
+
+| 変換前(そのまま出すと防衛を招く) | 変換後 |
+|---|---|
+| 「対外的には〇〇と説明しているが、実態は△△」 | 「外部環境の変化スピードに対し、現場の仕組みの追随には□□のタイムラグがある」 |
+| 「公約と実態が乖離している」 | 「目指す姿と、現在の運用上の摩擦点」 |
+
+**責任の所在ではなく、環境変化と適応のタイムラグとして描く**。これは事実を歪める操作ではなく、同じ事実を協調的探索の枠組みで提示する編集判断である(引用する `as_is` ノードと出典は変えない)。
 
 ---
 
@@ -496,7 +609,7 @@ rejected_options: list[RejectedOption] = []
 - **feasibility**: 技術ナレッジの確度 + `constraints` との突合
 - **保存形式**: 「基準・根拠・確度」を持つ比較表として保存し、数値効果はフェルミ生成物への参照に留める
 
-**感度分析**: `Hypothesis.fermi_ref`(3.4)により、「どの仮定がブレると効果の桁が変わるか」を決定論的に算出できる。これが `decision-roadmap` の検証優先度になる。
+**感度分析**: `Hypothesis.fermi_ref`(3.6)により、「どの仮定がブレると効果の桁が変わるか」を決定論的に算出できる。これが `decision-roadmap` の検証優先度になる。
 
 ---
 
@@ -504,14 +617,14 @@ rejected_options: list[RejectedOption] = []
 
 | 優先度 | 項目 | 備考 |
 |---|---|---|
-| **1** | 論理構造スキーマ + ID規約 + 移行 + 充足状況の可視化 | ID採番シーケンス(3.1)・型付きリンク・`covered_challenge_ids` を含める。これが無いと2を開始できない |
+| **1** | 論理構造スキーマ + ID規約 + 移行 + 充足状況の可視化 + **`medo-hearing` の改訂** | ID採番シーケンス(3.1)・型付きリンク・`covered_challenge_ids` を含める。これが無いと2を開始できない。**Skillが `process_checks` を読んで未確認項目をどう扱うかの契約(質問する/明示的に保留する/例外として記録する)を受入条件に含める**(Codex指摘。スキーマだけ作ってもSkillが使わなければ確認プロセスは実行されない) |
 | **2** | 陳腐化のセクション単位化 + カバレッジ判定 + 2段階重大度 | 1と密結合。飛ばすと全生成物が常時stale化して破綻 |
 | **3** | 出典検証の強化(URLフェッチ + 数値突合) | **他と技術的に独立しており並行可能**。Task10で穴を実証済み |
 | **4** | 生成物の依存グラフ + stale伝播 | `make-slides` の前提 |
 | **5** | `make-slides`(7章構成の構造化テンプレート) | 利用者の主要求 |
 | **6a** | ナレッジ来歴スキーマ | **6bの前提**(下記) |
 | **6b** | `knowledge-digest`(LLMによる統合提案) | 統合後も旧entryを残し、過去Artifactの引用が検証可能であること |
-| **7** | `decision-roadmap`(再定義) | 3.4の `fermi_ref` が前提。感度分析と連動 |
+| **7** | `decision-roadmap`(再定義) | 3.6の `fermi_ref` が前提。感度分析と連動 |
 | 後続 | `build-mock` / `propose-architecture` / pricing(再定義) / 簡易Webアプリ | フェーズ2完了定義の改訂が必要(後述) |
 
 ### 優先度6a: ナレッジ来歴スキーマの仕様
