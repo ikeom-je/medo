@@ -104,13 +104,30 @@ ToBe(confidence: confirmed)= 合意されたあるべき姿
 
 #### ToBeを出すタイミングは毎回ユーザーに問う
 
-往復の周回をSkillが勝手に決めない。**`as_is` を保存するたびに、Skillは「この時点でToBeを出す/更新するか」をユーザーに確認する**(判断4のSkill契約)。
+往復の周回をSkillが勝手に決めない。**`as_is` が変更されるたびに「この時点でToBeを出す/更新するか」の判断をユーザーに求める**(判断4のSkill契約)。
 
 - ユーザーが「出す」と答えれば、現時点のAsIsを前提にToBeを仮説(`assumed`)として生成する
 - 「まだ」と答えれば、AsIsの深掘りを続ける
-- 判断はユーザーが持つ。Skillは現状(内部実態の充足度・ToBeの現在の確度)を提示して問うだけ
+- 判断はユーザーが持つ。Skillは現状(`asis_tobe_loop`)を提示して問うだけ
+
+**この確認は自然言語の問いかけだけに依存させず、データとして観測可能にする**(Codex指摘)。Skill本文に「問え」と書いても実行時に問うた保証はなく、自動テストもできない(testing.md)。そこで `to_be_decision` チェックポイント(3.6)を core が持ち、未回答の状態を `medo status` が決定論的に報告する。
+
+**発火条件**: `as_is` の追加・削除・本文/属性の変更があった保存で `pending` を立てる。AsIsが変わらない再保存やID自動採番のみの保存では立てない。
 
 これは判断2「順序は固定しない」の具体化でもある。何周するか、いつToBeを出すかは案件ごとに違う。
+
+#### 仮説ToBeは「壊される前提の叩き台」として提示する
+
+仮のToBeをぶつける手法は実務で **Strawman Proposal**(叩き台提案)や **Sacrificial Concept**(犠牲的コンセプト)と呼ばれ、学術的には **Provotyping** として研究されている(agy調査)。
+
+- [Sacrificial Concepts](https://medium.com/design-thinking-group/sacrificial-concepts-design-thinking-tool-e00c3c3933c0)
+- [Straw Man Proposal](https://en.wikipedia.org/wiki/Straw_man_proposal)
+- [Provotyping: deliberate provocations for design research](https://www.researchgate.net/publication/262272464_Provotyping_deliberate_provocations_for_design_research)
+
+**リスクは、顧客が仮説を確定仕様やコミットメントと誤認すること、および初期案への思考固定(アンカリング)である**。`confidence: assumed` の記録だけでは対面の場での防壁にならないため、Skillの提示方針として次を契約に含める:
+
+- **壊される前提の叩き台であることを宣言してから提示する**(「反論をいただくために置きます」)
+- **単一のToBeを正解として置かず、振れ幅のある2〜3案を対比で提示する**(アグレッシブ案と段階的現実案など)。単一案はアンカリングを最も強く招く
 
 この失敗を防ぐため、ヒアリングに以下3つの確認プロセスを**Skillの契約として義務付ける**。実施結果は `process_checks`(3.5)に記録し、`medo status` が未実施を検出する。
 
@@ -296,7 +313,7 @@ class RequirementsDoc(BaseModel):
 
     # --- 追加 ---
     as_is: list[AsIs] = []            # visibility で public / internal を区別
-    to_be: list[Node] = []
+    to_be: list[ToBe] = []             # 確度昇格の証跡を持つ(3.6)
     kpis: list[Kpi] = []
     stakeholders: list[Stakeholder] = []
     gaps: list[Gap] = []              # kind で perception / goal を区別
@@ -305,6 +322,7 @@ class RequirementsDoc(BaseModel):
     attempts: list[Attempt] = []      # 既往の取り組みと、なぜ解決に至っていないか
     hypotheses: list[Hypothesis] = []
     process_checks: ProcessChecks = ProcessChecks()   # 判断4の3確認プロセスの実施結果
+    to_be_decision: ToBeDecision = ToBeDecision()     # ToBe生成の判断チェックポイント(3.6)
 ```
 
 **`challenges` の移行方針**: `Challenge` は `ConfidenceItem` の上位互換。既存JSONは `id` が無い状態で読めるため、**読み込み時に空IDとして扱い、次回保存時に core が採番する**。この初回採番は意味上の変更として扱わない(陳腐化を引き起こさない)。移行対象の実データは1プロジェクト(medo-ops、課題5件)のみ。
@@ -409,7 +427,32 @@ class ProcessChecks(BaseModel):
 
 `stakeholders.pains` は Section 6 の共感要素②の入力になる。**保存先は要件ドキュメント**とする(顧客個人名ではなく役割と痛みを記録する運用とし、個人特定情報は書かない)。
 
-### 3.6 仮説(Hypothesis)
+### 3.6 ToBe生成の判断チェックポイント(ToBeDecision)
+
+判断4の「毎回ユーザーに問う」契約を**データとして観測可能にする**(Codex指摘)。Skill本文に「問え」と書くだけでは実行時に問うた保証がなく、受入条件として検証できない。
+
+```python
+class ToBeDecision(BaseModel):
+    state: Literal["pending", "generate", "defer"] = "generate"
+    for_requirements_version: int = 0   # どのAsIs改訂に対する判断か
+```
+
+- `as_is` が変更された保存で core が `state="pending"` と当該バージョンを立てる
+- ユーザーの回答は明示的なCLI操作(`medo requirements to-be-decision --project <id> --answer generate|defer`)で記録する
+- `medo status` は未回答(`pending`)のチェックポイントを報告する
+
+**二層の担保**: データ層(チェックポイントの解消)は決定論的に検証でき、**自然言語で実際に問いかけたかはeval・手動スモークで確認する**。Skillの会話上の振る舞いは自動テストできない(testing.md)ため、この分離が必要になる。
+
+**確度が上がった契機を記録する**(agy指摘)。ToBeが `assumed` から `confirmed` へ昇格するとき、その根拠となった内部実態を残す。「当初のToBe(理想)に対し、現場ヒアリングで制約 `cs-1` と頓挫理由 `at-2` が判明したためToBe v2を経て合意に至った」という変遷の証跡は、後から「なぜこのToBeなのか」を問われた際の最大の防御になり、方針の蒸し返しを防ぐ。
+
+```python
+class ToBe(Node):
+    evidenced_by: list[str] = []   # 確度昇格の契機になった as_is / constraint / attempt のID
+```
+
+`to_be` の型を汎用 `Node` から `ToBe` に変更する(既定値ありのため後方互換)。**裏づけの判定(§4)には使わない** — 判定は `Gap(kind="goal")` 経由の明示リンクで行い、`evidenced_by` は経緯の記録に徹する。両者を兼ねさせると、記録の便宜で判定が緩む。
+
+### 3.7 仮説(Hypothesis)
 
 `confidence` は「今どれだけ確からしいか」、`Hypothesis` は「何を検証すれば確定するか」を持つ。
 
@@ -442,7 +485,7 @@ class Hypothesis(BaseModel):
   "structure": {
     "as_is":        {"count": 3, "confirmed": 2, "empty": false,
                      "public": 1, "internal": 2},
-    "to_be":        {"count": 0, "confirmed": 0, "empty": true},
+    "to_be":        {"count": 2, "confirmed": 0, "empty": false},
     "kpis":         {"count": 0, "confirmed": 0, "empty": true},
     "stakeholders": {"count": 2, "confirmed": 2, "empty": false},
     "gaps":         {"count": 0, "confirmed": 0, "empty": true,
@@ -469,18 +512,27 @@ class Hypothesis(BaseModel):
     "inconsistent_checks": []
   },
   "coverage_gaps": {
-    "internal_as_is_missing": true,
+    "internal_as_is_missing": false,
     "public_as_is_without_verification": ["as-1"],
     "challenges_without_attempt": ["ch-1", "ch-4"]
   },
   "asis_tobe_loop": {
-    "internal_as_is_count": 0,
+    "round_count": 2,
+    "reality_evidence": {"internal_as_is": 2, "constraints": 1, "resistant_stakeholders": 0},
     "to_be_count": 2,
     "to_be_confidence": {"confirmed": 0, "assumed": 2, "open": 0},
-    "unsupported_confirmed_to_be": []
+    "unsupported_confirmed_to_be": [],
+    "to_be_decision": {"state": "pending", "for_requirements_version": 3},
+    "divergence_warning": false
+  },
+  "empathy_readiness": {
+    "state": "not_ready",
+    "reasons": ["to_be がすべて assumed(往復継続中)", "process_checks.reality_gap が unverified"]
   }
 }
 ```
+
+**この例は往復2周目の途中を表す**。`structure.as_is.internal`(2件)と `reality_evidence.internal_as_is`(2件)、`structure.to_be.count`(2件)と `to_be_count`(2件)が一致していることに注意 — 同じ事実を2箇所で返す以上、整合が取れていなければ実装のテスト期待値を決められない(Codex指摘により当初例の矛盾を訂正)。
 
 `challenges_without_cause` は `bottleneck_ids` と `cause_hypothesis_ids` の**両方が空**の課題のみを列挙する(3.1参照)。
 
@@ -535,11 +587,38 @@ class Hypothesis(BaseModel):
 
 | キー | 意味 |
 |---|---|
-| `internal_as_is_count` | 内部実態として記録されているAsIsの件数 |
+| `round_count` | 往復の周回数(下記の定義による) |
+| `reality_evidence` | 往復で引き出された**現実の裏づけ**の件数。内部実態AsIsだけでなく `constraints` と抵抗を示すステークホルダーも数える(下記) |
 | `to_be_count` / `to_be_confidence` | ToBeの件数と確度の分布。往復が進むほど `assumed` から `confirmed` へ移る |
-| `unsupported_confirmed_to_be` | **内部実態の裏づけが無いまま `confirmed` になっているToBeのID**。往復の初期に確度だけが上がった状態の検出 |
+| `unsupported_confirmed_to_be` | **裏づけ無く `confirmed` になっているToBeのID**(判定式は下記) |
+| `to_be_decision` | 「ToBeを出すか」の未回答チェックポイント(3.6) |
+| `divergence_warning` | 往復が発散している疑いの検出(下記) |
 
-**`unsupported_confirmed_to_be` が唯一の警告対象**である。`internal_as_is_count` が0で `to_be` が `assumed` なのは往復の初期段階として正常であり、警告しない。
+#### 「裏づけあり」の判定式
+
+**ToBeと内部実態を結ぶ経路を明示する**(Codex・agyが独立に指摘した Blocker)。当初案は「内部実態の裏づけが無いToBe」と書きながら、`to_be` は汎用 `Node` でリンクを持たず、判定できるのは「内部AsIsが全体で0件か」までだった。無関係な内部AsIsが1件あるだけで、すべての `confirmed` ToBeが警告をすり抜ける。
+
+既存の `Gap(kind="goal")` を橋渡しとして使い、新しいフィールドを増やさずに定義する:
+
+> **ToBe `tb-N` が裏づけを持つ** ⟺ `from_to_be` に `tb-N` を含む `Gap(kind="goal")` が存在し、その `from_as_is` に `visibility="internal"` かつ `confidence != "open"` の AsIs が1件以上含まれる
+
+`unsupported_confirmed_to_be` は、この条件を満たさない `confidence="confirmed"` のToBeを列挙する。**リンクは判断5どおり任意**であり、欠落しても保存は拒否せず警告に留める。
+
+#### `reality_evidence`: 裏づけはAsIsだけではない
+
+**仮説ToBeをぶつけて噴出する暗黙知の大半は、現状(AsIs)ではなく制約と組織力学である**(agy指摘)。「そのToBeは無理」の主因は業務フローよりも、法務・親会社の内規(`constraints`)や特定部門長の反対(`stakeholders.stance = "resistant"`)であることが実務上多い。
+
+したがって往復の進捗は内部実態の件数だけで測らず、`internal_as_is` / `constraints` / `resistant_stakeholders` の3つを返す。
+
+#### 往復の周回数と発散の検出
+
+- **`round_count` の定義**: `as_is` の変更と `to_be` の変更が交互に起きた回数。要件バージョンの履歴から決定論的に導く
+- **`divergence_warning`**: `round_count` が3を超えても `to_be_confidence` の `confirmed` が0件のまま増えない状態。論点の発散、ステークホルダー間の対立、スコープ肥大化の兆候として報告する(agy指摘。実務上の有効な往復は2〜3周が目安)
+- **収束の目安**: 新規に得られた実態によってToBeの修正差分が出なくなった状態(飽和)
+
+`divergence_warning` は**報告であって停止条件ではない**(判断5)。
+
+**警告対象は `unsupported_confirmed_to_be` と `divergence_warning` の2つ**であり、`reality_evidence` が少なく `to_be` が `assumed` なのは往復の初期段階として正常であるため警告しない。
 
 **重複(MECEのE)の検知はフェーズ2後半**とし、`knowledge-digest` と同じLLM注入方式(fake generate でテスト可能)で**提案専用機能**として実装する。決定論では意味的重複を判定できないため、検出は提案に留め、統合の判断は利用者が行う。
 
@@ -566,8 +645,8 @@ class Hypothesis(BaseModel):
 
 | 対象 | `stale`(要再生成) | `outdated`(差分確認推奨) |
 |---|---|---|
-| Node系(as_is/to_be/gaps/bottlenecks/constraints/challenges/stakeholders) | 追加・削除、`confidence` 変更、リンク変更、`evidence_refs` 変更、`AsIs.visibility` / `Gap.kind` の変更 | `text` のみの変更 |
-| `Stakeholder` | 上記 + `is_decision_maker` / `stance` / `influence` / `interest` / `surfaced_by` の変更 | `role` / `pains` の変更 |
+| **論理連鎖の中核ノード**(as_is / to_be / gaps / bottlenecks / challenges / constraints) | 追加・削除、`confidence` 変更、リンク変更、`evidence_refs` 変更、`AsIs.visibility` / `Gap.kind` の変更、**`text` の変更**(下記) | `change_kind: "editorial"` を宣言した `text` 変更のみ |
+| `stakeholders` | 追加・削除、`confidence` / `is_decision_maker` / `stance` / `influence` / `interest` / `surfaced_by` の変更 | `role` / `pains` / `text` の変更 |
 | `Attempt` | 追加・削除、`outcome` / `blocker` / `blocker_category` / `challenge_ids` / `gap_ids` / `confidence` / `evidence_refs` の変更 | `description` のみの変更 |
 | `ProcessChecks` | — | — (下記の理由により陳腐化の対象外) |
 
@@ -580,9 +659,25 @@ class Hypothesis(BaseModel):
 | `goal`(str) | — | 変更 |
 | `background` / `industry` / `sources` | — | 変更 |
 
-`medo status` は両方を返し、`next_step` は `stale` のみを再生成対象とする。
+`medo status` は両方を返す。
+
+**ただし「staleである」と「今すぐ再生成すべき」は別である**(Codex指摘)。現行の `status` は stale が1件でもあれば `regenerate-stale-artifacts` を最優先で返すが、この挙動は往復設計と衝突する — 早期にmini-prfaqを作った後、往復のたびにToBeの確度や本文が変わって生成物がstaleになり、周回ごとに再生成へ誘導されてしまう。
+
+したがって**診断と次の行動を分離する**:
+
+- `stale` / `outdated` は診断として常に報告する
+- **単一の `next_step` ではなく `recommended_actions`(複数)を返す**
+- 往復が進行中(`to_be_decision.state == "pending"` または `to_be_confidence.confirmed == 0`)の場合、**stale生成物の再生成を最優先にしない**。「この版で提案を更新する」とユーザーが決めるまでは、往復の継続を優先候補として提示する
+
+後方互換のため `next_step` は `recommended_actions` の先頭要素として返し続ける。
 
 **`Attempt.blocker` を `stale` 側に置く理由**(Codex指摘による訂正): 頓挫理由は「なぜ今まで解決していないか」の核心であり、PRFAQ とスライド章3の記述を実質的に変える。`description`(何をやったか)の言い換えとは重みが違うため、`outdated` では弱すぎる。
+
+**論理連鎖の中核ノードは `text` 変更を既定で `stale` とする**(Codex指摘による訂正)。当初案は Node系の `text` 変更を一律 `outdated` にしていたが、**これは往復設計と正面から矛盾する**。判断4の往復は、暗黙知が判明するたびに AsIs や ToBe の本文を書き換えて精緻化する工程そのものである。その本文更新を「軽微」と分類すると、意味が大きく変わったPRFAQ・スライドが最新扱いのまま残る。特に `assumed → assumed` のまま複数周回する場合、confidence 変更でも捕捉できない。
+
+誤字・言い回しの修正まで `stale` にしたくない場合は、**保存時に `change_kind: "editorial"` を明示的に宣言する**。core は宣言を決定論的に処理するだけで、本文の意味差をLLMや文字列差分から推測しない(設計原則との整合)。宣言が無ければ `stale` を既定とする — 安全側に倒す。
+
+`stakeholders` は論理連鎖の中核ではないため、`text` / `role` / `pains` の変更は `outdated` に留める(属性の変更は `stale`)。
 
 ### 5.3 生成物の型ごとの依存セクション
 
@@ -647,12 +742,39 @@ Codex と agy が**独立に**「論理の一貫性は必要条件だが十分�
 
 | 要素 | 内容 | 検証方法 |
 |---|---|---|
-| ①**実態の共有** | **AsIsに内部実態が入っており、ToBeがその裏づけを得ている**(公開情報だけのAsIsから確定したToBeになっていない)。加えて、なぜ今まで解決していないかが共有されている | 半自動(`asis_tobe_loop.unsupported_confirmed_to_be` が裏づけ無き確定を、`unverified_process` が確認プロセスの未実施を検出) |
+| ①**実態の共有** | **AsIsに内部実態が入っており、ToBeがその裏づけを得ている**(公開情報だけのAsIsから確定したToBeになっていない)。加えて、なぜ今まで解決していないかが共有されている | 半自動(`empathy_readiness` が**肯定条件の充足**を合成して返す。下記) |
 | ②論理の一貫性 | as-is → to-be/KPI → gap → 真因 → 課題 → 打ち手 が繋がっている | **自動**(構造の充足とリンクで判定可能。ただし未接続はエラーにせず報告のみ) |
 | ③読み手の痛みとBefore/After | `stakeholders.pains` に紐づく具体的な痛み、変化後の体験 | 人間評価(スキーマが入力を保証) |
 | ④トレードオフの誠実な開示 | 不確実性・リスク・**採らなかった選択肢とその理由** | 人間評価(`hypotheses` の未検証項目 + `rejected_options`) |
 
 **①を先頭に置く**(レビュー指摘により追加)。実態が共有されないまま論理だけを整えても、受け手には「理想の正論」としか映らず共感は生まれない。共感の起点は論理ではなく、現実の直視である。
+
+### `empathy_readiness`: 違反の不在ではなく肯定条件で判定する
+
+**違反が無いことは、準備が整っている証明にはならない**(Codex指摘による訂正)。当初案は `unsupported_confirmed_to_be` が空であることを①の検証手段としていたが、**ToBeが0件でも、すべて `assumed` でも、内部実態が0件でもこの集合は空になる**。検出上は成功に見えて実態は未着手、という状態を通してしまう。
+
+`medo status` は肯定条件を明示的に合成して返す:
+
+```json
+"empathy_readiness": {
+  "state": "ready | not_ready | not_evaluable",
+  "reasons": ["..."]
+}
+```
+
+| 状態 | 意味 |
+|---|---|
+| `ready` | 下記の肯定条件をすべて満たす |
+| `not_ready` | 満たさない条件があり、`reasons` に列挙する |
+| `not_evaluable` | ToBeが未作成など、評価自体が時期尚早 |
+
+**肯定条件**(すべて満たすこと):
+
+1. `reality_evidence.internal_as_is` が1件以上(内部実態が入っている)
+2. `to_be` に `confirmed` が1件以上あり、**そのすべてが明示リンクで裏づけ済み**(`unsupported_confirmed_to_be` が空)
+3. `process_checks` の4項目がいずれも `unverified` でない
+
+**これは保存ゲートではなく診断である**(判断5との整合)。`not_ready` でもPRFAQやスライドの生成は妨げない。
 
 ### 見送った案の理由を保持する
 
@@ -730,7 +852,7 @@ rejected_options: list[RejectedOption] = []
 - **feasibility**: 技術ナレッジの確度 + `constraints` との突合
 - **保存形式**: 「基準・根拠・確度」を持つ比較表として保存し、数値効果はフェルミ生成物への参照に留める
 
-**感度分析**: `Hypothesis.fermi_ref`(3.6)により、「どの仮定がブレると効果の桁が変わるか」を決定論的に算出できる。これが `decision-roadmap` の検証優先度になる。
+**感度分析**: `Hypothesis.fermi_ref`(3.7)により、「どの仮定がブレると効果の桁が変わるか」を決定論的に算出できる。これが `decision-roadmap` の検証優先度になる。
 
 ---
 
@@ -745,7 +867,7 @@ rejected_options: list[RejectedOption] = []
 | **5** | `make-slides`(7章構成の構造化テンプレート) | 利用者の主要求 |
 | **6a** | ナレッジ来歴スキーマ | **6bの前提**(下記) |
 | **6b** | `knowledge-digest`(LLMによる統合提案) | 統合後も旧entryを残し、過去Artifactの引用が検証可能であること |
-| **7** | `decision-roadmap`(再定義) | 3.6の `fermi_ref` が前提。感度分析と連動 |
+| **7** | `decision-roadmap`(再定義) | 3.7の `fermi_ref` が前提。感度分析と連動 |
 | 後続 | `build-mock` / `propose-architecture` / pricing(再定義) / 簡易Webアプリ | フェーズ2完了定義の改訂が必要(後述) |
 
 ### 優先度6a: ナレッジ来歴スキーマの仕様
