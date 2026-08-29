@@ -1,6 +1,6 @@
 # Medo フェーズ2 設計ドキュメント
 
-ステータス: レビュー中(3エージェント相互検証を2ラウンド実施済み。実装計画化の前にユーザー承認が必要)
+ステータス: レビュー中(3エージェント相互検証を3ラウンド実施済み。実装計画化の前にユーザー承認が必要)
 
 正本: 本ファイル。全体設計は `medo-design.md` を参照し、本ファイルはフェーズ2の差分を定義する。
 
@@ -36,7 +36,7 @@
 
 汎用ノード+種別タグではなく、フレームワークに基づく**named field**として持つ。
 
-**理由**: 支援ツールの役割は利用者を導くこと。項目が定義されていなければ「何が漏れているか」を機械的に指摘できず、MECEを担保できない。汎用ノードは自由度が高い代わりに、漏れの検出を利用者の記憶に依存させる。
+**理由**: 支援ツールの役割は利用者を導くこと。項目が定義されていなければ「何が漏れているか」を機械的に指摘できず、MECEを担保できない。
 
 ### 判断2: 順序は固定しない
 
@@ -45,9 +45,7 @@
 - **CLI(決定論)**: 構造の充足状況(空のセクション・assumed/openのみの項目・繋がっていないリンク)を返す
 - **Skill(生成的)**: それを見て「次に何をどう問うか」を決める
 
-利用者の話の流れが順序を決め、CLIは「今どこが埋まっていないか」だけを機械的に返す。
-
-### 判断3: 顧客に直接問う項目と、Skillが下書きする項目を分ける
+### 判断3: 顧客に問う項目と、Skillが下書きする項目を分ける
 
 **相互レビュー(agy)の指摘を採用した最重要の判断**。スキーマが細分化された状態で「空欄を埋める」ことを機械的に追求すると、顧客が答えられない項目を質問し続ける**穴埋め尋問**になり対話が破綻する。
 
@@ -55,21 +53,22 @@
 
 | 分類 | 項目 | ヒアリングでの扱い |
 |---|---|---|
-| **顧客に直接問う(初期必須ミニマム)** | `as_is` / `challenges`(顧客の生の声) / `constraints` / `stakeholders` | 顧客が答えられる。ここから始める |
+| **顧客に直接問う(初期ミニマム)** | `as_is`(現状・症状・不満などの**生の声**) / `stakeholders` | 顧客がそのまま答えられる。**ここだけで開始できる** |
+| **対話の深化に応じて引き出す** | `constraints` / `stakeholders.pains` | 初回必須にしない。関係が深まってから |
 | **合意を取りにいく** | `to_be` / `kpis` / `principles` | ブレストで一緒に言語化する |
-| **Skillが下書きして確認する** | `gaps` / `bottlenecks` / `hypotheses` | 顧客に直接答えを求めない。対話内容からSkillが `confidence: assumed` で下書きし、「こういう真因と捉えて合っていますか」と**ぶつけて確認する** |
+| **Skillが下書きして確認する** | `gaps` / `bottlenecks` / `challenges` / `hypotheses` | 顧客に直接答えを求めない。対話内容からSkillが `confidence: assumed` で下書きし、「こう捉えて合っていますか」と**ぶつけて確認する** |
 
-この運用契約をSkill本文に義務付ける。空欄は「顧客がまだ答えていない」だけでなく「Skillがまだ下書きしていない」場合もあり、後者はSkillの責務。
+**重要**: 顧客の生の声(症状・不満)は `as_is` と `stakeholders.pains` が受ける。`challenges` は「解くべき問い」であり、真因分析を経てSkillが整理するもの。**生の声をそのまま `challenges` に入れない**(相互レビューで、生の声を課題として扱うと真因分析前に構造エラー扱いになると指摘された)。
+
+初回ヒアリングは `as_is` + 生の声だけで成立し、残りは対話の深化とSkillの下書きで埋まる。
 
 ### 判断4: 要素間のリンクは任意にする
 
-「すべての課題はGAPに紐づく」といった強制はしない。痛みは明確だが理想像が未言語化、という状態は実案件で普通に起きる。
+「すべての課題はGAPに紐づく」といった強制はしない。**繋がっていないこと自体を情報として扱う**。
 
-**繋がっていないこと自体を情報として扱う**。エラーではなく現在地。
+**未接続はエラーにしない**。CLIは「充足していない状態」として報告するだけで、保存を拒否しない。
 
 ### 判断5: 解像度は confidence が制御する
-
-「知らない顧客情報は仮説なので高解像度にしても判断できない」という懸念は、スキーマを粗くすることでは解決しない。既存の `confidence`(confirmed/assumed/open)が担う。
 
 | confidence | 期待する解像度 |
 |---|---|
@@ -83,21 +82,17 @@
 現象の差分をそのまま課題と呼ぶと対症療法しか出ない(agy指摘)。
 
 ```
-to_be − as_is = gap(現象)
-                  ↓ なぜ生じているか
-              bottleneck(真因)
-                  ↓ 何を解くべきか
-              challenge(問い)
+to_be − as_is = gap(現象) → bottleneck(真因) → challenge(解くべき問い)
 ```
 
 ### 判断7: 未検証の真因は hypotheses に一元管理する
 
-相互レビュー(agy)の指摘により、`bottlenecks` と `hypotheses(kind="cause")` の責務重複を解消する。
+`bottlenecks` と `hypotheses(kind="cause")` の責務重複を解消する。
 
 - **`bottlenecks`**: 検証・合意済みの真因のみ(`confidence: confirmed`)
 - **`hypotheses(kind="cause")`**: 未検証・要検証の真因
 
-仮説が検証されたら(`status: validated`)、`bottlenecks` に昇格させ、`from_hypothesis` に元の仮説IDを記録する。二重管理を避けつつ、昇格の経緯が追跡できる。
+仮説が検証されたら(`status: validated`)`bottlenecks` に昇格させ、`from_hypothesis` に元の仮説IDを記録する。
 
 ---
 
@@ -115,27 +110,40 @@ class Node(BaseModel):
     evidence_refs: list[str] = []   # fact-id / knowledge-id(出典による裏づけ)
 ```
 
-**ID採番の契約**(Codex指摘により明文化):
+**ID規約**:
 
-- **IDはプロジェクト内でグローバル一意**。セクション別プレフィックスを付ける(`as-1` / `tb-1` / `gap-1` / `bn-1` / `ch-1` / `cs-1` / `kpi-1` / `sh-1` / `hyp-1`)
-- **採番主体は core**。`id` が空のノードにのみ採番する(`KnowledgeStore.save` の既存方式と同じ)
-- **既存IDの検証**: 保存時、指定されたIDが直前バージョンに存在するか検証し、**存在しないIDはエラーで拒否する**。ホストLLMがノードを書き写す際の採番ミス(勝手なリナンバリング)を機械的に検出するため
-- **リンクは型付きにする**(汎用の `links: list[str]` にしない):
+- **プロジェクト内でグローバル一意**。セクション別プレフィックス(`as-` / `tb-` / `kpi-` / `sh-` / `gap-` / `bn-` / `ch-` / `cs-` / `hyp-`)
+- **採番対象**: Node系全セクション + `Hypothesis`
+
+**採番と検証のシーケンス**(Codex指摘により明文化。`RequirementsStore.save` 内で実行):
+
+```
+1. 直前バージョンを取得(無ければ空として扱う)
+2. 入力ドキュメント内のID重複を検証         → 重複はエラー
+3. 非空IDが直前バージョンに存在するか検証   → 存在しないIDはエラー
+   (ホストLLMが書き写す際の勝手なリナンバリングを機械的に検出する)
+4. 空IDに採番(プレフィックス+連番。既発番の最大値+1。削除済みIDは再利用しない)
+5. 型付きリンクの参照先が採番後の文書内に存在するか検証 → 不明参照はエラー
+6. 保存
+```
+
+**リンクは型付きにする**(汎用の `links: list[str]` にしない):
 
 ```python
 class Gap(Node):
-    from_as_is: list[str] = []       # as-is ノードID
-    from_to_be: list[str] = []       # to-be ノードID
+    from_as_is: list[str] = []
+    from_to_be: list[str] = []
 
 class Bottleneck(Node):
     gap_ids: list[str] = []
     from_hypothesis: str = ""        # 昇格元の仮説ID(判断7)
 
 class Challenge(Node):
-    bottleneck_ids: list[str] = []
+    bottleneck_ids: list[str] = []          # 確定した真因
+    cause_hypothesis_ids: list[str] = []    # 未検証の真因(検証途上はこちら)
 ```
 
-型付きリンクにより、接続方向と許容する接続先が実装・検証可能になる。
+**`Challenge.cause_hypothesis_ids` は相互レビュー(agy)の指摘により追加**。真因がまだ仮説段階にある健全な検証途上で、CLIが「未リンク」を警告し続けてしまう問題を防ぐ。未リンク警告は**両方が空のときのみ**出す。
 
 ### 3.2 RequirementsDoc の拡張
 
@@ -160,38 +168,43 @@ class RequirementsDoc(BaseModel):
     # --- 追加 ---
     as_is: list[Node] = []
     to_be: list[Node] = []
-    kpis: list[Kpi] = []              # 成功指標(agy指摘により追加)
-    stakeholders: list[Stakeholder] = []  # (agy指摘により追加)
+    kpis: list[Kpi] = []
+    stakeholders: list[Stakeholder] = []
     gaps: list[Gap] = []
     bottlenecks: list[Bottleneck] = []
     constraints: list[Node] = []      # 予算・期間・体制・法令・既存システム
     hypotheses: list[Hypothesis] = []
 ```
 
-**`challenges` の移行方針**: `Challenge` は `ConfidenceItem` の上位互換(`text`/`confidence` を保持し `id` を追加)。既存JSONは `id` が無い状態で読めるため、**読み込み時に空IDとして扱い、次回保存時に core が採番する**。移行対象の実データは1プロジェクト(medo-ops、課題5件)のみで、破壊的変更は発生しない。
+**`challenges` の移行方針**: `Challenge` は `ConfidenceItem` の上位互換。既存JSONは `id` が無い状態で読めるため、**読み込み時に空IDとして扱い、次回保存時に core が採番する**。この初回採番は意味上の変更として扱わない(陳腐化を引き起こさない)。移行対象の実データは1プロジェクト(medo-ops、課題5件)のみ。
 
 ### 3.3 KPI とステークホルダー
 
-相互レビュー(agy)の指摘により追加。フェルミ推定は効果の桁感を計算するが、**「どの指標をいくら改善するのか」を結ぶノードが無かった**。
+フェルミ推定は効果の桁感を計算するが、**「どの指標をいくら改善するのか」を結ぶノードが無かった**(agy指摘)。
 
 ```python
 class Kpi(Node):
-    name: str                      # 指標名
-    current_value: float | None = None
+    name: str
+    current_fact_id: str = ""        # 現状値は fact への参照(下記の理由)
     target_value: float | None = None
+    target_text: str = ""            # 定性目標(「即時化」「ランクA維持」等)
     unit: str = ""
-    to_be_ids: list[str] = []      # どのあるべき姿に対応するか
+    to_be_ids: list[str] = []
 
 class Stakeholder(Node):
-    role: str = ""                 # 役割・立場
-    pains: list[str] = []          # この立場固有の痛み
+    role: str = ""
+    pains: list[str] = []
 ```
 
-`stakeholders.pains` は Section 6 の共感要素②(読み手の痛みとBefore/After)の入力になる。
+**現状値を `float` で直接持たず `fact` を参照する理由**: KPIの現状値は観測された事実であり、設計原則「数値・事実の通り道にLLMを挟まない」の対象。`kind: company` のファクト(ヒアリング由来・URL不要)として保存し、`current_fact_id` で参照する。これにより出典・取得日・stale判定が自動的に効く。
+
+**`target_value` は数値のまま**保持する。目標は観測事実ではなく合意された決定であり、`confidence` が確度を表す。数値化できない目標は `target_text` を使う(相互レビューで、初期段階の定性目標が扱えず入力が止まるリスクを指摘された)。
+
+`stakeholders.pains` は Section 6 の共感要素②の入力になる。**保存先は要件ドキュメント**とする(顧客個人名ではなく役割と痛みを記録する運用とし、個人特定情報は書かない)。
 
 ### 3.4 仮説(Hypothesis)
 
-`confidence` は「今どれだけ確からしいか」、`Hypothesis` は「何を検証すれば確定するか」を持つ。両者は補完関係。
+`confidence` は「今どれだけ確からしいか」、`Hypothesis` は「何を検証すれば確定するか」を持つ。
 
 ```python
 class FermiRef(BaseModel):
@@ -202,20 +215,20 @@ class Hypothesis(BaseModel):
     id: str = ""
     kind: Literal["cause", "solution", "impact"]
     statement: str
-    validation_method: str = ""    # 何をすれば検証できるか
+    validation_method: str = ""
     status: Literal["unvalidated", "validating", "validated", "rejected"] = "unvalidated"
-    evidence_refs: list[str] = []  # 検証済みの場合の fact-id / knowledge-id
+    evidence_refs: list[str] = []
     challenge_ids: list[str] = []
     fermi_ref: FermiRef | None = None   # kind="impact" の場合(感度分析の接続点)
 ```
 
-**`fermi_ref` は Codex 指摘により、汎用の文字列リンクから型付き参照へ変更**。フェルミ変数は現状 `artifact.content` のJSON内にしか存在せず、文字列リンクでは特定できないため。
+**`fermi_ref` の検証契約**(Codex指摘により明文化): 保存時に `artifact_id` が同一プロジェクトに実在し `type == "fermi"` であること、`variable_name` がそのモデルの `variables` に存在することを検証する。検証箇所は Store(Pydantic単体では他Artifactを参照できないため)。
 
 ---
 
 ## 4. 充足状況の可視化(MECEの担保)
 
-`medo status` を拡張し、**漏れ**を決定論的に返す。
+`medo status` を拡張し、**漏れ**を決定論的に返す。**未接続はエラーではなく報告**(判断4)。
 
 ```json
 {
@@ -230,13 +243,15 @@ class Hypothesis(BaseModel):
     "challenges":   {"count": 5, "confirmed": 4, "empty": false}
   },
   "unlinked": {
-    "challenges_without_bottleneck": ["ch-2", "ch-5"],
+    "challenges_without_cause": ["ch-2"],
     "gaps_without_bottleneck": [],
     "to_be_without_kpi": ["tb-1"],
     "hypotheses_unvalidated": ["hyp-1", "hyp-3"]
   }
 }
 ```
+
+`challenges_without_cause` は `bottleneck_ids` と `cause_hypothesis_ids` の**両方が空**の課題のみを列挙する(3.1参照)。
 
 **重複(MECEのE)の検知はフェーズ2後半**とし、`knowledge-digest` と同じLLM注入方式(fake generate でテスト可能)で**提案専用機能**として実装する。決定論では意味的重複を判定できないため、検出は提案に留め、統合の判断は利用者が行う。
 
@@ -255,104 +270,125 @@ class Hypothesis(BaseModel):
 | ノード単位(依存のみ) | **0件stale** | 「課題の追加」を検出できず取りこぼす |
 | ノード単位+カバレッジ | 2件stale | 正確だが安定IDの全面移行が必要 |
 
-**ノード単位の依存追跡だけでは不十分**である点が重要な発見。追加は既存ノードを変更しないため依存グラフでは何も壊れないが、実際には「打ち手が全課題をカバーしていない」状態になる。
+**ノード単位の依存追跡だけでは不十分**。追加は既存ノードを変更しないため依存グラフでは何も壊れないが、実際には「打ち手が全課題をカバーしていない」状態になる。
 
-### 5.2 変更の種類による2段階判定(agy指摘により追加)
+### 5.2 変更の種類による2段階判定
 
-軽微な文言修正で下流の全生成物が連鎖的にstale化すると、実務で再生成ループに陥る。**変更の種類で重大度を分ける**。判定は決定論で行える。
+軽微な文言修正で下流の全生成物が連鎖的にstale化すると、実務で再生成ループに陥る(agy指摘)。判定は決定論で行える。**全フィールド型について定義する**(Codex指摘により非Nodeフィールドも網羅):
 
-| 変更の種類 | 重大度 | 意味 |
+| 対象 | `stale`(要再生成) | `outdated`(差分確認推奨) |
 |---|---|---|
-| ノードの**追加・削除**、`confidence` の変更、リンクの変更、KPI目標値の変更 | **stale**(要再生成) | 論理構造が変わった |
-| ノードの `text` のみの変更 | **outdated**(差分確認推奨) | 言い回しの修正の可能性が高い |
+| Node系(as_is/to_be/gaps/bottlenecks/constraints/challenges/stakeholders) | 追加・削除、`confidence` 変更、リンク変更、`evidence_refs` 変更 | `text` のみの変更 |
+| `Kpi` | 追加・削除、`current_fact_id` / `target_value` / `target_text` / `unit` / `to_be_ids` の変更 | `name` のみの変更 |
+| `Hypothesis` | 追加・削除、`status` / `fermi_ref` / `challenge_ids` の変更 | `statement` / `validation_method` の変更 |
+| `principles` / `functional`(ConfidenceItem) | 追加・削除、`confidence` 変更 | `text` のみの変更 |
+| `non_functional`(dict) | キーの追加・削除、値の変更(数値制約のため) | — |
+| `open_questions`(list[str]) | 追加・削除 | — |
+| `goal`(str) | — | 変更 |
+| `background` / `industry` / `sources` | — | 変更 |
 
 `medo status` は両方を返し、`next_step` は `stale` のみを再生成対象とする。
 
 ### 5.3 生成物の型ごとの依存セクション
 
-**全ArtifactTypeを網羅する**(Codex指摘。旧案は `mock` / `comparison` が未定義だった)。生成物側の宣言は不要で、型ごとの固定ルールとして core が持つ。
+**全ArtifactTypeを網羅する**。生成物側の宣言は不要で、型ごとの固定ルールとして core が持つ。
 
-| 生成物type | 依存セクション |
-|---|---|
-| `fermi` | なし(facts と assume のみに依存) |
-| `mini-prfaq` | `goal` / `challenges` / `principles` / `constraints` / `to_be` / `kpis` |
-| `prfaq` | 上記 + `bottlenecks` / `hypotheses` |
-| `comparison` | `challenges` / `principles` / `constraints` / `kpis` |
-| `slides` | 親artifact(`derived_from`)に委譲。要件への直接依存は持たない |
-| `architecture` | `functional` / `non_functional` / `constraints` |
-| `mock` | `functional` / `constraints` |
+| 生成物type | 依存セクション | 親への依存 |
+|---|---|---|
+| `fermi` | なし(facts と assume のみ) | — |
+| `mini-prfaq` | `goal` / `challenges` / `principles` / `constraints` / `to_be` / `kpis` | — |
+| `prfaq` | 上記 + `as_is` / `gaps` / `bottlenecks` / `hypotheses` | `grown_from`(候補選択の来歴。伝播対象外) |
+| `comparison` | `challenges` / `principles` / `constraints` / `kpis` | — |
+| `slides` | `open_questions`(親が依存しない範囲のみ) | **`derived_from` の親に依存し、staleを継承する** |
+| `architecture` | `functional` / `non_functional` / `constraints` | — |
+| `mock` | `functional` / `constraints` | — |
+
+**`slides` の依存を明確化**(Codex指摘。旧案は「要件への直接依存は持たない」としながら§7で `as_is`・`kpis`・`gaps` 等を直接入力にしており矛盾していた)。`slides` が描画する `as_is` / `to_be` / `kpis` / `gaps` / `bottlenecks` / `hypotheses` は**すべて親 `prfaq` の依存に含まれる**ため、親からの伝播で捕捉できる。親が依存しない `open_questions` のみ直接依存として持つ。
 
 **比較の基準**: 直前バージョンではなく、**`artifact.requirements_version` の文書と最新版**を比較する(`RequirementsStore.get(project, version)` で任意版を取得できるため実装可能)。
 
 ### 5.4 カバレッジ判定
 
-`Artifact` に **`covered_challenge_ids: list[str]`** を追加する。生成時点の要件に存在した課題IDのうち、その生成物が扱ったものを記録する。
+`Artifact` に **`covered_challenge_ids: list[str]`** を追加する。生成時点の要件に存在した課題IDのうち、その生成物が扱ったものを記録する。最新要件の課題ID集合との差分に未対応のものがあれば `stale` とする。
 
-最新要件の課題ID集合との差分に未対応のものがあれば `stale` とする。
-
-**本文の文字列一致やLLM判定でカバレッジを推定しない**(設計原則「数値・事実の通り道にLLMを挟まない」に反するため)。Skillが保存時に明示的に宣言する。
+- **本文の文字列一致やLLM判定でカバレッジを推定しない**(設計原則に反するため)。Skillが保存時に明示的に宣言する
+- **既存Artifact(フィールド未設定)の扱い**: 推測によるバックフィルはしない。未設定の生成物はカバレッジ判定を `outdated`(差分確認推奨)とし、`stale` にはしない。再生成時に宣言されれば以降は正確に判定される
 
 ### 5.5 生成物の依存グラフと stale 伝播
 
-現状 `grown_from` は `prfaq` にのみ必須で、スライドがどのPRFAQ由来かを記録できない。Skill契約だけでは論理分岐を防げないため、スキーマで支える。
-
 **2つの来歴概念を明確に分ける**(Codex指摘):
 
-| フィールド | 意味 | 対象 |
-|---|---|---|
-| `grown_from` | **候補選択の来歴**(どの候補セットのどの打ち手を選んだか) | `prfaq`(既存・変更なし) |
-| `derived_from` | **内容依存の親**(同じ論理の別表現) | `slides`(必須)・将来の派生生成物 |
+| フィールド | 意味 | 対象 | stale伝播 |
+|---|---|---|---|
+| `grown_from` | **候補選択の来歴**(どの候補セットのどの打ち手を選んだか) | `prfaq`(既存・変更なし) | しない |
+| `derived_from` | **内容依存の親**(同じ論理の別表現) | `slides`(必須) | **する** |
+
+```python
+derived_from: str | None = None   # 親artifact ID(例: "prfaq-v3")
+```
+
+**親typeの許容表**(「通常はprfaq」ではなく必須契約として定義):
+
+| 子type | 許容する親type |
+|---|---|
+| `slides` | `prfaq` |
+
+(将来の派生生成物を追加する際は本表を拡張する)
 
 **実装契約**:
 
-- `ArtifactStore.save` で親が同一プロジェクトに実在し、期待する型であることを検証する(Pydantic単体ではStoreを参照できないため、検証箇所はStore)
+- `ArtifactStore.save` で以下を検証する(Pydantic単体ではStoreを参照できないため検証箇所はStore):
+  - `derived_from` の親が同一プロジェクトに実在し、上表の許容typeであること
+  - `grown_from.artifact` が実在し、`grown_from.option` がその候補セットの `options` に存在すること
 - `status` は**全Artifactを `id -> Artifact` で保持して親を再帰評価**してから、表示用に型ごと最新版へ射影する(現行の `latest_by_type` は非最新版を捨てるため、親が旧版のPRFAQだと解決できない)
 - 親の欠落・循環参照は例外にせず、**理由付きで stale** とする
-- CLIに `--derived-from` を追加し、`slides` で許す親type(通常は `prfaq`)を契約として定める
+- CLIに `--derived-from` を追加する
 
 ---
 
 ## 6. 「共感できるドキュメント」の定義
 
-相互レビューで Codex と agy が**独立に**「論理の一貫性は必要条件だが十分条件ではない」と指摘した(確度が高い)。以下の3要素として再定義する。
+Codex と agy が**独立に**「論理の一貫性は必要条件だが十分条件ではない」と指摘した(確度が高い)。
 
 | 要素 | 内容 | 検証方法 |
 |---|---|---|
-| ①論理の一貫性 | as-is → to-be/KPI → gap → 真因 → 課題 → 打ち手 が繋がっている | **自動**(構造の充足とリンクで判定可能) |
+| ①論理の一貫性 | as-is → to-be/KPI → gap → 真因 → 課題 → 打ち手 が繋がっている | **自動**(構造の充足とリンクで判定可能。ただし未接続はエラーにせず報告のみ) |
 | ②読み手の痛みとBefore/After | `stakeholders.pains` に紐づく具体的な痛み、変化後の体験 | 人間評価(スキーマが入力を保証) |
 | ③トレードオフの誠実な開示 | 不確実性・リスク・**採らなかった選択肢とその理由** | 人間評価(`hypotheses` の未検証項目 + `rejected_options`) |
 
-### 見送った案の理由を保持する(agy指摘により追加)
+### 見送った案の理由を保持する
 
 現状 `prfaq` は採択案のみを育成し、**却下案の見送り理由が失われる**。意思決定者の納得感はここで大きく変わる。
 
 ```python
 class RejectedOption(BaseModel):
     name: str
-    reason: str          # なぜ見送ったか
+    reason: str               # なぜ見送ったか
     accepted_risk: str = ""   # 見送りによって受け入れたリスク
 
 # Artifact に追加
-rejected_options: list[RejectedOption] = []   # prfaq で使う
+rejected_options: list[RejectedOption] = []
 ```
 
-これはmedo自身の表現の分担(コードコメント=Why not)と同じ思想である。スライドの比較マトリクスとQ&Aパートに反映する。
+**記録するタイミング**(agy指摘により訂正): 見送りの判断は打ち手比較の段階で起きるため、`mini-prfaq` と `comparison` で記録できるようにし、`prfaq` がそれを引き継ぐ。旧案は `prfaq` のみとしていたが、それではスライド4(打ち手比較)に反映できなかった。
+
+これはmedo自身の表現の分担(コードコメント=Why not)と同じ思想である。
 
 ---
 
 ## 7. スライド生成の設計
 
-**PRFAQの長文をそのままMarpに分割すると「文字だらけの箇条書き」になり、最も共感されない形式になる**(agy指摘)。`make-slides` は要約ではなく、**定型スライドパターンの構造化テンプレート**として設計する。
+**PRFAQの長文をそのままMarpに分割すると「文字だらけの箇条書き」になり、最も共感されない形式になる**(agy指摘)。`make-slides` は要約ではなく、**定型パターンの構造化テンプレート**として設計する。
 
-相互レビュー(agy)により、当初の5構成から**7構成へ改訂**。旧案は「打ち手を比較した後、どの案をどう具体化するか」の説明がないままロードマップへ飛び、かつ**意思決定依頼(Ask)の締めが無かった**。
+**7章構成**とする。1章=1枚に固定せず、**全体で10枚前後の展開を許容する**(agy指摘。特に章5は情報密度が高くMarpの1枚に収めると視認性が落ちる)。
 
-| # | スライド | 内容 | 主な入力 |
+| # | 章 | 内容 | 主な入力 |
 |---|---|---|---|
 | 1 | SCQAエグゼクティブサマリー | Situation-Complication-Question-Answer | `as_is` / `challenges` / 採択案 |
 | 2 | As-Is vs To-Be 対比 | 現状と理想の対比、KPIの現状値→目標値 | `as_is` / `to_be` / `kpis` |
 | 3 | GAPと真因 | 状態の乖離と、その裏にある真因 | `gaps` / `bottlenecks` |
 | 4 | 打ち手比較と選定理由 | Impact × Feasibility マトリクス + **なぜ他案を落としたか** | `mini-prfaq` / `rejected_options` |
-| 5 | 推奨ソリューション詳細 | 選定案の具体像(How・Workflow Before/After) | `prfaq` の技術的背景・workflow改善見込み |
+| 5 | 推奨ソリューション詳細 | 選定案の具体像(How・Workflow Before/After)。**複数枚に展開してよい** | `prfaq` の技術的背景・workflow改善見込み |
 | 6 | ロードマップ | 段階と、各段階がどの仮説の検証に依存するか | `hypotheses` / `decision-roadmap` |
 | 7 | ネクストアクション(Ask) | **本日合意いただきたい事項**(PoC実施・体制・スコープ・次工程) | `open_questions` / `hypotheses(unvalidated)` |
 
@@ -376,15 +412,31 @@ rejected_options: list[RejectedOption] = []   # prfaq で使う
 
 | 優先度 | 項目 | 備考 |
 |---|---|---|
-| **1** | 論理構造スキーマ + ID規約 + 移行 + 充足状況の可視化 | **ID採番・リンク契約・`covered_challenge_ids` を含める**。これが無いと2を開始できない(Codex指摘) |
+| **1** | 論理構造スキーマ + ID規約 + 移行 + 充足状況の可視化 | ID採番シーケンス(3.1)・型付きリンク・`covered_challenge_ids` を含める。これが無いと2を開始できない |
 | **2** | 陳腐化のセクション単位化 + カバレッジ判定 + 2段階重大度 | 1と密結合。飛ばすと全生成物が常時stale化して破綻 |
-| **3** | 出典検証の強化(URLフェッチ + 数値突合) | **他と技術的に独立しており並行可能**(Codex指摘)。Task10で穴を実証済み |
+| **3** | 出典検証の強化(URLフェッチ + 数値突合) | **他と技術的に独立しており並行可能**。Task10で穴を実証済み |
 | **4** | 生成物の依存グラフ + stale伝播 | `make-slides` の前提 |
-| **5** | `make-slides`(7構成の構造化テンプレート) | 利用者の主要求 |
-| **6a** | ナレッジ来歴スキーマ(`supersedes`・不変保存・旧引用の解決) | **6bの前提**。統合でIDが変わると過去の引用が全滅する |
+| **5** | `make-slides`(7章構成の構造化テンプレート) | 利用者の主要求 |
+| **6a** | ナレッジ来歴スキーマ | **6bの前提**(下記) |
 | **6b** | `knowledge-digest`(LLMによる統合提案) | 統合後も旧entryを残し、過去Artifactの引用が検証可能であること |
 | **7** | `decision-roadmap`(再定義) | 3.4の `fermi_ref` が前提。感度分析と連動 |
 | 後続 | `build-mock` / `propose-architecture` / pricing(再定義) / 簡易Webアプリ | フェーズ2完了定義の改訂が必要(後述) |
+
+### 優先度6a: ナレッジ来歴スキーマの仕様
+
+現行 `KnowledgeStore.save` は同一 `entry_id` でファイルを**上書きする**ため、統合すると原本が消え、過去のPRFAQ・スライドの引用(`cited_knowledge`)が解決不能になる。
+
+```python
+class KnowledgeEntry(BaseModel):
+    # --- 追加 ---
+    supersedes: list[str] = []      # このエントリが統合・置換した旧エントリID
+    superseded_by: str = ""         # 後継エントリID(旧エントリ側に記録)
+```
+
+- **旧エントリは削除せず不変で残す**。`superseded_by` を追記するのみ
+- `medo knowledge search` は既定で `superseded_by` が設定されたエントリを除外する(`--include-superseded` で含める)
+- **過去Artifactの引用IDは常に解決可能**であることを不変条件とする。`status` は旧エントリを引用する生成物を「後継あり」として `outdated` で報告する(欠落ではないため `stale` にしない)
+- 案件固有ナレッジ(markdown / sqlite の2バックエンド)にも同じ規約を適用する
 
 ### 相互レビューで訂正された当初案の誤り
 
@@ -395,13 +447,12 @@ rejected_options: list[RejectedOption] = []   # prfaq で使う
 
 現行は「課題→What/Why合意→スライド+モックまで半日」だが、`build-mock` を後続に送るため改訂が必要:
 
-> **改訂案**: 課題→What/Why合意(MECEな構造の充足を確認)→共感できるドキュメント+提案スライド(7構成)まで半日。knowledgeが案件を跨いで洗練される。
+> **改訂案**: 課題→What/Why合意(MECEな構造の充足を確認)→共感できるドキュメント+提案スライド(7章構成)まで半日。knowledgeが案件を跨いで洗練される。
 
 ---
 
 ## 10. 未決事項
 
 1. 重複検知(MECEのE)を `knowledge-digest` と実装共有するか、別機能にするか
-2. `Kpi.current_value` を `facts` の値と自動照合するか(出典による裏づけの強制範囲)
-3. 差別化の訴求(証跡追跡可能性をMoatとして押し出す)を正本のどこに書くか。**競合ツールの具体的な弱点は未検証のため、出典なしにドキュメントへ書かない**
-4. `stakeholders` を要件ドキュメントに持つか、案件固有ナレッジ側に置くか(個人情報の扱いに関わる)
+2. 差別化の訴求(証跡追跡可能性をMoatとして押し出す)を正本のどこに書くか。**競合ツールの具体的な弱点は未検証のため、出典なしにドキュメントへ書かない**
+3. `decision-roadmap` の出力形式(生成物typeを新設するか、既存の `comparison` を使うか)
