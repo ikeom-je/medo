@@ -24,7 +24,7 @@ projects/{id}/artifacts/{type}-v{n}
 
 ## 2. イベントモデル
 
-進行記録は4種類あり、**共通のenvelope + 型別payload**で表す。4つを1つの曖昧な汎用イベントに潰さず、共通部分だけを共有する。
+進行記録は5種類あり、**共通のenvelope + 型別payload**で表す。1つの曖昧な汎用イベントに潰さず、共通部分だけを共有する。
 
 ```python
 class ArtifactTarget(BaseModel):
@@ -47,7 +47,7 @@ class WorkflowEventBase(BaseModel):
 
 `TargetRef` を判別共用体にすることで、`target_kind` と `target_id` / `target_version` の排他制約がスキーマで保証される。
 
-### 4つのイベント型
+### 5つのイベント型
 
 ```python
 class DiscoveryCheckRecorded(WorkflowEventBase):
@@ -59,7 +59,7 @@ class AsIsReportReviewed(WorkflowEventBase):
     kind: Literal["asis_review"] = "asis_review"
     outcome: Literal["approved", "changes_requested"]
     finding_refs: list[str] = []   # gap / challenge / open_question のID
-    reviewed_slides_id: str = ""   # 同時にレビューした討議用スライドのID
+    reviewed_slides_id: str        # 同時にレビューした討議用スライドのID(必須)
     reviewed_by: Literal["claude", "codex", "gemini", "human"] = "human"
 
 class StakeholderResponded(WorkflowEventBase):
@@ -71,7 +71,7 @@ class StakeholderResponded(WorkflowEventBase):
 
 class MilestoneDetected(WorkflowEventBase):
     kind: Literal["milestone"] = "milestone"
-    condition: MilestoneCondition          # §4の8条件のいずれか
+    condition: MilestoneCondition          # §4の10条件のいずれか
     round_id: int                          # この節目が属する周回
     focus_hypothesis_id: str = ""          # この周回で検証する論点(任意)
 
@@ -85,6 +85,14 @@ class ToBeCheckpointRecorded(WorkflowEventBase):
 
 `round_id` と `focus_hypothesis_id` も `MilestoneDetected` が持つ。当初案は索引で `focus_hypothesis_id` に言及しながら保存先が無く、envelope に周回が付くと書きながら周回IDが無かった。
 
+**`round_id` の採番**: `MilestoneDetected` を記録する時点で、§7 の `round_count` アルゴリズムを最新の要件履歴に適用して得た値を入れる。周回が進んでいなければ直前の `MilestoneDetected` と同じ値になる。これにより `round_count` と `max(round_id)` が一致する。
+
+**`focus_hypothesis_id` の設定**: `medo checkpoint answer --focus <hyp-id>` で指定する。指定が無ければ直前の `MilestoneDetected` の値を引き継ぐ(周回をまたぐまで同じ論点を追う)。参照先が実在する仮説であることを保存時に検証する。
+
+**保存時の検証**: `ToBeCheckpointRecorded.responds_to` が実在する `MilestoneDetected` のIDであり、まだ回答されていないこと(二重回答を防ぐ)。
+
+**記録の冪等性**: 要件保存とイベント記録は別ストアであるため、要件保存後に `MilestoneDetected` の記録が失敗する可能性がある。**`(requirements_version, condition)` の組で重複を排除する** — 同じ版の同じ条件に対する `MilestoneDetected` は1件しか作らない。再試行しても重複しない。
+
 ### イベント型ごとの許容target
 
 判別共用体だけでは、すべてのイベントが両方のtargetを取れてしまう。**型ごとに固定する**。
@@ -97,9 +105,15 @@ class ToBeCheckpointRecorded(WorkflowEventBase):
 | `MilestoneDetected` | `requirements` |
 | `ToBeCheckpointRecorded` | `requirements` |
 
-**保存時の検証**: 上表の組み合わせ、および `AsIsReportReviewed(outcome="changes_requested")` の `finding_refs` が非空でその記録時点の要件版に実在すること。
+`StakeholderResponded` の許容targetは purpose で決まる(§3)。`phase_signoff` のみ `artifact` を取る。
 
-**共通envelopeにしたことで、すべての進行記録に対象・日付・周回が付く**。当初案は `ProcessChecks` と `ToBeDecision` を要件内のスナップショットに、`AsIsReview` と `Confirmation` を外部イベントに、と偶然分裂させていた。意味の似た4概念が保存場所で分かれており、イベント追加時に要件内のチェックポイントをどう更新するかが定義できなかった。
+**保存時の検証**:
+
+- 上表の target 組み合わせ
+- `AsIsReportReviewed(outcome="changes_requested")` の `finding_refs` が非空で、その記録時点の要件版に実在すること
+- `AsIsReportReviewed.reviewed_slides_id` は**必須**とし、`slide_kind="discussion"` の `slides` で、かつ `derived_from` に当該 `as-is-report` を含むこと(レポートとスライドを必ず一緒にレビューする契約と整合させる)
+
+**共通envelopeにしたことで、すべての進行記録に対象・日付が付く**。当初案は `ProcessChecks` と `ToBeDecision` を要件内のスナップショットに、`AsIsReview` と `Confirmation` を外部イベントに、と偶然分裂させていた。意味の似た概念が保存場所で分かれており、イベント追加時に要件内のチェックポイントをどう更新するかが定義できなかった。
 
 ### 反応の目的(purpose)
 
@@ -143,7 +157,7 @@ class ConvergenceTarget(BaseModel):
 |---|---|---|
 | `as_is_alignment` | `artifact`(`as-is-report` のみ) | 共有した現状認識への反応 |
 | `to_be_go_ahead` | `requirements` | この理想像で検討を進めてよい |
-| `phase_signoff` | `requirements` | フェーズを完了して次へ進む承認 |
+| `phase_signoff` | `artifact`(`slides` の `slide_kind="final"` のみ) | フェーズを完了して次へ進む承認(§7 phase_readiness) |
 
 保存時にこの組み合わせを検証する。
 
@@ -151,7 +165,12 @@ class ConvergenceTarget(BaseModel):
 
 同一ステークホルダーの反応は、**対象の系列ごとに最新のものを有効値とする**。
 
-> **有効な反応の決定**: 同一 `stakeholder_id` × 同一 `purpose` について、**現在の収束対象またはその祖先**を対象とする `StakeholderResponded` のうち、`id` の採番順で最後のものを有効値とする。
+> **有効な反応の決定**: 同一 `stakeholder_id` × 同一 `purpose` について、**現在の収束対象またはその祖先**を対象とする `StakeholderResponded` から、次の順で1件を選ぶ。
+>
+> 1. **現在の収束対象を対象とするもの**があれば、そのうち `id` の採番順で最後のもの
+> 2. 無ければ、祖先を対象とするもののうち **`target` の `requirements_version` が最大**のもの。同値なら `id` の採番順で最後のもの
+
+**現行版への反応を祖先への反応より常に優先する**(Codex指摘による訂正)。祖先全体から単純に `id` 順で選ぶと、**現行版に反応を得た後で旧版の反応を追記した場合に、古い内容への反応が現行版の反応を上書きしてしまう**。記録の順序ではなく対象の新しさで優先する。
 
 **祖先を含めるのが要点である**。`as-is-report-v1` への異議は、同じ相手が `as-is-report-v2`(v1の後継)に反応を記録した時点で**superseded** となり、有効値から外れる。当初案は「同一target」に限定していたため、v1で異議が出た後にv2で修正して合意を得ても**v1の異議が永久に残り、収束条件を一生満たせなかった**。
 
@@ -207,7 +226,7 @@ class ConvergenceTarget(BaseModel):
 
 **発火の判定順序**: 要件保存とイベント記録の2つのストアにまたがるため、共通のカーソルを定める。
 
-- 要件保存による節目(条件1〜6)は、`RequirementsStore.save` の完了後に core が差分から判定して `MilestoneDetected` を記録する(`requirements_version` は保存後の版)
+- 要件保存による節目(条件1〜6・9・10)は、`RequirementsStore.save` の完了後に core が差分から判定して `MilestoneDetected` を記録する(`requirements_version` は保存後の版)
 - イベント記録による節目(条件7〜8)は、そのイベントの記録直後に core が `MilestoneDetected` を記録する(`requirements_version` は記録時点の最新版)
 - 同一の要件保存で複数条件が成立した場合は、**`MilestoneDetected` を1件だけ記録し `condition` に最初に成立した条件を入れる**(1回の保存に対して問いかけは1回でよい)
 
@@ -312,9 +331,31 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 | ゲート | 判定 | 必要な承認 | いつ |
 |---|---|---|---|
 | **標準周回の収束**(本表) | `readiness.state = "ready"` | `to_be_go_ahead` の `agreed` | 現状と理想が合意でき、打ち手の検討に進んでよい |
-| **フェーズ完了** | `phase_readiness` | `phase_signoff` の `agreed` | 最終提案スライド(Ask)を提示した後 |
+| **フェーズ完了** | `phase_readiness`(下記) | `phase_signoff` の `agreed` | 最終提案スライド(Ask)を提示した後 |
 
-`phase_signoff` は `prfaq` と最終提案スライドが存在することを前提とする別のゲートであり、標準周回の判定には含めない。
+### phase_readiness
+
+**`phase_signoff` の target は最終提案スライドの生成物とする**(`requirements` ではない)。要件版を対象にすると、同じ要件版から `prfaq` や最終提案スライドを再生成しても古い承認が有効なまま残る。**何を見て承認したか**が一意に定まる必要がある。
+
+| purpose | 許容する target(§3の表を更新) |
+|---|---|
+| `phase_signoff` | `artifact`(`slides` の `slide_kind="final"` のみ) |
+
+```json
+"phase_readiness": {
+  "state": "ready | not_ready | not_evaluable",
+  "failed_conditions": [{"code": "...", "refs": []}]
+}
+```
+
+| # | 条件 | 理由コード |
+|---|---|---|
+| 1 | 標準周回の `readiness.state == "ready"` | `convergence_not_ready` |
+| 2 | `prfaq` が存在し stale でない | `prfaq_missing_or_stale` |
+| 3 | `slide_kind="final"` の `slides` が存在し stale でない | `final_slides_missing_or_stale` |
+| 4 | 決裁者から最新の最終提案スライドに対する `phase_signoff` の `agreed` | `phase_signoff_missing` |
+
+`prfaq` が存在しない段階では `not_evaluable` を返す(標準周回のみを回している間は評価しない)。
 
 **条件2の「裏づけ済み」の判定式**: ToBeと内部実態を結ぶ経路を既存の `Gap(kind="goal")` で定義する。
 

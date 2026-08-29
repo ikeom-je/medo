@@ -106,7 +106,7 @@ class ScopedNode(Node):
 6. 採番簿を更新し、変更manifest(§7)と共に保存
 ```
 
-**採番簿を永続化する**(`projects/{id}/id_watermark`)。直前バージョンの最大ID+1で採番すると、**過去に最大IDのノードを削除した場合にそのIDを再利用してしまい**、「削除済みIDは再利用しない」に違反する。プレフィックス別の high-water mark を保持し、単調増加させる。
+**採番簿を永続化する**(`projects/{id}/meta/id_watermark` — document位置。Firestore互換のため偶数セグメントにする)。直前バージョンの最大ID+1で採番すると、**過去に最大IDのノードを削除した場合にそのIDを再利用してしまい**、「削除済みIDは再利用しない」に違反する。プレフィックス別の high-water mark を保持し、単調増加させる。
 
 Firestoreバックエンドでは採番簿の更新をトランザクションで行う(並行保存時の重複を防ぐ)。
 
@@ -338,16 +338,23 @@ class Hypothesis(BaseModel):
 陳腐化判定は「生成物の要件版から最新版まで」を比較するため、**保存時にしか分からない情報を後から再現できる必要がある**。`change_kind: "editorial"` の宣言やID初回採番は保存時の引数でしかなく、記録しなければプロセス終了後に通常の文言変更と区別できない。
 
 ```python
+class SectionChange(BaseModel):
+    section: str                                       # 変更があったセクション名
+    change_kind: Literal["substantive", "editorial"] = "substantive"
+
 class ChangeManifest(BaseModel):
     version: int
-    change_kind: Literal["substantive", "editorial"] = "substantive"
-    changed_sections: list[str] = []      # 変更があったセクション名
+    changes: list[SectionChange] = []
     id_only_migration: bool = False       # 初回ID採番のみで意味変更を伴わない
     recorded_on: str
 ```
 
-- `change_kind: "editorial"` は**保存者が明示的に宣言したときのみ**。既定は `substantive`(安全側に倒す)
+**`change_kind` はセクション別に持つ**(Codex指摘)。文書全体で単一の値にすると、同じ保存で「AsIsは誤字修正、ToBeは実質変更」という状態を表現できず、フィールド別のstale/outdated判定をmanifestから再現できない。
+
+- `change_kind: "editorial"` は**保存者が該当セクションについて明示的に宣言したときのみ**。既定は `substantive`(安全側に倒す)
 - `id_only_migration: true` の版は陳腐化を引き起こさない
-- 陳腐化判定は、生成物の要件版から最新版までの**全manifestを畳み込んで**評価する。途中に1つでも `substantive` な該当セクションの変更があれば `stale` とする
+- 陳腐化判定は、生成物の要件版から最新版までの**全manifestを畳み込んで**評価する。生成物の依存セクションについて `substantive` な変更が1つでもあれば `stale` とする
+
+**保存パス**: `projects/{id}/manifests/v{n}`(document位置)。Firestore互換のため偶数セグメントにする。
 
 core は宣言を決定論的に処理するだけで、本文の意味差をLLMや文字列差分から推測しない(設計原則との整合)。

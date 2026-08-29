@@ -40,7 +40,7 @@ status
 
 ## 2. 診断の対象範囲
 
-**既定では `scope: "core"` の項目のみを診断対象とする**。往復のたびに課題とGAPが蓄積するが、すべてを今回解くわけではない。スコープを絞らないと、重要度の低い項目にまで一律にアラートが出て実務が埋没する。
+**既定では `scope: "core"` の項目のみを診断対象とする**(`ScopedNode` を継承する型に限る)。往復のたびに課題とGAPが蓄積するが、すべてを今回解くわけではない。スコープを絞らないと、重要度の低い項目にまで一律にアラートが出て実務が埋没する。
 
 `--include-scope secondary,out` で範囲を広げられる。
 
@@ -121,6 +121,7 @@ status
   "readiness": {
     "state": "not_ready",
     "failed_conditions": [
+      {"code": "as_is_report_missing", "refs": []},
       {"code": "unsupported_confirmed_to_be", "refs": []},
       {"code": "discovery_check_missing", "refs": ["reality_gap", "decision_maker"]},
       {"code": "review_findings_open", "refs": ["gap-1"]},
@@ -137,7 +138,9 @@ status
 
 ### 診断キーの判定式
 
-各キーの入力と判定を明示する(**すべて `scope: core` に限定**。`--include-scope` で拡張)。
+各キーの入力と判定を明示する。
+
+**scope による絞り込みは `ScopedNode` を継承する型にのみ作用する**([ドメインモデル](phase2-domain-model.md) §3)。`Kpi` / `Stakeholder` / `Hypothesis` / `Attempt` は scope を持たないため常に全件が対象になる。`--include-scope` はこれらに影響しない。
 
 | キー | 判定式 |
 |---|---|

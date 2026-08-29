@@ -130,6 +130,9 @@
 | ナレッジ来歴 / `knowledge-digest` | `supersedes` のスキーマ、旧引用の解決規則、統合提案の入出力 |
 | `decision-roadmap` | 出力形式(生成物typeを新設するか `comparison` を使うか)が未決 |
 | pricing(再定義) | クラウド非依存でのゴールデンデータの持ち方 |
+| `build-mock` | 合意形成用モックの生成物type・保存形式 |
+| `propose-architecture` | 完全版PRFAQの技術的背景との関係、出力形式 |
+| 簡易Webアプリ | coreをどう公開するか(CLIとの責務分担) |
 
 ### 相互レビューで訂正された当初案の誤り
 
