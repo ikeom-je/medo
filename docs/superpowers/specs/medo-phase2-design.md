@@ -38,6 +38,26 @@
 
 **認識GAPと目標GAPは連鎖上の役割が違う**。認識GAPは実態を発見するための**契機**であり、打ち手のパイプライン(真因→課題→打ち手)に直接流さない。パイプラインに流れるのは、発見された実態から導かれた目標GAPである(3.1参照)。
 
+### この連鎖は成果物を伴って周回する
+
+上の連鎖は頭の中では回らない。**各周回で成果物を出し、レビューし、顧客に共有して反応を得る**ことで初めて暗黙知が引き出される(判断4-b):
+
+```
+調査 → research(md)     ─┐
+  ↓                       │
+AsIs整理 → as-is(md)      │  この周回を繰り返すことで
+  ↓ + slides(as-is由来)   │  AsIsとToBeの過不足と
+レビュー(論理矛盾・GAP)   │  暗黙知が引き出される
+  ↓                       │
+ToBe出力の要否をAsk(節目) │  収束の判断は複数の人間の
+  ↓                       │  確認・共感による(Confirmation)
+顧客に共有 → 反応を記録  ─┘
+  ↓
+[調査に戻る]
+```
+
+**収束の判断はKPI/KGIだけでは決められない**。それらは暗黙知に依存し、人間自身も認知していない場合がある。したがって最終的な判断材料は**複数の人間(顧客・コンサルタント)が確認し共感した事実**である(3.7 / §6)。
+
 **AsIsに内部実態(非公開情報・暗黙知)が入らないままToBeを確定させると、理想の正論に終わる**。公開情報だけのAsIsからは一般論しか出ない。ただし**内部実態が揃うのを待ってからToBeを書くのではない** — 仮説のToBeをぶつける往復こそが暗黙知を引き出す機構であり、AsIsの薄さはToBeを止める理由ではなく確度を `assumed` に留める理由である(判断4)。
 
 **medoの位置づけ**: 利用者を導く支援ツールであり、判断を代行しない。フレームワークをパターンとして整理し、MECE(漏れなく重複なく)なヒアリングを支える。
@@ -133,8 +153,10 @@ ToBe(confidence: confirmed)= 合意されたあるべき姿
 4. `constraints` が新規に追加された
 5. `outcome` が `stalled` / `failed` の `Attempt` が新規に追加された(頓挫理由が判明)
 6. `stance="resistant"` または `is_decision_maker=True` の `Stakeholder` が新規に追加された
+7. **`process_checks.as_is_review` が `unverified` から変化した**(AsIsをレビューして論理矛盾・GAP・課題が明確になった。判断4-b ステップ4)
+8. **`Confirmation` に `reaction="objected"` が新規に追加された**(共有した内容に異議が出た。判断4-b ステップ6)
 
-いずれも「そのToBeは無理だ」という現実の反応が現れた地点であり、**仮説を見直すべきタイミングとして意味を持つ**。単なる本文の微修正や既存項目の言い換えは節目にしない。
+いずれも「そのToBeは無理だ」という現実の反応、または**AsIs自体の不整合が露見した地点**であり、**仮説を見直すべきタイミングとして意味を持つ**。単なる本文の微修正や既存項目の言い換えは節目にしない。
 
 条件2〜6が示すとおり、節目はAsIsの変化だけで決まらない — 制約・組織力学の判明も含む(`reality_evidence` の3軸と対応する)。
 
@@ -191,6 +213,27 @@ ToBe(confidence: confirmed)= 合意されたあるべき姿
 顧客が最初に挙げるステークホルダーは、たいてい当事者と直属の関係者に限られる。**承認が必要な人、影響を受ける現場、反対しうる部門**は明示的に問わないと出てこない。
 
 特に案件を頓挫させるのは「決裁権限はないが拒否権を持つ実力者」である(agy指摘)。公式な決裁権と非公式な影響力は別物として捉える必要があるため、`influence`(影響力)と `interest`(関心度)を決裁権限とは別に持つ。
+
+### 判断4-b: 往復は「出力 → レビュー → 共有 → 反応」で回す
+
+判断4の往復は頭の中だけでは回らない。**各周回で成果物を出し、レビューし、顧客に共有して反応を得る**ことで初めて暗黙知が引き出される(ユーザー指摘)。
+
+```
+1. 調査(公開情報 + 顧客提供・暗黙知)     → facts に出典付きで保存
+2. 調査結果を整理                        → artifact: research(markdown)
+3. AsIsを整理・出力                       → artifact: as-is(markdown)+ slides(as-is由来)
+4. AsIsをレビュー                         → 論理矛盾・GAP・課題が明確になる
+                                            (process_checks.as_is_review)
+5. ここで「ToBeを出すか」を問う            → to_be_decision(節目)
+6. 顧客に共有し、確認・共感・異議を得る    → confirmations に記録
+7. 得られた反応・過不足を持って [1] へ戻る
+```
+
+**ステップ4のレビューが節目の条件になる**。「現実が仮説を押し返した瞬間」(判断4の6条件)に加え、**AsIsをレビューして論理矛盾やGAPが明確になった段階**も、ToBeを問うべきタイミングである。
+
+**ステップ6の反応がループの収束判断を支える**。収束を決めるKPI/KGIは暗黙知に依存し人間自身も認知していない場合があるため、構造的条件だけでは決められない。**複数の人間が確認し共感した事実**(3.7 `Confirmation`)を材料にする。
+
+このサイクルに必要な成果物として `research` と `as-is` を `ArtifactType` に追加する(5.3)。
 
 ### 判断5: 要素間のリンクは任意にする
 
@@ -347,6 +390,7 @@ class RequirementsDoc(BaseModel):
     hypotheses: list[Hypothesis] = []
     process_checks: ProcessChecks = ProcessChecks()   # 判断4の3確認プロセスの実施結果
     to_be_decision: ToBeDecision = ToBeDecision()     # ToBe生成の判断チェックポイント(3.6)
+    confirmations: list[Confirmation] = []            # 共有して得た反応の記録(3.7)
 ```
 
 **`challenges` の移行方針**: `Challenge` は `ConfidenceItem` の上位互換。既存JSONは `id` が無い状態で読めるため、**読み込み時に空IDとして扱い、次回保存時に core が採番する**。この初回採番は意味上の変更として扱わない(陳腐化を引き起こさない)。移行対象の実データは1プロジェクト(medo-ops、課題5件)のみ。
@@ -428,7 +472,10 @@ class ProcessChecks(BaseModel):
     past_attempts: CheckState = "unverified"        # プロセス2: 既往の取り組みの確認
     hidden_stakeholders: CheckState = "unverified"  # プロセス3: 隠れた関係者の探索
     decision_maker: CheckState = "unverified"       # プロセス3: 決裁者の特定
+    as_is_review: CheckState = "unverified"         # AsIsの論理矛盾・GAPのレビュー(判断4)
 ```
+
+**`as_is_review` はAsIsドキュメントに対するレビューの実施記録**である。ToBeを問う節目の条件として使う(判断4)。`identified` は矛盾・GAPが見つかったことを、`confirmed_none` はレビューして問題が無かったことを表す。
 
 `RequirementsDoc.process_checks` として持つ。
 
@@ -481,7 +528,26 @@ class ToBe(Node):
 
 `to_be` の型を汎用 `Node` から `ToBe` に変更する(既定値ありのため後方互換)。**裏づけの判定(§4)には使わない** — 判定は `Gap(kind="goal")` 経由の明示リンクで行い、`evidenced_by` は経緯の記録に徹する。両者を兼ねさせると、記録の便宜で判定が緩む。
 
-### 3.7 仮説(Hypothesis)
+### 3.7 共有と反応の記録(Confirmation)
+
+**ループの収束は構造的条件だけでは決められない**。収束を決めるKPI/KGIは暗黙知に依存し、人間自身も認知していない場合がある。したがって**複数の人間(顧客・コンサルタント)が確認し共感した事実**を収束判断の材料にする(ユーザー指摘)。
+
+```python
+class Confirmation(BaseModel):
+    id: str = ""                       # 採番プレフィックス cf-
+    stakeholder_id: str                # 誰が(3.3のステークホルダー)
+    target: str                        # 何に対して(artifact ID または requirements version)
+    reaction: Literal["empathized", "acknowledged", "objected", "unclear"]
+    note: str = ""                     # 異議・補足の内容
+    recorded_on: str                   # ISO日付
+```
+
+**認証・マルチテナントは導入しない**(product.md の利用スコープを維持)。これは**利用者本人が、対話の結果として得た他者の反応を記録する**ものであり、他者がシステムにログインして入力するものではない。`stakeholder_id` は既存の `stakeholders` を指し、新たな利用者概念を作らない。
+
+- `reaction: objected` の `note` は、次の往復で掘るべき論点になる
+- 同じ `target` に対する `empathized` が複数のステークホルダーから得られている状態が、収束の有力な指標になる(§4の `empathy_readiness`)
+
+### 3.8 仮説(Hypothesis)
 
 `confidence` は「今どれだけ確からしいか」、`Hypothesis` は「何を検証すれば確定するか」を持つ。
 
@@ -713,9 +779,20 @@ class Hypothesis(BaseModel):
 
 **全ArtifactTypeを網羅する**。生成物側の宣言は不要で、型ごとの固定ルールとして core が持つ。
 
+**`ArtifactType` に `research` と `as-is` を追加する**(判断4-b)。往復の各周回で出力する成果物であり、これが無いとループが回らない。
+
+```python
+ArtifactType = Literal[
+    "research", "as-is",                                     # 追加(判断4-b)
+    "architecture", "slides", "mock", "comparison", "mini-prfaq", "prfaq", "fermi"
+]
+```
+
 | 生成物type | 依存セクション | 親への依存 |
 |---|---|---|
 | `fermi` | なし(facts と assume のみ) | — |
+| **`research`** | なし(`facts` の引用のみに依存。`cited_facts` のstaleで陳腐化する) | — |
+| **`as-is`** | `as_is` / `gaps` / `constraints` / `stakeholders` / `attempts` | — |
 | `mini-prfaq` | `goal` / `challenges` / `principles` / `constraints` / `to_be` / `kpis` | — |
 | `prfaq` | 上記 + `as_is` / `gaps` / `bottlenecks` / `hypotheses` / `attempts` / `stakeholders` | `grown_from`(候補選択の来歴。伝播対象外) |
 | `comparison` | `challenges` / `principles` / `constraints` / `kpis` | — |
@@ -723,7 +800,9 @@ class Hypothesis(BaseModel):
 | `architecture` | `functional` / `non_functional` / `constraints` | — |
 | `mock` | `functional` / `constraints` | — |
 
-**`slides` の依存を明確化**(Codex指摘。旧案は「要件への直接依存は持たない」としながら§7で `as_is`・`kpis`・`gaps` 等を直接入力にしており矛盾していた)。`slides` が描画する `as_is` / `to_be` / `kpis` / `gaps` / `bottlenecks` / `hypotheses` は**すべて親 `prfaq` の依存に含まれる**ため、親からの伝播で捕捉できる。親が依存しない `open_questions` のみ直接依存として持つ。
+**`research` は要件セクションに依存しない**。調査結果は要件が変わっても陳腐化せず、引用ファクトの鮮度切れでのみ陳腐化する。これはループの起点として、要件の往復から独立していることを意味する。
+
+**`slides` の依存を明確化**(Codex指摘。旧案は「要件への直接依存は持たない」としながら§7で `as_is`・`kpis`・`gaps` 等を直接入力にしており矛盾していた)。`slides` が描画する内容は**すべて親(`prfaq` または `as-is`)の依存に含まれる**ため、親からの伝播で捕捉できる。親が依存しない `open_questions` のみ直接依存として持つ。
 
 **比較の基準**: 直前バージョンではなく、**`artifact.requirements_version` の文書と最新版**を比較する(`RequirementsStore.get(project, version)` で任意版を取得できるため実装可能)。
 
@@ -749,11 +828,14 @@ derived_from: str | None = None   # 親artifact ID(例: "prfaq-v3")
 
 **親typeの許容表**(「通常はprfaq」ではなく必須契約として定義):
 
-| 子type | 許容する親type |
-|---|---|
-| `slides` | `prfaq` |
+| 子type | 許容する親type | 用途 |
+|---|---|---|
+| `slides` | `prfaq` | 最終提案スライド(§7の7章構成) |
+| `slides` | `as-is` | **AsIs説明スライド**(往復の途中で顧客に共有し共感を得る。§7参照) |
 
 (将来の派生生成物を追加する際は本表を拡張する)
+
+**同じ `slides` 型が2つの用途を持つ**ため、どちらであるかは `derived_from` の親typeで判別する。`prfaq` 由来なら提案スライド、`as-is` 由来ならAsIs説明スライドとして、Skillが異なる構成で生成する。
 
 **実装契約**:
 
@@ -802,7 +884,10 @@ Codex と agy が**独立に**「論理の一貫性は必要条件だが十分�
 
 1. `reality_evidence.internal_as_is` が1件以上(内部実態が入っている)
 2. `to_be` に `confirmed` が1件以上あり、**そのすべてが明示リンクで裏づけ済み**(`unsupported_confirmed_to_be` が空)
-3. `process_checks` の4項目がいずれも `unverified` でない
+3. `process_checks` の5項目がいずれも `unverified` でない
+4. **`Confirmation` で `reaction="empathized"` が複数のステークホルダーから得られており、未解消の `objected` が無い**(3.7)
+
+**条件4が収束判断の中核である**(ユーザー指摘)。収束を決めるKPI/KGIは暗黙知に依存し人間自身も認知していない場合があるため、構造的条件(1〜3)だけでは「一定の精度に達した」と判断できない。**複数の人間が確認し共感した事実**が最終的な根拠になる。
 
 **これは保存ゲートではなく診断である**(判断5との整合)。`not_ready` でもPRFAQやスライドの生成は妨げない。
 
@@ -827,6 +912,29 @@ rejected_options: list[RejectedOption] = []
 ---
 
 ## 7. スライド生成の設計
+
+スライドには**2つの用途**があり、構成が異なる(判断4-b)。`derived_from` の親typeで判別する。
+
+| 親type | 用途 | いつ使うか |
+|---|---|---|
+| `as-is` | **AsIs説明スライド** | 往復の途中。顧客に現状認識を共有し、確認・共感・過不足の指摘を得る |
+| `prfaq` | **最終提案スライド** | 合意形成後。打ち手と意思決定依頼を提示する |
+
+### 7-1. AsIs説明スライド(親: `as-is`)
+
+**目的は説得ではなく、認識の確認と過不足の洗い出し**である。提案スライドと同じ構成にすると、まだ合意していない段階で結論を押し付ける資料になる。
+
+| # | 章 | 内容 | 主な入力 |
+|---|---|---|---|
+| 1 | 現状の全体像 | 何を調べ、何が分かったか | `research` / `as_is` |
+| 2 | 公開情報と現場実態 | 外部から見える姿と実態の対比(**リフレーミング規約を適用**) | `as_is`(public/internal)/ `gaps(perception)` |
+| 3 | 立場による見え方の違い | 経営と現場で実態認識が分かれている点 | `gaps(internal_conflict)` / `stakeholders` |
+| 4 | 制約と、これまでの取り組み | 動かせない条件と、なぜ今まで解決していないか | `constraints` / `attempts` |
+| 5 | **確認したいこと** | 認識の過不足・誤りの指摘を求める問いかけ | `open_questions` / `confidence: assumed` の項目 |
+
+**章5が最も重要**である。この資料は結論を出すためではなく、**間違いを指摘してもらうため**に出す。`assumed` の項目を明示して「ここは推測です。実態と違えば教えてください」と問う。得られた反応は `Confirmation`(3.7)に記録し、次の往復の入力になる。
+
+### 7-2. 最終提案スライド(親: `prfaq`)
 
 **PRFAQの長文をそのままMarpに分割すると「文字だらけの箇条書き」になり、最も共感されない形式になる**(agy指摘)。`make-slides` は要約ではなく、**定型パターンの構造化テンプレート**として設計する。
 
@@ -882,7 +990,7 @@ rejected_options: list[RejectedOption] = []
 - **feasibility**: 技術ナレッジの確度 + `constraints` との突合
 - **保存形式**: 「基準・根拠・確度」を持つ比較表として保存し、数値効果はフェルミ生成物への参照に留める
 
-**感度分析**: `Hypothesis.fermi_ref`(3.7)により、「どの仮定がブレると効果の桁が変わるか」を決定論的に算出できる。これが `decision-roadmap` の検証優先度になる。
+**感度分析**: `Hypothesis.fermi_ref`(3.8)により、「どの仮定がブレると効果の桁が変わるか」を決定論的に算出できる。これが `decision-roadmap` の検証優先度になる。
 
 ---
 
@@ -893,11 +1001,12 @@ rejected_options: list[RejectedOption] = []
 | **1** | 論理構造スキーマ + ID規約 + 移行 + 充足状況の可視化 + **`medo-hearing` の改訂** | ID採番シーケンス(3.1)・型付きリンク・`covered_challenge_ids` を含める。これが無いと2を開始できない。**Skillの受入条件**: (a) `process_checks` を読んで未確認項目をどう扱うか(質問する/明示的に保留する/例外として記録する)の契約、(b) **`to_be_decision.milestone` が真のとき `asis_tobe_loop` を提示して「ToBeを出す/更新するか」を問い、偽のときは現在地の1行提示に留める**契約(判断4)。スキーマだけ作ってもSkillが使わなければ確認プロセスも往復も起きない |
 | **2** | 陳腐化のセクション単位化 + カバレッジ判定 + 2段階重大度 | 1と密結合。飛ばすと全生成物が常時stale化して破綻 |
 | **3** | 出典検証の強化(URLフェッチ + 数値突合) | **他と技術的に独立しており並行可能**。Task10で穴を実証済み |
-| **4** | 生成物の依存グラフ + stale伝播 | `make-slides` の前提 |
-| **5** | `make-slides`(7章構成の構造化テンプレート) | 利用者の主要求 |
+| **4** | 生成物の依存グラフ + stale伝播 | `make-slides` の前提。**`derived_from` の親type表に `as-is` を含める**(7-1) |
+| **5a** | **`research` / `as-is` 生成物 + 共有と反応の記録(`Confirmation`)** | 判断4-bのループを回すための最小構成。これが無いと往復が頭の中だけの話になる |
+| **5b** | `make-slides`(AsIs説明スライド 5章 / 最終提案スライド 7章) | 利用者の主要求。5aの `as-is` が親になる |
 | **6a** | ナレッジ来歴スキーマ | **6bの前提**(下記) |
 | **6b** | `knowledge-digest`(LLMによる統合提案) | 統合後も旧entryを残し、過去Artifactの引用が検証可能であること |
-| **7** | `decision-roadmap`(再定義) | 3.7の `fermi_ref` が前提。感度分析と連動 |
+| **7** | `decision-roadmap`(再定義) | 3.8の `fermi_ref` が前提。感度分析と連動 |
 | 後続 | `build-mock` / `propose-architecture` / pricing(再定義) / 簡易Webアプリ | フェーズ2完了定義の改訂が必要(後述) |
 
 ### 優先度6a: ナレッジ来歴スキーマの仕様
