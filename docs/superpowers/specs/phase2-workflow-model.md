@@ -59,6 +59,7 @@ class CheckRecorded(WorkflowEventBase):
     result: Literal["completed", "finding", "undeterminable"]
     note: str = ""                      # finding / undeterminable のとき必須
     finding_refs: list[str] = []        # finding のとき、該当するノードID
+    disposition: Literal["open", "deferred", "promoted"] = "open"   # undeterminable の扱い(§6)
 
 class AsIsReportReviewed(WorkflowEventBase):
     kind: Literal["asis_review"] = "asis_review"
@@ -345,7 +346,27 @@ result: completed | finding | undeterminable
 
 **中立的な語彙にする**(Codex指摘による訂正)。当初案の `confirmed_none` / `identified` は「探索対象の有無」には使えるが、品質・合意・安全性の評価には意味が定まらなかった — `source_quality=identified` が「良質な出典を確認した」なのか「品質問題を発見した」なのか判別できない。`completed` / `finding` なら11項目すべてで意味が一貫する。
 
-`undeterminable` は**欠落ではなく発見**として扱う。`readiness` の不合格条件にはせず、次の周回で掘る論点として `actions` に現れる。
+`undeterminable` は**欠落ではなく発見**として扱う。ただし**無条件に充足として数えない**。
+
+#### 判断不能には「扱いを決める」ことを求める
+
+**すべてを `undeterminable` と記録すれば収束できてしまう抜け道を塞ぐ**(agy指摘)。「寛容さはプロセスの層に」(不変条件7)が、検証そのものの骨抜きに変質してはならない。
+
+```python
+disposition: Literal["open", "deferred", "promoted"] = "open"
+```
+
+`CheckRecorded(result="undeterminable")` に `disposition` を持たせ、その後の扱いを記録する。
+
+| disposition | 意味 | 収束への影響 |
+|---|---|---|
+| `open` | まだ扱いを決めていない | **収束をブロックする** |
+| `deferred` | 今回は不問・保留と判断した | ブロックしない |
+| `promoted` | 課題または未確定事項へ昇格させた | ブロックしない |
+
+**核となる2項目は `deferred` を許さない**。`reality_gap` と `decision_maker` は、判断できないまま先へ進むと提案の土台が崩れる。この2項目は `promoted` へ昇格させることでのみ先へ進める。
+
+これにより、判断不能が残っていても**扱いを決めれば前へ進める**一方、扱いを決めずに素通りすることはできない。
 
 ### 未確定・矛盾・判断不能は課題の候補である
 
@@ -357,7 +378,27 @@ class Challenge(ScopedNode):
     promoted_from: str = ""   # 昇格元(gap-N / ev-N)
 ```
 
-当初案は `internal_conflict` に「パイプラインに直接流さない」と書いて経路を塞いでいた。**論理矛盾やトレードオフが課題であることもある**ため、この判断を撤回する。昇格は自動ではなく、人間が「これは解くべき課題だ」と判断したときに記録する。
+当初案は `internal_conflict` に「パイプラインに直接流さない」と書いて経路を塞いでいた。**論理矛盾やトレードオフが課題であることもある**ため、この判断を撤回する。昇格は自動ではなく、人間が判断したときに記録する。
+
+#### 昇格先は Challenge だけではない
+
+**すべてを課題にすると一覧が肥大化する**(agy指摘)。些細な認識相違や単なる情報不足まで課題化すると、本当に解くべきことが埋もれる。次の基準で仕分ける。
+
+| 昇格先 | 基準 |
+|---|---|
+| `Challenge`(解くべき問い) | ①ゴール達成に直結する ②構造的なトレードオフで意思決定が要る ③`cost_of_inaction` を定義できる — **これらを満たす場合** |
+| `OpenQuestion`(共に解明する問い) | 解明が要るが、まだ「解くべき課題」と断定できない |
+| `Constraint`(制約) | 変えられない前提として受け入れる |
+| (昇格しない) | 上記のいずれでもない。`disposition: deferred` で保留する |
+
+#### 顧客に向けては「課題」と呼ばない
+
+**「答えられないこと自体が御社の課題です」と伝えるのは危険である**(agy指摘)。顧客が語れない理由の多くは情報不足・社内利害の未調整・語彙の欠如であり、そこを課題と名指しすると組織防衛を激しく刺激し、伴走ではなく**査定・責任転嫁**と受け取られて信頼が壊れる。
+
+- **内部の扱い**: `Challenge` として構造化し、真因分析のパイプラインに載せる
+- **顧客への提示**: 「**共に解明したい問い**」として提示する。討議用スライドでは `OpenQuestion` の語彙を使う
+
+同じ実体を、内部では課題として扱い、対話では共同探求の問いとして扱う。これはリフレーミング規約([スライド設計](phase2-slides-design.md))と同じ考え方である。
 
 昇格の記録により、「なぜこれが課題なのか」を矛盾の発見まで遡って追跡できる。
 
@@ -405,7 +446,9 @@ CLIが持つ registry で、項目ごとに次を定義する。
 
 ### チェックリスト自体の形骸化を検出する
 
-**同じ check の有効値が、直近3周(`round_id`)にわたって連続で `completed` だったら報告する**。中身のない定型入力が続いている可能性を示す。判定は `workflow.checks.ritualized` に出す。
+**要件に `substantive` な変更があったにもかかわらず、同じ check の有効値が3周続けて `completed` だったら報告する**。判定は `workflow.checks.ritualized` に出す。
+
+変更が無い周回を数に入れない(agy指摘)。ステークホルダーが最初から限定されている案件では `hidden_stakeholders` が `completed` のまま続くのが正常であり、単純な連続回数では誤検出になる。
 
 これは私(medoの設計者)が改訂のたびに矛盾を混入させた問題と同じ構造である — **チェックする側が機能しているかを、別の層が見る必要がある**。報告であって強制ではない。
 
@@ -425,7 +468,7 @@ CLIが持つ registry で、項目ごとに次を定義する。
 |---|---|---|
 | 1 | `scope: core` の `internal` AsIs が1件以上 | `internal_as_is_missing` |
 | 2 | `scope: core` の `to_be` に `confirmed` が1件以上あり、そのすべてが裏づけ済み | `unsupported_confirmed_to_be` |
-| 3 | その段階で出る check(§6)がすべて記録されている。**`undeterminable` は充足として数える** | `check_missing` |
+| 3 | その段階で出る check(§6)がすべて記録されている。`undeterminable` は `disposition` が `deferred` / `promoted` なら充足として数える | `check_missing` / `undeterminable_open` |
 | 4 | 未解決の `changes_requested` が無い | `review_findings_open` |
 | 5 | 決裁者(`is_decision_maker=True`)から `purpose="to_be_go_ahead"` の `agreed` が得られている | `to_be_go_ahead_missing` |
 | 6 | `influence="high"` のステークホルダーに、有効値としての `objected` が残っていない | `high_influence_objection_open` |
@@ -465,7 +508,7 @@ CLIが持つ registry で、項目ごとに次を定義する。
 
 > **ToBe `tb-N` が裏づけを持つ** ⟺ `from_to_be` に `tb-N` を含む `Gap(kind="goal")` が存在し、その `from_as_is` に `visibility="internal"` かつ `confidence != "open"` の AsIs が1件以上含まれる
 
-**`undeterminable` を不合格にしない**。「確認したが判断できなかった」は確認プロセスが機能した結果であり、未実施とは違う。判断できないこと自体が課題なら `challenge` へ昇格させ、そちらで扱う(§6)。
+**`undeterminable` それ自体は不合格にしない**。「確認したが判断できなかった」は確認プロセスが機能した結果であり、未実施とは違う。ただし**扱いを決めないまま(`disposition: open`)は収束させない** — でなければ全項目を判断不能と記録して素通りできてしまう(§6)。
 
 **条件5・6が収束判断の中核である**。単なる頭数では判定しない — 現場担当者2名の共感で通る一方、決裁者が未確認でも通り、影響力の無い1名の異議で全体が止まる、という誤判定を防ぐ。
 
@@ -499,9 +542,11 @@ CLIが持つ registry で、項目ごとに次を定義する。
 | `resolved_objections` | その `round_id` のイベントで有効値から外れた `objected` の件数 |
 | `promoted_challenges` | その周回の要件版で `promoted_from` が新規に設定された `challenge` の件数 |
 | `confidence_raised` | その周回で `confidence` が上がったノードのID |
-| `undeterminable_found` | その `round_id` の `CheckRecorded(result="undeterminable")` の check 名 |
+| `undeterminable_found` | その `round_id` で**初めて** `undeterminable` になった check 名。**2周以上続けて同じ項目が判断不能のままなら数えない** |
 
 `progress_count` を上記の合計(IDリストは件数に換算)として定義する。
+
+**同じ項目の判断不能が続く場合を成果に数えない**(agy指摘)。毎周「やはり判断できませんでした」を記録するだけで `progress_count` が非ゼロになり、**進捗のない空転が発散警告に引っかからなくなる**ためである。初回の発見は前進だが、繰り返しは停滞である。
 
 ### 往復の発散
 

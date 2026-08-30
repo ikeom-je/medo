@@ -190,8 +190,8 @@ status
 | 4 | `draft_strawman_to_be` | `to_be` が0件で、`internal` AsIs が1件以上ある |
 | 5 | `generate_as_is_report` | 最新要件版から生成された `as-is-report` が無い |
 | 6 | `run_check` | `unverified` の check がある(段階に応じた項目のみ) |
-| 6b | `explore_undeterminable` | `undeterminable` の check がある。**判断できなかったこと自体を掘る** |
-| 6c | `consider_promotion` | 未昇格の `internal_conflict` または `undeterminable` がある。**課題として扱うか判断する** |
+| 6b | `explore_undeterminable` | **`disposition: open` の** `undeterminable` がある。判断できなかったこと自体を掘る |
+| 6c | `consider_promotion` | 未昇格の `internal_conflict` がある。課題・未確定事項・制約のどれとして扱うか判断する |
 | 7 | `regenerate_stale_artifacts` | stale な生成物がある(**往復進行中は順位を下げる**。下記) |
 | 7b | `elicit_internal_as_is` | `internal_as_is_missing`(内部実態がまだ無い) |
 | 7c | `ground_confirmed_to_be` | `unsupported_confirmed_to_be`(裏づけの無い確定ToBeがある) |
@@ -199,6 +199,8 @@ status
 | 7e | `request_to_be_go_ahead` | 他の条件を満たし、決裁者の `to_be_go_ahead` だけが未取得 |
 | 8 | `proceed_to_propose_options` | `readiness.state == "ready"` |
 | 9 | `continue_hearing` | 上記のいずれにも該当しない |
+
+**`disposition` を決めれば先へ進める**(agy指摘)。当初案は 6b/6c が `proceed_to_propose_options`(8)より上位にあり、判断不能が1件でも残ると次ステージへの行動が提示されず実務が凍結した。`deferred` / `promoted` を記録すれば 6b/6c は消え、8が出る。
 
 **`readiness.failed_conditions` のすべてに対応する action がある**(Codex指摘により追加)。当初案は `internal_as_is_missing` / `unsupported_confirmed_to_be` / `to_be_go_ahead_missing` に対応する行動が無く、決裁者の合意が無いだけの状態でも `continue_hearing` に落ちて何をすべきか分からなかった。
 
