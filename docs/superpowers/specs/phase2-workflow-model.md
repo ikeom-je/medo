@@ -50,10 +50,12 @@ class WorkflowEventBase(BaseModel):
 ### 5つのイベント型
 
 ```python
-class DiscoveryCheckRecorded(WorkflowEventBase):
-    kind: Literal["discovery_check"] = "discovery_check"
-    check: Literal["reality_gap", "past_attempts", "hidden_stakeholders", "decision_maker"]
-    result: Literal["confirmed_none", "identified"]
+class CheckRecorded(WorkflowEventBase):
+    kind: Literal["check"] = "check"
+    check: CheckItem                    # §6のチェック項目
+    result: Literal["confirmed_none", "identified", "undeterminable"]
+    note: str = ""                      # undeterminable のとき必須(なぜ判断できないか)
+    finding_refs: list[str] = []        # identified のとき、該当するノードID
 
 class AsIsReportReviewed(WorkflowEventBase):
     kind: Literal["asis_review"] = "asis_review"
@@ -100,7 +102,7 @@ class ToBeCheckpointRecorded(WorkflowEventBase):
 
 | イベント型 | 許容する target |
 |---|---|
-| `DiscoveryCheckRecorded` | `requirements` |
+| `CheckRecorded` | `requirements`(スライド表現のチェックのみ `artifact`) |
 | `AsIsReportReviewed` | `artifact`(`as-is-report` のみ) |
 | `StakeholderResponded` | `purpose` により決まる(§3) |
 | `MilestoneDetected` | `requirements` |
@@ -285,22 +287,79 @@ class ConvergenceTarget(BaseModel):
 
 ---
 
-## 6. 発見プロセスの確認
+## 6. チェックリスト
 
-AsIsに暗黙知が入らないままToBeを確定させると理想の正論に終わる。これを防ぐ**4つの確認**をSkillの契約とする。実施結果は `DiscoveryCheckRecorded` イベントに記録する。
+AsIsに暗黙知が入らないままToBeを確定させると理想の正論に終わる。これを防ぐ確認項目をSkillの契約とし、実施結果を `CheckRecorded` イベントに記録する。
 
-| check | 問うこと | 組織防衛を招かない問い方 |
-|---|---|---|
-| `reality_gap` | 公開情報から見える姿を現場実態と突き合わせたか | 「対外的にはこう見えていますが実態は」ではなく「**目標達成に向けて、現場で直面している想定外の制約は何でしょうか**」 |
-| `past_attempts` | その課題にこれまで取り組んだか、なぜ進まなかったか | — |
-| `hidden_stakeholders` | 影響を受ける人・承認が必要な人が他にいないか | — |
-| `decision_maker` | 決裁権限を持つのは誰か | — |
+### チェックリストの正本はCLI側に置く
+
+**項目の定義と結果の記録はCLIが持ち、各ドキュメントにはその時点で関連する項目を投影する**。ドキュメント本文にチェックリストを埋め込むと、更新が4種類の文書に分散し、記録が本文に埋まってCLIが未確認を検出できなくなる。これは移植性の条件1・4([Skill構成と移植性](phase2-skill-portability.md))と衝突する。
+
+### 文書ごとに別の観点を持つ
+
+**同じ項目を複数の文書で繰り返しチェックさせない**。重複はそれ自体が形骸化の原因になる。
+
+| 文書 | check | 問うこと | 確認者 |
+|---|---|---|---|
+| `research` | `source_quality` | 出典・鮮度・数値の転記精度 | consultant |
+| `as-is-report` | `reality_gap` | 公開情報から見える姿を現場実態と突き合わせたか | consultant → customer |
+| | `past_attempts` | その課題にこれまで取り組んだか、なぜ進まなかったか | consultant → customer |
+| | `hidden_stakeholders` | 影響を受ける人・承認が必要な人が他にいないか | consultant → customer |
+| | `decision_maker` | 決裁権限を持つのは誰か | consultant → customer |
+| | `internal_consistency` | **前回版と矛盾していないか。制約と両立するか** | consultant |
+| | `as_is_articulation` | **現状認識は合っているか。語られていない実態はないか** | customer |
+| 討議用スライド | `expression_safety` | リフレーミング規約に反する表現はないか。開示制御は適切か | consultant |
+| `to_be` | `to_be_articulation` | **あるべき姿を描けるか。誰の視点のToBeか** | customer |
+| | `feasibility` | 制約と両立するか。過渡期は描けているか | consultant → customer |
+| 全体 | `scope_agreement` | 今回の対象範囲(`scope: core`)はこれでよいか | customer |
 
 **`reality_gap` の問い方には注意が要る**。標榜していることと現場の実態の乖離を不用意に突くと、組織は自己防衛のために隠蔽・反発に走り対話が閉じる(Argyrisの組織防衛論)。告発・尋問と受け取られない**協調的探索の問い**に変換する。
 
-**「未確認」と「確認したが該当なし」を区別する**。データの形から確認プロセスの実施を推測すると誤判定になる — 推定した関係者を1件置くだけで警告が消え、逆に質問して「他にいない」と確認した正常なケースでは永続的に警告され続ける。したがって `result: confirmed_none | identified` を明示的に記録する。
+### 段階的に出す
 
-**`identified` に対応するレコード**(整合検証に使う):
+**初日から全項目を並べない**。探索の初期に全チェックが並ぶと「全部埋めないと動かない」という圧を与え、[status契約](phase2-status-contract.md)の段階的開示と衝突する。
+
+| 段階 | 出す check |
+|---|---|
+| `discovery`(`to_be` が0件) | `source_quality` / `reality_gap` / `past_attempts` / `hidden_stakeholders` / `as_is_articulation` |
+| `convergence` | 上記 + `internal_consistency` / `expression_safety` / `to_be_articulation` / `feasibility` / `decision_maker` / `scope_agreement` |
+
+### 「判断できない」を第一級の状態にする
+
+**チェックリストで判断できない場合はありうる。そして、判断できないこと自体が課題であることもある。**
+
+顧客が「あるべき姿を語れない」とき、それは埋めるべき欠落とは限らない。「組織として方向性が定まっていない」「部門間で前提が食い違っている」「そもそも誰も考えていない」といった**発見であり、案件の核心的な課題**でありうる。
+
+```
+result: confirmed_none | identified | undeterminable
+```
+
+| result | 意味 |
+|---|---|
+| (イベント無し) | 未確認 |
+| `confirmed_none` | 確認した結果、該当なし |
+| `identified` | 確認して該当があった |
+| **`undeterminable`** | **確認したが判断できなかった**。`note` に理由を必須で記録する |
+
+`undeterminable` は**欠落ではなく発見**として扱う。`readiness` の不合格条件にはせず、次の周回で掘る論点として `actions` に現れる。
+
+### 未確定・矛盾・判断不能は課題の候補である
+
+`undeterminable` と `Gap(kind="internal_conflict")` は、そのままでは打ち手のパイプラインに流れない。しかし**それ自体が解くべき課題である**と判断したときに、`challenge` へ昇格できる。
+
+```python
+class Challenge(ScopedNode):
+    ...
+    promoted_from: str = ""   # 昇格元(gap-N / ev-N)
+```
+
+当初案は `internal_conflict` に「パイプラインに直接流さない」と書いて経路を塞いでいた。**論理矛盾やトレードオフが課題であることもある**ため、この判断を撤回する。昇格は自動ではなく、人間が「これは解くべき課題だ」と判断したときに記録する。
+
+昇格の記録により、「なぜこれが課題なのか」を矛盾の発見まで遡って追跡できる。
+
+### `identified` に対応するレコード
+
+整合検証に使う。対応レコードを定義できない check は検証対象外とする。
 
 | check | `identified` が意味するもの |
 |---|---|
@@ -308,12 +367,20 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 | `past_attempts` | `Attempt` が1件以上(`outcome` は問わない) |
 | `hidden_stakeholders` | `Stakeholder(surfaced_by="inferred")` が1件以上 |
 | `decision_maker` | `Stakeholder(is_decision_maker=True)` が1件以上 |
+| `internal_consistency` | `finding_refs` が非空 |
+| その他 | 検証しない(`finding_refs` があれば実在を検証するに留める) |
 
 `identified` なのに対応レコードが0件、または `confirmed_none` なのに対応レコードが存在する場合は**不整合**として報告する。
 
 **同じ check が複数回記録された場合は、`id` の採番順で最後のものを有効値とする**(反応の畳み込みと同じ規則)。要件が更新されても check は自動的に無効化しない — 実施した事実は残る。
 
-**`inconsistent` が残っていても `readiness` は通す**。不整合は報告であって強制ではない(不変条件6)。`readiness.failed_conditions` には含めず、`workflow.checks.inconsistent` に列挙するに留める。
+**`inconsistent` が残っていても `readiness` は通す**。不整合は報告であって強制ではない(不変条件6)。
+
+### チェックリスト自体の形骸化を検出する
+
+**同じ check で `confirmed_none` が3回以上連続したら報告する**。中身のない定型入力が続いている可能性を示す。
+
+これは私(medoの設計者)が改訂のたびに矛盾を混入させた問題と同じ構造である — **チェックする側が機能しているかを、別の層が見る必要がある**。報告であって強制ではない。
 
 ---
 
@@ -331,7 +398,7 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 |---|---|---|
 | 1 | `scope: core` の `internal` AsIs が1件以上 | `internal_as_is_missing` |
 | 2 | `scope: core` の `to_be` に `confirmed` が1件以上あり、そのすべてが裏づけ済み | `unsupported_confirmed_to_be` |
-| 3 | `DiscoveryCheckRecorded` が4つの check すべてについて存在する | `discovery_check_missing` |
+| 3 | その段階で出る check(§6)がすべて記録されている。**`undeterminable` は充足として数える** | `check_missing` |
 | 4 | 未解決の `changes_requested` が無い | `review_findings_open` |
 | 5 | 決裁者(`is_decision_maker=True`)から `purpose="to_be_go_ahead"` の `agreed` が得られている | `to_be_go_ahead_missing` |
 | 6 | `influence="high"` のステークホルダーに、有効値としての `objected` が残っていない | `high_influence_objection_open` |
@@ -371,13 +438,36 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 
 > **ToBe `tb-N` が裏づけを持つ** ⟺ `from_to_be` に `tb-N` を含む `Gap(kind="goal")` が存在し、その `from_as_is` に `visibility="internal"` かつ `confidence != "open"` の AsIs が1件以上含まれる
 
+**`undeterminable` を不合格にしない**。「確認したが判断できなかった」は確認プロセスが機能した結果であり、未実施とは違う。判断できないこと自体が課題なら `challenge` へ昇格させ、そちらで扱う(§6)。
+
 **条件5・6が収束判断の中核である**。単なる頭数では判定しない — 現場担当者2名の共感で通る一方、決裁者が未確認でも通り、影響力の無い1名の異議で全体が止まる、という誤判定を防ぐ。
 
 **これは保存ゲートではなく診断である**。条件を満たさなくてもPRFAQやスライドの生成は妨げない。
 
+### 周回の成果を示す
+
+**回るほど疑われる構造にしない**。当初案は `round_count`(何周したか)と `divergence_warning`(3周超えたら発散疑い)しか持たず、**ループを回すこと自体が疑いの対象**になっていた。
+
+往復は暗黙知を引き出す機構であり、**回ること自体が価値**である。周回ごとに何が得られたかを返す。
+
+```json
+"round_delta": {
+  "new_internal_as_is": 2,
+  "new_constraints": 1,
+  "resolved_objections": 1,
+  "promoted_challenges": 1,
+  "confidence_raised": ["tb-1"],
+  "undeterminable_found": ["to_be_articulation"]
+}
+```
+
+`undeterminable_found` も**成果として数える**。「顧客があるべき姿を語れないと分かった」ことは前進であり、次に何を掘るかを決める材料になる。
+
 ### 往復の発散
 
-`round_count` が3を超えても `to_be` の `confirmed` が増えない状態を **発散の疑い**として報告する。論点の発散、ステークホルダー間の対立、スコープ肥大化の兆候になる。実務上の有効な往復は2〜3周が目安である。
+`round_count` が3を超えても `round_delta` が空に近い状態(新たに得られるものが無い)を **発散の疑い**として報告する。論点の発散、ステークホルダー間の対立、スコープ肥大化の兆候になる。実務上の有効な往復は2〜3周が目安である。
+
+**これは失敗の警告ではなく、論点を絞る合図である**。`focus_hypothesis` を絞り直すか、`scope` を `secondary` へ移す判断の材料になる。停止条件ではない。
 
 **収束の目安**: 新規に得られた実態によってToBeの修正差分が出なくなった状態(飽和)。
 

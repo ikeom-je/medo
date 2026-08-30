@@ -163,7 +163,9 @@ status
 | 3 | `address_review_findings` | 未解決の `changes_requested` がある |
 | 4 | `draft_strawman_to_be` | `to_be` が0件で、`internal` AsIs が1件以上ある |
 | 5 | `generate_as_is_report` | 最新要件版から生成された `as-is-report` が無い |
-| 6 | `run_discovery_check` | `unverified` の check がある |
+| 6 | `run_check` | `unverified` の check がある(段階に応じた項目のみ) |
+| 6b | `explore_undeterminable` | `undeterminable` の check がある。**判断できなかったこと自体を掘る** |
+| 6c | `consider_promotion` | 未昇格の `internal_conflict` または `undeterminable` がある。**課題として扱うか判断する** |
 | 7 | `regenerate_stale_artifacts` | stale な生成物がある(**往復進行中は順位を下げる**。下記) |
 | 8 | `proceed_to_propose_options` | `readiness.state == "ready"` |
 | 9 | `continue_hearing` | 上記のいずれにも該当しない |
@@ -173,6 +175,10 @@ status
 ### 理由をコードで返す
 
 `failed_conditions` は自然文ではなく**理由コード + 参照ID**で返す。自然文だとSkillの契約が文言に依存し、テストが不安定になる。コードは[ワークフローモデル](phase2-workflow-model.md) §7 の肯定条件表と1対1で対応する。
+
+**ただしこれは「失敗条件」ではなく「次の一手の候補」である**。当初案は診断の語彙がほぼすべて「足りない・間違っている」の枠組みで、監査人の視点になっていた。不変条件6「診断は報告であって強制ではない」と書きながら、`not_ready` をゲートに読める位置に置いていた。
+
+`readiness` は求められたときに答える位置に下げ、**`actions`(次にできること)を主役にする**。同じデータを返すが、Skillが最初に読むものを変える。
 
 ### stale と「今すぐ再生成すべき」は別
 
@@ -194,7 +200,7 @@ medo status --project <id> --include-scope secondary
 medo status --project <id> --format json|digest
 ```
 
-- `--view summary`(既定): `diagnostic_phase` / `readiness` / `workflow.loop.checkpoint` / `workflow.responses.open_objections` / `workflow.review.open_findings` / `actions`
+- `--view summary`(既定): **`actions` を先頭に置く**。続いて `diagnostic_phase` / `workflow.loop.round_delta` / `workflow.loop.checkpoint` / `workflow.responses.open_objections` / `workflow.review.open_findings`。`readiness` は `state` のみを返し、`failed_conditions` は `--view readiness` で取る
 - `--view full`: 全4階層
 - `--view <枝名>`: その枝のみ
 
