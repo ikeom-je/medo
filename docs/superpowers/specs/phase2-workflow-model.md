@@ -58,7 +58,8 @@ class DiscoveryCheckRecorded(WorkflowEventBase):
 class AsIsReportReviewed(WorkflowEventBase):
     kind: Literal["asis_review"] = "asis_review"
     outcome: Literal["approved", "changes_requested"]
-    finding_refs: list[str] = []   # gap / challenge / open_question のID
+    finding_refs: list[str] = []   # gap / challenge / open_question のID(要件側の所見)
+    slide_findings: list[str] = [] # スライド固有の所見(表現・構成。自由文)
     reviewed_slides_id: str        # 同時にレビューした討議用スライドのID(必須)
     reviewed_by: Literal["claude", "codex", "gemini", "human"] = "human"
 
@@ -110,7 +111,8 @@ class ToBeCheckpointRecorded(WorkflowEventBase):
 **保存時の検証**:
 
 - 上表の target 組み合わせ
-- `AsIsReportReviewed(outcome="changes_requested")` の `finding_refs` が非空で、その記録時点の要件版に実在すること
+- `AsIsReportReviewed(outcome="changes_requested")` は `finding_refs` と `slide_findings` の**いずれかが非空**であること。`finding_refs` を使う場合は記録時点の要件版に実在すること
+  - **スライド固有の差し戻しを要件ノードで表せないため**(agy指摘)。「見出しの表現がリフレーミング規約に反する」といった所見は要件の欠陥ではなく、要件側にダミーの `open_question` を捏造しないと保存できない状態だった
 - `AsIsReportReviewed.reviewed_slides_id` は**必須**とし、`slide_kind="discussion"` の `slides` で、かつ `derived_from` に当該 `as-is-report` を含むこと(レポートとスライドを必ず一緒にレビューする契約と整合させる)
 
 **共通envelopeにしたことで、すべての進行記録に対象・日付が付く**。当初案は `ProcessChecks` と `ToBeDecision` を要件内のスナップショットに、`AsIsReview` と `Confirmation` を外部イベントに、と偶然分裂させていた。意味の似た概念が保存場所で分かれており、イベント追加時に要件内のチェックポイントをどう更新するかが定義できなかった。
@@ -187,7 +189,15 @@ class ConvergenceTarget(BaseModel):
 
 祖先への反応を無条件に有効とすると、**v1で得た合意が、v2で内容が大きく変わっても有効なまま残る**(agy指摘)。「古い合意で誤って通る」を防ぐという目的と矛盾する。
 
-> **祖先への `agreed` / `empathized` は、現在対象までの変更がすべて `editorial` の場合にのみ継承する**。途中に `substantive` な変更([ドメインモデル](phase2-domain-model.md) §7 の変更manifest)があれば、その合意は失効し `re_confirmation_required` として報告する。
+> **祖先への `agreed` / `empathized` は、その合意が依存するセクションに `substantive` な変更が無い場合にのみ継承する**。該当セクションに実質変更([ドメインモデル](phase2-domain-model.md) §7 の変更manifest)があれば、その合意は失効し `re_confirmation_required` として報告する。
+
+**失効の判定はセクション単位で行う**(agy指摘による訂正)。「途中に `substantive` な変更が1つでもあれば失効」とすると、**`to_be_go_ahead` を得た後に無関係な `constraints` や `stakeholders` へ実態を追記しただけで合意が巻き添え失効し**、再び収束不能ループに陥る。陳腐化判定がセクション単位であるのと同じ粒度にする。
+
+| purpose | 失効を引き起こすセクション |
+|---|---|
+| `as_is_alignment` | 対象 `as-is-report` の依存セクション(`as_is` / `gaps` / `constraints` / `stakeholders` / `attempts`) |
+| `to_be_go_ahead` | `to_be` / `kpis` / `goal` |
+| `phase_signoff` | 対象の最終提案スライドとその親 `prfaq` の依存セクション |
 
 **`objected` は逆で、内容が変わっても継承する**(解消されたことが確認できるまで残す)。安全側に倒す。
 
@@ -271,7 +281,7 @@ class ConvergenceTarget(BaseModel):
 - `approved`(問題なし)の記録は任意。記録しない場合、構造診断([status契約](phase2-status-contract.md)の `model.links`)が代替の検出手段になる
 - 収束条件は「レビューが存在すること」ではなく「**未解決の `changes_requested` が無いこと**」とする
 
-**`changes_requested` の解消**: 同じ `as-is-report` 系列の後継に対して `approved` が記録されるか、`finding_refs` が指すノードがすべて解消(削除または `confidence: confirmed` へ)されたとき。当初案は「レビューが存在する」だけで収束条件を満たしたため、所見が未解決でも通ってしまった。
+**`changes_requested` の解消**: 同じ `as-is-report` 系列の後継に対して `approved` が記録されたとき。`finding_refs` が指すノードがすべて解消(削除または `confidence: confirmed` へ)された場合も解消とする。`slide_findings`(自由文)は機械判定できないため、**後継への `approved` でのみ解消する**。当初案は「レビューが存在する」だけで収束条件を満たしたため、所見が未解決でも通ってしまった。
 
 ---
 
