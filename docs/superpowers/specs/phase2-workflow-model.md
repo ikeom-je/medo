@@ -43,7 +43,10 @@ class WorkflowEventBase(BaseModel):
     target: TargetRef
     occurred_on: str             # ISO日付
     requirements_version: int    # 記録時点の最新要件版
+    round_id: int                # 記録時点の周回(§7のアルゴリズムで導出)
 ```
+
+**`round_id` を全イベントが持つ**。当初案は `MilestoneDetected` だけが持っていたため、反応やチェックがどの周回に属するかを一意に決められず、`round_delta`(§7)を決定論的に算出できなかった。要件版とイベントIDは別系列であり、両者から周回を推定することはできない。
 
 `TargetRef` を判別共用体にすることで、`target_kind` と `target_id` / `target_version` の排他制約がスキーマで保証される。
 
@@ -53,9 +56,9 @@ class WorkflowEventBase(BaseModel):
 class CheckRecorded(WorkflowEventBase):
     kind: Literal["check"] = "check"
     check: CheckItem                    # §6のチェック項目
-    result: Literal["confirmed_none", "identified", "undeterminable"]
-    note: str = ""                      # undeterminable のとき必須(なぜ判断できないか)
-    finding_refs: list[str] = []        # identified のとき、該当するノードID
+    result: Literal["completed", "finding", "undeterminable"]
+    note: str = ""                      # finding / undeterminable のとき必須
+    finding_refs: list[str] = []        # finding のとき、該当するノードID
 
 class AsIsReportReviewed(WorkflowEventBase):
     kind: Literal["asis_review"] = "asis_review"
@@ -75,7 +78,6 @@ class StakeholderResponded(WorkflowEventBase):
 class MilestoneDetected(WorkflowEventBase):
     kind: Literal["milestone"] = "milestone"
     condition: MilestoneCondition          # §4の10条件のいずれか
-    round_id: int                          # この節目が属する周回
     focus_hypothesis_id: str = ""          # この周回で検証する論点(任意)
 
 class ToBeCheckpointRecorded(WorkflowEventBase):
@@ -86,9 +88,9 @@ class ToBeCheckpointRecorded(WorkflowEventBase):
 
 **節目の検出自体をイベントにする**。当初案は `ToBeCheckpointRecorded` が回答しか持たないのに「同イベントの未回答状態が立つ」と説明しており、**未回答状態がどのデータから導かれるのかが定義できていなかった**。節目を `MilestoneDetected` として記録し、回答を `responds_to` で紐づけることで、未回答は「対応する `ToBeCheckpointRecorded` を持たない `MilestoneDetected`」として一意に導ける。
 
-`round_id` と `focus_hypothesis_id` も `MilestoneDetected` が持つ。当初案は索引で `focus_hypothesis_id` に言及しながら保存先が無く、envelope に周回が付くと書きながら周回IDが無かった。
+`focus_hypothesis_id` は `MilestoneDetected` が持つ(周回ごとの検証論点)。`round_id` は envelope が持つ(上記)。
 
-**`round_id` の採番**: `MilestoneDetected` を記録する時点で、§7 の `round_count` アルゴリズムを最新の要件履歴に適用して得た値を入れる。周回が進んでいなければ直前の `MilestoneDetected` と同じ値になる。これにより `round_count` と `max(round_id)` が一致する。
+**`round_id` の採番**: イベントを記録する時点で、§7 の `round_count` アルゴリズムを最新の要件履歴に適用して得た値を入れる。これにより `round_count` と `max(round_id)` が一致する。
 
 **`focus_hypothesis_id` の設定**: `medo checkpoint answer --focus <hyp-id>` で指定する。指定が無ければ直前の `MilestoneDetected` の値を引き継ぐ(周回をまたぐまで同じ論点を追う)。参照先が実在する仮説であることを保存時に検証する。
 
@@ -331,15 +333,17 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 顧客が「あるべき姿を語れない」とき、それは埋めるべき欠落とは限らない。「組織として方向性が定まっていない」「部門間で前提が食い違っている」「そもそも誰も考えていない」といった**発見であり、案件の核心的な課題**でありうる。
 
 ```
-result: confirmed_none | identified | undeterminable
+result: completed | finding | undeterminable
 ```
 
 | result | 意味 |
 |---|---|
 | (イベント無し) | 未確認 |
-| `confirmed_none` | 確認した結果、該当なし |
-| `identified` | 確認して該当があった |
+| `completed` | 確認した。特筆すべきものは無い |
+| `finding` | 確認して**何かが見つかった**。`note` または `finding_refs` を必須とする |
 | **`undeterminable`** | **確認したが判断できなかった**。`note` に理由を必須で記録する |
+
+**中立的な語彙にする**(Codex指摘による訂正)。当初案の `confirmed_none` / `identified` は「探索対象の有無」には使えるが、品質・合意・安全性の評価には意味が定まらなかった — `source_quality=identified` が「良質な出典を確認した」なのか「品質問題を発見した」なのか判別できない。`completed` / `finding` なら11項目すべてで意味が一貫する。
 
 `undeterminable` は**欠落ではなく発見**として扱う。`readiness` の不合格条件にはせず、次の周回で掘る論点として `actions` に現れる。
 
@@ -357,28 +361,51 @@ class Challenge(ScopedNode):
 
 昇格の記録により、「なぜこれが課題なのか」を矛盾の発見まで遡って追跡できる。
 
-### `identified` に対応するレコード
+### check registry: 有効期間と適用条件
+
+**checkには「いつまで有効か」がある**(Codex指摘)。当初案は「要件が更新されても check は自動的に無効化しない」としていたが、これでは**内容が変わっても旧結果が通り続ける**。特に `internal_consistency` や `feasibility` は、要件が変われば再確認が要る。
+
+CLIが持つ registry で、項目ごとに次を定義する。
+
+| check | 種別 | 対象 | 再確認を要求する変更 |
+|---|---|---|---|
+| `source_quality` | artifact束縛 | `research` | 対象の再生成 |
+| `reality_gap` | 持続 | requirements | — |
+| `past_attempts` | 持続 | requirements | — |
+| `hidden_stakeholders` | 持続 | requirements | — |
+| `decision_maker` | 持続 | requirements | `stakeholders` の変更 |
+| `internal_consistency` | 版束縛 | requirements | 論理連鎖の中核ノードの `substantive` 変更 |
+| `as_is_articulation` | artifact束縛 | `as-is-report` | 対象の再生成 |
+| `expression_safety` | artifact束縛 | 討議用 `slides` | 対象の再生成 |
+| `to_be_articulation` | 版束縛 | requirements | `to_be` の `substantive` 変更 |
+| `feasibility` | 版束縛 | requirements | `to_be` / `constraints` の `substantive` 変更 |
+| `scope_agreement` | 版束縛 | requirements | `scope` の変更 |
+
+- **持続**: 一度記録すれば有効。要件更新で無効化しない
+- **版束縛**: 上表の変更があった時点で失効し、再確認が必要になる
+- **artifact束縛**: 対象の生成物が再生成されたら失効する。畳み込みは反応と同じく**対象の系列ごと**に行う
+
+> **有効なcheckの決定**: 現在の対象に適用される check それぞれについて、失効していない最新の `CheckRecorded` を有効値とする。
+
+### `finding` に対応するレコード
 
 整合検証に使う。対応レコードを定義できない check は検証対象外とする。
 
-| check | `identified` が意味するもの |
+| check | `finding` が意味するもの |
 |---|---|
 | `reality_gap` | `Gap(kind="perception")` が1件以上 |
 | `past_attempts` | `Attempt` が1件以上(`outcome` は問わない) |
 | `hidden_stakeholders` | `Stakeholder(surfaced_by="inferred")` が1件以上 |
 | `decision_maker` | `Stakeholder(is_decision_maker=True)` が1件以上 |
-| `internal_consistency` | `finding_refs` が非空 |
-| その他 | 検証しない(`finding_refs` があれば実在を検証するに留める) |
+| その他 | `finding_refs` または `note` が非空であることのみ検証する |
 
-`identified` なのに対応レコードが0件、または `confirmed_none` なのに対応レコードが存在する場合は**不整合**として報告する。
-
-**同じ check が複数回記録された場合は、`id` の採番順で最後のものを有効値とする**(反応の畳み込みと同じ規則)。要件が更新されても check は自動的に無効化しない — 実施した事実は残る。
+`finding` なのに対応レコードが0件、または `completed` なのに対応レコードが存在する場合は**不整合**として報告する。
 
 **`inconsistent` が残っていても `readiness` は通す**。不整合は報告であって強制ではない(不変条件6)。
 
 ### チェックリスト自体の形骸化を検出する
 
-**同じ check で `confirmed_none` が3回以上連続したら報告する**。中身のない定型入力が続いている可能性を示す。
+**同じ check の有効値が、直近3周(`round_id`)にわたって連続で `completed` だったら報告する**。中身のない定型入力が続いている可能性を示す。判定は `workflow.checks.ritualized` に出す。
 
 これは私(medoの設計者)が改訂のたびに矛盾を混入させた問題と同じ構造である — **チェックする側が機能しているかを、別の層が見る必要がある**。報告であって強制ではない。
 
@@ -463,9 +490,22 @@ class Challenge(ScopedNode):
 
 `undeterminable_found` も**成果として数える**。「顧客があるべき姿を語れないと分かった」ことは前進であり、次に何を掘るかを決める材料になる。
 
+**各項目は `round_id` で帰属を決める**。全イベントが envelope に `round_id` を持ち(§2)、要件変更は変更manifestの版を `round_count` アルゴリズムに通して周回を決める。
+
+| 項目 | 算出 |
+|---|---|
+| `new_internal_as_is` | その周回の要件版で新規追加された `visibility="internal"` の AsIs 件数 |
+| `new_constraints` | 同上、`constraints` の新規追加件数 |
+| `resolved_objections` | その `round_id` のイベントで有効値から外れた `objected` の件数 |
+| `promoted_challenges` | その周回の要件版で `promoted_from` が新規に設定された `challenge` の件数 |
+| `confidence_raised` | その周回で `confidence` が上がったノードのID |
+| `undeterminable_found` | その `round_id` の `CheckRecorded(result="undeterminable")` の check 名 |
+
+`progress_count` を上記の合計(IDリストは件数に換算)として定義する。
+
 ### 往復の発散
 
-`round_count` が3を超えても `round_delta` が空に近い状態(新たに得られるものが無い)を **発散の疑い**として報告する。論点の発散、ステークホルダー間の対立、スコープ肥大化の兆候になる。実務上の有効な往復は2〜3周が目安である。
+**直近2周の `progress_count` がいずれも0**の状態を **発散の疑い**として報告する。新たに得られるものが2周続けて無いことを意味する。論点の発散、ステークホルダー間の対立、スコープ肥大化の兆候になる。実務上の有効な往復は2〜3周が目安である。
 
 **これは失敗の警告ではなく、論点を絞る合図である**。`focus_hypothesis` を絞り直すか、`scope` を `secondary` へ移す判断の材料になる。停止条件ではない。
 
@@ -490,6 +530,6 @@ state = "waiting_as_is"
 
 **同一の保存で `as_is` と `to_be` の両方が変わった場合は1周と数える**(`waiting_as_is` から入って同じ版で `to_be` 変更も成立するため)。`change_kind: "editorial"` の版は走査から除外する。
 
-`round_id` は `MilestoneDetected` に記録され、`round_count` はその最大値としても導ける(両者は一致する)。
+`round_id` は全イベントの envelope に記録され、`round_count` はその最大値と一致する。
 
 発散の報告は**停止条件ではない**。

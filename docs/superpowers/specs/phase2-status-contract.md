@@ -90,12 +90,20 @@ status
   "workflow": {
     "checks": {
       "states": {
+        "source_quality": "completed",
         "reality_gap": "unverified",
-        "past_attempts": "identified",
-        "hidden_stakeholders": "confirmed_none",
-        "decision_maker": "unverified"
+        "past_attempts": "finding",
+        "hidden_stakeholders": "completed",
+        "decision_maker": "unverified",
+        "internal_consistency": "finding",
+        "as_is_articulation": "completed",
+        "expression_safety": "unverified",
+        "to_be_articulation": "undeterminable",
+        "feasibility": "unverified",
+        "scope_agreement": "unverified"
       },
-      "inconsistent": []
+      "inconsistent": [],
+      "ritualized": []
     },
     "review": {
       "current_target": "as-is-report-v2",
@@ -114,6 +122,15 @@ status
       "round_count": 2,
       "focus_hypothesis": "hyp-1",
       "reality_evidence": {"internal_as_is": 2, "constraints": 1, "resistant_stakeholders": 0},
+      "round_delta": {
+        "new_internal_as_is": 2,
+        "new_constraints": 1,
+        "resolved_objections": 0,
+        "promoted_challenges": 1,
+        "confidence_raised": [],
+        "undeterminable_found": ["to_be_articulation"],
+        "progress_count": 5
+      },
       "checkpoint": {"state": "pending", "since_version": 2},
       "divergence_warning": false
     }
@@ -123,7 +140,7 @@ status
     "failed_conditions": [
       {"code": "as_is_report_missing", "refs": []},
       {"code": "unsupported_confirmed_to_be", "refs": []},
-      {"code": "discovery_check_missing", "refs": ["reality_gap", "decision_maker"]},
+      {"code": "check_missing", "refs": ["reality_gap", "decision_maker", "expression_safety"]},
       {"code": "review_findings_open", "refs": ["gap-1"]},
       {"code": "to_be_go_ahead_missing", "refs": ["sh-1"]},
       {"code": "high_influence_objection_open", "refs": ["ev-7"]}
@@ -131,8 +148,13 @@ status
   },
   "actions": [
     {"code": "answer_tobe_checkpoint", "reason": "節目で未回答"},
-    {"code": "resolve_objection", "refs": ["ev-7"]}
-  ]
+    {"code": "resolve_objection", "refs": ["ev-7"]},
+    {"code": "explore_undeterminable", "refs": ["to_be_articulation"]},
+    {"code": "consider_promotion", "refs": ["gap-1"]},
+    {"code": "generate_discussion_slides"},
+    {"code": "request_to_be_go_ahead", "refs": ["sh-1"]}
+  ],
+  "next_step": "propose-options"
 }
 ```
 
@@ -144,7 +166,7 @@ status
 
 | キー | 判定式 |
 |---|---|
-| `links.challenges_without_cause` | `bottleneck_ids` と `cause_hypothesis_ids` の**両方が空**の課題 |
+| `links.challenges_without_cause` | `bottleneck_ids` と `cause_hypothesis_ids` の**両方が空**で、かつ `promoted_from` を持たない課題。**昇格した課題は矛盾や判断不能が起点なので真因リンクが空でも正常**であり除外する |
 | `links.gaps_without_bottleneck` | `kind="goal"` の gap のうち、どの `Bottleneck.gap_ids` からも参照されないもの |
 | `links.to_be_without_kpi` | どの `Kpi.to_be_ids` からも参照されない `to_be` |
 | `links.hypotheses_unvalidated` | `status` が `unvalidated` または `validating` の仮説 |
@@ -154,7 +176,11 @@ status
 
 ### actions の優先順位
 
-`actions` は下表の順に評価し、該当するものを順に並べる。**`actions[0]` が旧 `next_step` に相当する**。
+`actions` は下表の順に評価し、該当するものを順に並べる。
+
+**`next_step` は `actions[0]` にしない**(Codex指摘による訂正)。フェーズ1の Skill は `hearing` / `propose-options` / `grow-prfaq` / `regenerate-stale-artifacts` / `up-to-date` を**完全一致で分岐**しており、`actions` の新しい値域とは互換性がない。フィールドを残しても値域が変われば意味的互換は壊れる。
+
+移行期間中は **`next_step` をフェーズ1のロジックで独立に計算し続ける**。Skillをフェーズ2の契約へ更新した時点で削除する。
 
 | 順 | code | 条件 |
 |---|---|---|
@@ -167,8 +193,16 @@ status
 | 6b | `explore_undeterminable` | `undeterminable` の check がある。**判断できなかったこと自体を掘る** |
 | 6c | `consider_promotion` | 未昇格の `internal_conflict` または `undeterminable` がある。**課題として扱うか判断する** |
 | 7 | `regenerate_stale_artifacts` | stale な生成物がある(**往復進行中は順位を下げる**。下記) |
+| 7b | `elicit_internal_as_is` | `internal_as_is_missing`(内部実態がまだ無い) |
+| 7c | `ground_confirmed_to_be` | `unsupported_confirmed_to_be`(裏づけの無い確定ToBeがある) |
+| 7d | `generate_discussion_slides` | 最新 `as-is-report` に対応する討議用スライドが無い |
+| 7e | `request_to_be_go_ahead` | 他の条件を満たし、決裁者の `to_be_go_ahead` だけが未取得 |
 | 8 | `proceed_to_propose_options` | `readiness.state == "ready"` |
 | 9 | `continue_hearing` | 上記のいずれにも該当しない |
+
+**`readiness.failed_conditions` のすべてに対応する action がある**(Codex指摘により追加)。当初案は `internal_as_is_missing` / `unsupported_confirmed_to_be` / `to_be_go_ahead_missing` に対応する行動が無く、決裁者の合意が無いだけの状態でも `continue_hearing` に落ちて何をすべきか分からなかった。
+
+`run_check` は**対象が存在するときだけ出す**。討議用スライドが無い状態で `expression_safety` を求めても実行できないため、生成の action(7d)を先に出す。
 
 **Discovery段階でも `actions` は必ず何かを返す**(agy指摘)。`readiness` を出さない段階でも、順位4・5・6が「次に何をすべきか」を示す。当初案は Discovery で `readiness` を非表示にする一方で `actions` の生成規則が無く、初日の利用者が立ち往生する状態だった。
 
@@ -214,7 +248,7 @@ medo status --project <id> --format json|digest
 
 フェーズ1の `medo status` はフラットなJSON(`requirements` / `facts` / `artifacts` / `next_step`)を返している。
 
-- `next_step` は `actions[0].code` として返し続ける
+- `next_step` は**フェーズ1のロジックで独立に計算**して返し続ける(`actions[0]` にしない。値域が異なるため。§3参照)
 - フェーズ1の `artifacts` 配列は `model` 直下に残す(生成物の一覧と stale フラグ)
 - **`--view summary` に後方互換フィールドを含める**: `requirements`(最新版・confidence件数)・`facts`(件数・stale件数)・`artifacts`(型ごと最新版とstaleフラグ)・`next_step`。フェーズ1のSkillはこれらだけで動く
 - `medo-hearing` は `medo-investigate` に統合するが、**フェーズ2の移行期間中は同名のSkillを残す**(本文は `medo-investigate` を呼ぶよう案内するだけの薄いwrapper)。統合完了後に削除する

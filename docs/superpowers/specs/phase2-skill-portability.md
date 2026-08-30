@@ -51,7 +51,7 @@ Skill Aの出力をSkill Bがコンテキスト越しに受け取る、という
 したがって:
 
 - Skillには**手順**だけを書く(何を、どの順で、どのCLIで)
-- **何が足りないか・次に何をすべきか**は `medo status` が返す(`readiness.failed_conditions` の理由コード、`actions`)
+- **次に何をすべきか**は `medo status --view summary` の `actions` が返す。理由コード(`readiness.failed_conditions`)は `--view readiness` で取る
 - 判定ロジック・検証・整合性チェックはすべてCLI側に置く
 
 **帰結**: Skill本文が短く保たれ、モデルの能力差に左右されにくくなる。同時に、設計原則「数値・事実の通り道にLLMを挟まない」とも一致する。
@@ -88,7 +88,7 @@ Skill Aの出力をSkill Bがコンテキスト越しに受け取る、という
 
 全Skillが守る契約。**3項目に絞る**(4項目以上は遵守率が落ちる)。
 
-1. **開始時と終了時に `medo status --view summary` を実行し、現在地と次の行動をユーザーに報告する**
+1. **開始時と終了時に `medo status --view summary` を実行し、`actions`(次にできること)をユーザーに報告する**。詳しい理由が要るときだけ `--view readiness` を追加で呼ぶ
 2. **CLIが失敗したら推測で補完せず、エラー内容をそのまま報告する**
 3. **stale・未確認・仮説の項目を引用するときは、その旨を明記する**
 

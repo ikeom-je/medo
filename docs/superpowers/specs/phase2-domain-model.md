@@ -68,7 +68,9 @@
 
 **目的は「反論させる」ことではなく「一緒に育てる」ことである**。顧客はAsIsはもちろんToBeも描けていない可能性が高く、こちらが叩き台を出すのは**代わりに描くため**ではなく**一緒に描き始めるため**である。
 
-顧客の言葉が入って確度が上がった経緯は `ToBe.evidenced_by` に残す。誰の発言が理想像を形にしたかが追える状態にすることで、後から「なぜこのToBeなのか」を説明できる。
+顧客の言葉が入って確度が上がった経緯は `ToBe.evidenced_by` に残す。**ノードIDだけでなくイベントID(`ev-N`)も参照できる**ようにし、誰の発言が理想像を形にしたかを `StakeholderResponded` の `stakeholder_id` と `note` まで遡れるようにする(Codex指摘。ノード参照だけでは「顧客の言葉」を追跡できない)。
+
+保存時に参照先が同一プロジェクトに実在することを検証する。
 
 ---
 
@@ -125,7 +127,7 @@ class AsIs(ScopedNode):
     reality_checked: bool = False                 # public用: 現場実態と突合済みか
 
 class ToBe(ScopedNode):
-    evidenced_by: list[str] = []                  # 確度昇格の契機になったノードID(経緯の記録)
+    evidenced_by: list[str] = []                  # 確度昇格の契機。ノードID または イベントID(ev-N)
     assumed_risks: list[str] = []                 # この案を採る場合に引き受けるリスク
     transition_steps: list[str] = []              # 現状からここへ至る過渡期(PoC・暫定運用など)
 
@@ -142,14 +144,27 @@ class Challenge(ScopedNode):
     bottleneck_ids: list[str] = []          # 確定した真因
     cause_hypothesis_ids: list[str] = []    # 未検証の真因(検証途上はこちら)
     cost_of_inaction: str = ""              # 解かずに現状維持した場合の損失
-    promoted_from: str = ""                 # 昇格元(gap-N / ev-N)。矛盾や判断不能から昇格した場合
+    promoted_from: PromotionSource | None = None   # 矛盾や判断不能から昇格した場合
 
 class Constraint(ScopedNode):
     """予算・期間・体制・法令・既存システム。"""
 
 class OpenQuestion(ScopedNode):
     """未確定事項。レビュー所見から参照されるためIDを持つ。"""
+
+
+class PromotionSource(BaseModel):
+    """課題の昇格元。矛盾・判断不能が「解くべき課題」になった経緯を残す。"""
+    kind: Literal["internal_conflict", "undeterminable"]
+    ref: str        # kind に応じて gap-N(kind="internal_conflict") または ev-N
 ```
+
+**`promoted_from` は型付きにする**(Codex指摘)。生の文字列だと、任意のイベントや `goal` gap からでも昇格扱いにできてしまう。保存時に次を検証する。
+
+- `kind="internal_conflict"` → `ref` が `Gap(kind="internal_conflict")` として同一プロジェクトに実在する
+- `kind="undeterminable"` → `ref` が `CheckRecorded(result="undeterminable")` として実在する
+
+**1つの昇格元から複数の課題を作ってよい**(1つの矛盾が複数の問いに分解されることがあるため)。逆に、昇格元を持つ課題は `bottleneck_ids` / `cause_hypothesis_ids` が空でも正常であり、`links.challenges_without_cause` の対象から除外する([status契約](phase2-status-contract.md))。
 
 **`AsIs.visibility` は既定値を持たない必須項目**とする。既定 `internal` にすると、指定漏れの公開情報まで内部実態として扱われ、認識GAPの検出が壊れる。`as_is` はフェーズ2の新規セクションで既存データが無いため、必須化しても後方互換は損なわれない。
 
