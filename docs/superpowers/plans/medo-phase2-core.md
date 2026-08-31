@@ -1460,9 +1460,9 @@ class RequirementsStore:
                     raise ValueError(f"evidenced_by の参照先が存在しません: {ref}")
 ```
 
-**イベントID(`ev-N`)を参照する検証は Task 12 で追加する**。この時点では EventStore が存在しないため `ev-` 始まりは通過させる。対象は `ToBe.evidenced_by` と `PromotionSource(kind="undeterminable")` の2つ。
+**イベントID(`ev-N`)を参照する検証はここでは行わない**。`RequirementsStore` は EventStore を持たないため、`ev-` 始まりは通過させる。実体は **Task 13 の `WorkflowRecorder._validate_cross_store_refs`** が持つ(対象: `ToBe.evidenced_by` / `PromotionSource(kind="undeterminable")` / `Hypothesis.fermi_ref`)。
 
-**`fermi_ref` の検証は別ストアを参照する**。`RequirementsStore` が `ArtifactStore` を持つと依存が増えるため、**Task 12 の `WorkflowRecorder.save_requirements` 側で検証する**(そこは既に両ストアを持つ)。
+**この分割により、`RequirementsStore.save` を直接呼ぶと他ストア参照が未検証のまま通る**。CLIとSkillの経路は必ず `WorkflowRecorder.save_requirements` を通す(Task 16 Step 4)。
 
 manifest記録:
 
@@ -2743,6 +2743,7 @@ git commit -m "feat(core): 進行記録のイベントモデルを追加
 `core/tests/test_workflow.py`:
 
 ```python
+import json
 from datetime import date
 
 import pytest
@@ -2792,6 +2793,15 @@ def test_record_assigns_round_id_from_requirements_history(project):
     stored = EventStore(project).list("p1")[0]
     assert stored.id == ev_id
     assert stored.round_id == 0
+
+
+def test_record_rejects_target_pointing_to_nonexistent_version(project):
+    """存在しない版を対象にすると、畳み込みの祖先判定が壊れる。"""
+    with pytest.raises(ValueError, match="v9"):
+        _recorder(project).record("p1", CheckRecorded(
+            target=RequirementsTarget(version=9), occurred_on=TODAY,
+            requirements_version=1, round_id=0, check="reality_gap", result="completed",
+        ))
 
 
 def test_record_rejects_response_for_unknown_stakeholder(project):
@@ -2957,7 +2967,7 @@ class WorkflowRecorder:
         if duplicate:
             return duplicate
 
-        self._validate_target_kind(event)
+        self._validate_target_kind(project_id, event)
         self._validate_references(project_id, event, existing)
         event = event.model_copy(
             update={"round_id": self.round_count(project_id)}
@@ -2965,6 +2975,42 @@ class WorkflowRecorder:
         event_id = self._events.append(project_id, event)
         self._record_event_driven_milestone(project_id, event)
         return event_id
+
+    def _validate_cross_store_refs(self, project_id: str, doc: RequirementsDoc) -> None:
+        """生成物・イベントを参照するフィールドの実在を検証する。"""
+        event_ids = {e.id for e in self._events.list(project_id)}
+        undeterminable_ids = {
+            e.id for e in self._events.list(project_id)
+            if e.kind == "check" and e.result == "undeterminable"
+        }
+
+        for tb in doc.to_be:
+            for ref in tb.evidenced_by:
+                if ref.startswith("ev-") and ref not in event_ids:
+                    raise ValueError(f"evidenced_by のイベントが存在しません: {ref}")
+
+        for ch in doc.challenges:
+            src = ch.promoted_from
+            if src and src.kind == "undeterminable" and src.ref not in undeterminable_ids:
+                raise ValueError(
+                    "promoted_from(undeterminable)の参照先は result='undeterminable' の"
+                    f"CheckRecorded である必要があります: {src.ref}"
+                )
+
+        for hyp in doc.hypotheses:
+            if hyp.fermi_ref is None:
+                continue
+            artifact = self._artifacts.get(project_id, hyp.fermi_ref.artifact_id)
+            if artifact is None or artifact.type != "fermi":
+                raise ValueError(
+                    f"fermi_ref の参照先が fermi ではありません: "
+                    f"{hyp.fermi_ref.artifact_id}"
+                )
+            if hyp.fermi_ref.variable_name not in _fermi_variables(artifact):
+                raise ValueError(
+                    "fermi_ref の変数がモデルに存在しません: "
+                    f"{hyp.fermi_ref.variable_name}"
+                )
 
     def round_count(self, project_id: str) -> int:
         """要件履歴を走査し、as_is変更のあと to_be変更が現れたら1周と数える。"""
@@ -2999,12 +3045,19 @@ class WorkflowRecorder:
                 return e.id
         return None
 
-    def _validate_target_kind(self, event) -> None:
+    def _validate_target_kind(self, project_id: str, event) -> None:
         expected = EVENT_TARGET_KIND.get(event.kind)
         if expected and event.target.kind != expected:
             raise ValueError(
                 f"{event.kind} の target は {expected} である必要があります"
             )
+        if event.target.kind == "requirements":
+            latest = self._requirements.latest_version(project_id)
+            if not 1 <= event.target.version <= latest:
+                raise ValueError(
+                    f"要件バージョンが存在しません: v{event.target.version}"
+                    f"(最新: v{latest})"
+                )
         if event.kind == "response":
             kind, artifact_type, slide_kind = PURPOSE_TARGETS[event.purpose]
             if event.target.kind != kind:
@@ -3247,6 +3300,50 @@ def test_text_only_edit_is_not_a_milestone(tmp_path):
     assert milestones == []
 
 
+def test_save_requirements_rejects_fermi_ref_to_missing_variable(tmp_path):
+    """数値の接続点が壊れていると、感度分析が別の変数を指すまま通ってしまう。"""
+    from medo_core.nodes import FermiRef, Hypothesis
+
+    storage = LocalJsonStorage(tmp_path)
+    ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="fermi", requirements_version=1,
+        content=json.dumps({
+            "model": {"name": "工数", "formula": "transcription_hours * 12",
+                      "variables": {"transcription_hours": {"assume": 120}}},
+            "result": {"name": "工数", "value": 1440, "resolved": {}},
+        }),
+    ))
+    doc = RequirementsDoc(project="p1", hypotheses=[Hypothesis(
+        kind="impact", statement="半減する",
+        fermi_ref=FermiRef(artifact_id="fermi-v1", variable_name="unknown_var"),
+    )])
+
+    with pytest.raises(ValueError, match="unknown_var"):
+        WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
+
+
+def test_save_requirements_rejects_promotion_from_non_undeterminable_event(tmp_path):
+    from medo_core.nodes import Challenge, PromotionSource
+
+    storage = LocalJsonStorage(tmp_path)
+    doc = RequirementsDoc(project="p1", challenges=[Challenge(
+        text="方向性が定まっていない",
+        promoted_from=PromotionSource(kind="undeterminable", ref="ev-99"),
+    )])
+
+    with pytest.raises(ValueError, match="ev-99"):
+        WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
+
+
+def test_save_requirements_rejects_evidenced_by_to_missing_event(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    doc = RequirementsDoc(project="p1",
+                          to_be=[ToBe(text="自動化", evidenced_by=["ev-99"])])
+
+    with pytest.raises(ValueError, match="ev-99"):
+        WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
+
+
 def test_detect_milestone_fires_on_first_save_with_internal_as_is():
     """「0件→1件以上」は初回保存でも成立する。"""
     saved = RequirementsDoc(project="p1",
@@ -3272,6 +3369,18 @@ Expected: FAIL — `AttributeError: 'WorkflowRecorder' object has no attribute '
 from datetime import date
 
 from medo_core.requirements import RequirementsDoc
+
+
+def _fermi_variables(artifact) -> set[str]:
+    """fermi生成物のモデル変数名。
+
+    content は `{"model": {...}, "result": {...}}` のJSON
+    (cli/src/medo_cli/main.py の fermi calc が書く形式)。
+    """
+    import json
+
+    payload = json.loads(artifact.content)
+    return set((payload.get("model", {}).get("variables") or {}).keys())
 
 
 def detect_milestone(
@@ -3337,7 +3446,12 @@ def detect_milestone(
         editorial_sections: tuple[str, ...] = (),
         today: date | None = None,
     ) -> int:
-        """要件を保存し、節目条件が成立していれば MilestoneDetected を記録する。"""
+        """要件を保存し、節目条件が成立していれば MilestoneDetected を記録する。
+
+        他ストア(生成物・イベント)を参照する検証もここで行う。
+        RequirementsStore にそれらを持たせると依存が逆流するため。
+        """
+        self._validate_cross_store_refs(project_id, doc)
         previous = self._requirements.get(project_id)
         version = self._requirements.save(
             project_id, doc, editorial_sections=editorial_sections, today=today
@@ -5933,6 +6047,32 @@ git commit -m "docs: フェーズ2決定論層の完成に伴う参照先を同�
 - [ ] `medo requirements save` が `WorkflowRecorder` 経由で節目を記録する(Task 16 Step 4)
 - [ ] `medo artifacts save` の既存オプション(`--cites` / `--cites-facts` / `--options` / `--grown-from`)がすべて残っている
 - [ ] `project_status` の既存呼び出し(`knowledge_root` 位置引数・要件なしで `next_step: "hearing"`)が壊れていない
+
+## 相互レビューの照合
+
+2者のレビューは**観点を分けて実施した**(Codex=実装可能性、agy=設計の取りこぼしと目的整合)。両者が同じ問題を別の言葉で指摘した箇所と、片方しか見つけなかった箇所を以下に残す。
+
+| # | 指摘 | Codex | agy | 判定 |
+|---|---|---|---|---|
+| 1 | Task 19が実装不能(実装手順が無い) | 重大 | — | Codex単独。19/19bへ分割 |
+| 2 | 既存CLI契約の破壊(`--cites` / `--grown-from` 消失) | 重大 | — | Codex単独。追加のみに戻した |
+| 3 | `diff()` が pydantic モデルを `set()` に入れる | 重大 | — | Codex単独 |
+| 4 | 初回manifestが全セクション変更扱い | 重大 | — | Codex単独 |
+| 5 | `--editorial` でノード追加まで隠せる | 重大 | — | Codex単独 |
+| 6 | `freshness()` が引用ファクトの鮮度を見ない | 重大 | — | Codex単独 |
+| 7 | CLI要件保存が `WorkflowRecorder` を経由しない | 重大 | — | Codex単独。実利用で節目が記録されない |
+| 8 | `Bottleneck.confidence` / `from_hypothesis` の検証欠落 | 重大(5に含む) | 軽微 | **両者一致** |
+| 9 | `detect_ritualized` が変更のあった周回のみを母数にする | 軽微 | 軽微 | **両者一致** |
+| 10 | 往復中は `regenerate_stale_artifacts` の順位を下げる | — | 軽微 | 計画に既出。agyは縮約版で見えず |
+| 11 | `RejectedOption` が `Artifact` に無い | — | 重大 | **agy単独**。設計にあり実在 |
+| 12 | スモークが標準周回を1周していない | 重大(16) | 軽微 | **両者一致**(観点は別) |
+| 13 | `disposition` の更新手段が非自明 | — | 軽微 | agy単独。追記で対応 |
+
+**agyの重大2・3と軽微1〜3は誤検出**だった。5,900行では2度タイムアウトしたためコードブロックを削った骨子を渡したが、`journey_before` / `--focus` / `--disposition` / `confirmed` 検証は削った側にあり、agyには欠落に見えていた。レビュー材料の作り方の失敗であってagyの判断の誤りではない。
+
+**Codexが実装可能性、agyが設計整合という分担は機能した**。Codexの重大7件はagyが1件も検出せず、agyが見つけた `RejectedOption` の欠落はCodexが検出しなかった。同じ計画を同じ観点で2度読ませるより、観点を分けたほうが被覆が広い。
+
+---
 
 ## 本計画の範囲外
 
