@@ -1689,6 +1689,23 @@ def test_non_slides_reject_slide_kind():
         _artifact(type="research", slide_kind="discussion")
 
 
+def test_rejected_option_records_why_it_was_dropped():
+    """却下案の見送り理由が失われると、意思決定者の納得感が大きく変わる。"""
+    from medo_core.artifacts import RejectedOption
+
+    a = _artifact(type="comparison",
+                  rejected_options=[RejectedOption(name="B案", reason="運用負荷が高い",
+                                                   accepted_risk="初期費用が上がる")])
+
+    assert a.rejected_options[0].accepted_risk == "初期費用が上がる"
+
+
+def test_rejected_options_are_not_allowed_on_reporting_types():
+    with pytest.raises(ValidationError):
+        _artifact(type="as-is-report",
+                  rejected_options=[{"name": "B案", "reason": "運用負荷"}])
+
+
 def test_generated_by_accepts_codex():
     """どのホストからでも生成できる設計であり、来歴が追える必要がある。"""
     assert _artifact(generated_by="codex").generated_by == "codex"
@@ -1791,6 +1808,15 @@ ALLOWED_PARENTS: dict[tuple[str, str | None], tuple[tuple[str, ...], bool]] = {
 # カバレッジ判定を適用する型。現状の記述と共有が目的の型には適用しない。
 COVERAGE_TYPES = ("mini-prfaq", "prfaq", "comparison", "architecture", "mock")
 
+# 見送り理由を保持する型。判断は打ち手比較の段階で起きる。
+REJECTION_TYPES = ("mini-prfaq", "comparison", "prfaq")
+
+
+class RejectedOption(BaseModel):
+    name: str
+    reason: str                # なぜ見送ったか
+    accepted_risk: str = ""    # 見送りによって受け入れたリスク
+
 
 class Artifact(BaseModel):
     project: str
@@ -1804,6 +1830,7 @@ class Artifact(BaseModel):
     derived_from: list[str] = Field(default_factory=list)
     slide_kind: SlideKind | None = None
     covered_challenge_ids: list[str] | None = None
+    rejected_options: list[RejectedOption] = Field(default_factory=list)
     generated_by: Literal["claude", "codex", "gemini"] | None = None
     content: str
 
@@ -1815,6 +1842,10 @@ class Artifact(BaseModel):
             )
         if self.type == "slides" and self.slide_kind is None:
             raise ValueError("slides には slide_kind(discussion|final)が必須です")
+        if self.rejected_options and self.type not in REJECTION_TYPES:
+            raise ValueError(
+                f"rejected_options を持てるのは {'/'.join(REJECTION_TYPES)} のみです"
+            )
         if self.type != "slides" and self.slide_kind is not None:
             raise ValueError("slide_kind は slides でのみ指定できます")
         if self.type == "fermi":
@@ -2340,15 +2371,25 @@ def artifacts_save(
     derived_from: str = typer.Option("", "--derived-from",
                                      help="内容依存の親artifact ID(カンマ区切り)"),
     covers: str = typer.Option("", "--covers", help="扱った課題ID(カンマ区切り)"),
+    rejected: list[str] = typer.Option(
+        [], "--rejected",
+        help="見送った案: <名前>:<理由>[:<受け入れたリスク>](複数可)",
+    ),
 ):
 ```
 
-`Artifact(...)` の生成箇所に3フィールドを足す(既存フィールドはそのまま):
+`Artifact(...)` の生成箇所に4フィールドを足す(既存フィールドはそのまま):
 
 ```python
             slide_kind=slide_kind,
             derived_from=[c for c in derived_from.split(",") if c],
             covered_challenge_ids=[c for c in covers.split(",") if c] if covers else None,
+            rejected_options=[
+                RejectedOption(name=n, reason=r, accepted_risk=risk)
+                for n, r, risk in (
+                    (*v.split(":", 2), "", "")[:3] for v in rejected
+                )
+            ],
 ```
 
 既存の `artifacts save` の引数名・挙動は維持する(追加のみ)。
@@ -4189,6 +4230,8 @@ def check_add(
     typer.echo(f"recorded: {_recorder().record(project, event)}")
 ```
 
+**`disposition` は同じ項目を record し直して更新する**。イベントは追記のみで、`effective_checks` が最新の有効値を採るため、後から扱いを決めたときは `medo check add --check <name> --result undeterminable --note <理由> --disposition promoted` を再度実行すればよい。更新用の別コマンドは設けない(進行の履歴を残すため)。この運用をCLIヘルプの `--disposition` 説明にも書く。
+
 同様に `review add` / `respond add` / `checkpoint answer` を実装する:
 
 ```python
@@ -5837,6 +5880,20 @@ uv run medo status --project medo-ops --view model   # 生成物がstaleにな�
 #   (/tmp/req.json を編集。既存ノードのIDは書き換えない)
 uv run medo requirements save --project medo-ops --file /tmp/req.json
 uv run medo status --project medo-ops                # actions先頭が節目回答か
+
+# 標準周回を1周させる: 出力 → レビュー → ぶつける → 振り返る
+uv run medo artifacts save --project medo-ops --type as-is-report \
+  --requirements-version 2 --generated-by claude --file /tmp/as-is-report.md
+uv run medo artifacts save --project medo-ops --type slides --slide-kind discussion \
+  --derived-from as-is-report-v1 --requirements-version 2 \
+  --generated-by claude --file /tmp/slides.md
+uv run medo check add --project medo-ops --check reality_gap --result completed
+uv run medo review add --project medo-ops --report as-is-report-v1 \
+  --slides slides-v1 --outcome approved --reviewed-by human
+uv run medo respond add --project medo-ops --stakeholder sh-1 \
+  --artifact as-is-report-v1 --purpose as_is_alignment --reaction empathized
+uv run medo checkpoint answer --project medo-ops --responds-to <ev-N> --answer generate
+uv run medo status --project medo-ops --view full    # round_delta が非空か
 ```
 
 確認項目:
@@ -5846,6 +5903,9 @@ uv run medo status --project medo-ops                # actions先頭が節目回
 3. `internal` な AsIs を追加した保存で `MilestoneDetected` が記録される
 4. `medo status` の `actions` 先頭が `answer_tobe_checkpoint` になる
 5. `next_step` がフェーズ1の値域のまま返る
+6. **討議用スライドを保存すると `expression_safety` が `run_check` に現れる**(対象が無い間は出ない)
+7. **`review add` が `--slides` の親子関係を検証する**(無関係なスライドIDを渡すと失敗する)
+8. **1周させた後の `round_delta` が非空になり、`progress_count` が0でない**
 
 **結果を `docs/setup.md` に追記する**(失敗した項目は失敗として記録し、推測で補完しない)。
 
