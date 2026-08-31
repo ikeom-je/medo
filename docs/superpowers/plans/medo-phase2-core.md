@@ -46,6 +46,7 @@
 | `core/src/medo_core/status.py` | 既存を拡張。4階層の提示と actions 合成。**フェーズ1の `next_step` ロジックは変更しない** |
 | `cli/src/medo_cli/main.py` | 既存を拡張。肥大化するため `commands/` へ分割する(Task 20) |
 | `cli/src/medo_cli/commands/workflow.py` | **新規**。進行記録の4コマンド。`main.py` を import しない |
+| `cli/src/medo_cli/trace.py` | **新規**。CLI呼び出し列の記録(Skill再現性のホスト間比較) |
 
 **`nodes.py` を `requirements.py` から分離する理由**: ノード型は `events.py`(`promoted_from` の検証)と `status.py`(診断)からも参照される。`requirements.py` に置くと `Store` の実装まで巻き込んだ循環参照になる。
 
@@ -5969,7 +5970,9 @@ Skillは開始・終了ごとにstatusを呼ぶため、毎回全量を返すと
 
 - [ ] **Step 2: コマンド一覧を更新**
 
-`.claude/steering/tech.md` §6 に、Task 16・20で追加したコマンドを追加する。
+`.claude/steering/tech.md` §6 に、Task 16・20で追加したコマンドを追加する。§5 の環境変数表に `MEDO_TRACE`(既定なし。設定するとCLI呼び出し列をJSONLで追記)を追加する。
+
+`.claude/steering/testing.md` の「Skill evalケース」を差し替える。現行は「実案件1件を目視確認」だが、これではホスト間の差が見えない。**同じ初期状態から各ホストに1周させ、`MEDO_TRACE` のトレースをdiffする**手順に改める(Task 22)。
 
 - [ ] **Step 3: フェーズ2のAgent向け要約を作る**
 
@@ -6037,6 +6040,244 @@ git commit -m "docs: フェーズ2決定論層の完成に伴う参照先を同�
 
 ---
 
+## Task 22: CLIコールトレース(Skill再現性の計測)
+
+**Files:**
+- Create: `cli/src/medo_cli/trace.py`
+- Create: `cli/tests/test_trace.py`
+- Modify: `cli/src/medo_cli/main.py`
+- Modify: `cli/pyproject.toml`
+
+**Interfaces:**
+- Consumes: なし(既存CLIに横断的に付ける)
+- Produces: `Tracer.from_env() -> Tracer | None` / `Tracer.record(argv, exit_code)` / `medo_cli.main:main` を console_script のエントリポイントにする
+
+**なぜ必要か**: Skillは手順書であり、どのホスト(Claude / Codex / agy)がどのモデルで実行するかで挙動が変わる。**「事実は縛る」はCLIが担保するが、Skillが必要なCLI呼び出しを飛ばしたことは検出できない** — 飛ばしても残りのコマンドは正常終了するため。
+
+状態がすべてCLIにある(移植性の条件1)という性質上、**Skillが実行したCLI呼び出しの列は決定論的な成果物**である。同じ初期状態から各ホストに1周させてトレースを突き合わせれば、「再現性が気になる」を「agyは `facts save` を飛ばす傾向がある」という修正可能な事実に変えられる。現行の `testing.md` は「実案件1件を目視確認」としており、ホスト間の差が見えない。
+
+- [ ] **Step 1: 失敗するテストを書く**
+
+`cli/tests/test_trace.py`:
+
+```python
+import json
+
+from medo_cli.trace import Tracer
+
+
+def test_disabled_when_env_is_unset(monkeypatch):
+    monkeypatch.delenv("MEDO_TRACE", raising=False)
+
+    assert Tracer.from_env() is None
+
+
+def test_records_command_and_exit_code(tmp_path, monkeypatch):
+    path = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("MEDO_TRACE", str(path))
+
+    Tracer.from_env().record(["status", "--project", "p1"], exit_code=0)
+
+    entry = json.loads(path.read_text(encoding="utf-8").strip())
+    assert entry["command"] == ["status"]
+    assert entry["exit_code"] == 0
+
+
+def test_appends_so_a_whole_round_forms_one_trace(tmp_path, monkeypatch):
+    path = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("MEDO_TRACE", str(path))
+    tracer = Tracer.from_env()
+
+    tracer.record(["status", "--project", "p1"], exit_code=0)
+    tracer.record(["check", "add", "--project", "p1"], exit_code=0)
+
+    assert [json.loads(x)["command"] for x in path.read_text(encoding="utf-8").splitlines()] == [
+        ["status"], ["check", "add"]
+    ]
+
+
+def test_keeps_values_of_decision_relevant_options(tmp_path, monkeypatch):
+    """どの選択肢を選んだかはホスト間比較の対象なので値を残す。"""
+    path = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("MEDO_TRACE", str(path))
+
+    Tracer.from_env().record(
+        ["check", "add", "--check", "reality_gap", "--result", "undeterminable",
+         "--disposition", "promoted"],
+        exit_code=0,
+    )
+
+    entry = json.loads(path.read_text(encoding="utf-8").strip())
+    assert entry["options"]["--result"] == "undeterminable"
+    assert entry["options"]["--disposition"] == "promoted"
+
+
+def test_redacts_free_text_values(tmp_path, monkeypatch):
+    """顧客の生の声がトレースに残ると、リポジトリ外に出せなくなる。"""
+    path = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("MEDO_TRACE", str(path))
+
+    Tracer.from_env().record(
+        ["facts", "save", "--statement", "A社は年間3億円を紙処理に費やしている"],
+        exit_code=0,
+    )
+
+    entry = json.loads(path.read_text(encoding="utf-8").strip())
+    assert entry["options"]["--statement"] == "<redacted>"
+
+
+def test_redacts_file_paths(tmp_path, monkeypatch):
+    """パスに顧客名が含まれうる。"""
+    path = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("MEDO_TRACE", str(path))
+
+    Tracer.from_env().record(["requirements", "save", "--file", "/home/x/A社/req.json"],
+                             exit_code=0)
+
+    entry = json.loads(path.read_text(encoding="utf-8").strip())
+    assert entry["options"]["--file"] == "<redacted>"
+
+
+def test_records_failures_so_skipped_recovery_is_visible(tmp_path, monkeypatch):
+    path = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("MEDO_TRACE", str(path))
+
+    Tracer.from_env().record(["status", "--project", "unknown"], exit_code=1)
+
+    assert json.loads(path.read_text(encoding="utf-8").strip())["exit_code"] == 1
+
+
+def test_never_raises_when_trace_path_is_unwritable(tmp_path, monkeypatch):
+    """計測機構が本来の作業を止めてはならない。"""
+    monkeypatch.setenv("MEDO_TRACE", str(tmp_path / "missing" / "trace.jsonl"))
+
+    Tracer.from_env().record(["status"], exit_code=0)
+```
+
+- [ ] **Step 2: テストが失敗することを確認**
+
+Run: `uv run pytest cli/tests/test_trace.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'medo_cli.trace'`
+
+- [ ] **Step 3: `trace.py` を実装**
+
+```python
+"""CLI呼び出し列の記録。Skillの再現性をホスト間で比較するための計測機構。
+
+状態がすべてCLIにあるため、呼び出し列は決定論的な成果物になる。同じ初期状態から
+各ホストに1周させてトレースを突き合わせると、Skillが飛ばした操作が見える。
+"""
+
+import json
+import os
+from datetime import UTC, datetime
+from pathlib import Path
+
+# 値を残すオプション。「どの選択肢を選んだか」はホスト間比較の対象になる。
+# ここに無いオプションの値は伏せる(顧客の生の声・ファイルパスが混ざるため)。
+VALUE_SAFE_OPTIONS = frozenset({
+    "--type", "--slide-kind", "--result", "--check", "--purpose", "--reaction",
+    "--outcome", "--disposition", "--answer", "--view", "--format", "--kind",
+    "--include-scope", "--editorial", "--generated-by", "--reviewed-by",
+    "--requirements-version", "--responds-to", "--stakeholder", "--artifact",
+    "--report", "--slides", "--derived-from", "--covers", "--focus", "--refs",
+    "--from-artifact",
+})
+
+
+class Tracer:
+    def __init__(self, path: Path):
+        self._path = path
+
+    @classmethod
+    def from_env(cls) -> "Tracer | None":
+        raw = os.environ.get("MEDO_TRACE")
+        return cls(Path(raw)) if raw else None
+
+    def record(self, argv: list[str], exit_code: int) -> None:
+        entry = {
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "command": _command(argv),
+            "options": _options(argv),
+            "exit_code": exit_code,
+        }
+        try:
+            with self._path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            pass  # 計測が本来の作業を止めない
+
+
+def _command(argv: list[str]) -> list[str]:
+    return [a for a in argv if not a.startswith("-")][:2] if argv else []
+
+
+def _options(argv: list[str]) -> dict[str, str]:
+    options: dict[str, str] = {}
+    for i, token in enumerate(argv):
+        if not token.startswith("--"):
+            continue
+        value = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else ""
+        options[token] = value if token in VALUE_SAFE_OPTIONS else "<redacted>"
+    return options
+```
+
+**`_command` が先頭2つの非オプション語を取るのは、`medo check add` のようなサブコマンド2階層に合わせるため**。`--project` の値は非オプション語ではないので混入しない。
+
+- [ ] **Step 4: エントリポイントを `main()` に変える**
+
+現行の console_script は `medo_cli.main:app` を直指ししており、終了コードを観測できない。ラッパーを挟む。
+
+`cli/src/medo_cli/main.py` の末尾:
+
+```python
+def main() -> None:
+    """console_script のエントリポイント。MEDO_TRACE 指定時は呼び出しを記録する。"""
+    tracer = Tracer.from_env()
+    code = 0
+    try:
+        app()
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        raise
+    finally:
+        if tracer:
+            tracer.record(sys.argv[1:], exit_code=code)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+`cli/pyproject.toml`:
+
+```toml
+[project.scripts]
+medo = "medo_cli.main:main"
+```
+
+- [ ] **Step 5: テストが通ることを確認**
+
+Run: `uv run pytest -v`
+Expected: 全て pass
+
+- [ ] **Step 6: リントとコミット**
+
+```bash
+uv run ruff check .
+git add cli/src/medo_cli/trace.py cli/tests/test_trace.py cli/src/medo_cli/main.py cli/pyproject.toml
+git commit -m "feat(cli): CLIコールトレースを追加
+
+Skillが必要な操作を飛ばしたことは、残りのコマンドが正常終了するため
+検出できない。状態がすべてCLIにある性質を使い、呼び出し列を
+ホスト間で突き合わせられるようにする。
+
+顧客の生の声とファイルパスは伏せる。トレースをリポジトリやIssueに
+貼れなくなると、比較そのものが回らないため。"
+```
+
+---
+
 ## 完了の定義
 
 - [ ] `uv run pytest` が全て通る
@@ -6047,6 +6288,7 @@ git commit -m "docs: フェーズ2決定論層の完成に伴う参照先を同�
 - [ ] `medo requirements save` が `WorkflowRecorder` 経由で節目を記録する(Task 16 Step 4)
 - [ ] `medo artifacts save` の既存オプション(`--cites` / `--cites-facts` / `--options` / `--grown-from`)がすべて残っている
 - [ ] `project_status` の既存呼び出し(`knowledge_root` 位置引数・要件なしで `next_step: "hearing"`)が壊れていない
+- [ ] `MEDO_TRACE` を設定して1周させると、CLI呼び出し列がJSONLで得られる(Task 22)
 
 ## 相互レビューの照合
 
