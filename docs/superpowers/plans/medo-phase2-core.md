@@ -38,8 +38,14 @@
 | `core/src/medo_core/events.py` | **新規**。5つのイベント型 / `EventStore` / 畳み込み |
 | `core/src/medo_core/checks.py` | **新規**。check registry(有効期間・適用条件・段階) |
 | `core/src/medo_core/artifacts.py` | 既存を拡張。`derived_from` / `slide_kind` / セクション依存 / stale伝播 |
-| `core/src/medo_core/status.py` | 既存を全面拡張。4階層診断の合成 |
+| `core/src/medo_core/watermark.py` | **新規**。ID採番簿(プレフィックス別 high-water mark) |
+| `core/src/medo_core/workflow.py` | **新規**。イベント記録の入口。他ストアを参照する検証と節目の自動記録 |
+| `core/src/medo_core/responses.py` | **新規**。収束対象の解決と反応の畳み込み |
+| `core/src/medo_core/diagnostics.py` | **新規**。model診断・収束判定・周回成果 |
+| `core/src/medo_core/context.py` | **新規**。診断素材の収集と workflow 枝の組み立て |
+| `core/src/medo_core/status.py` | 既存を拡張。4階層の提示と actions 合成。**フェーズ1の `next_step` ロジックは変更しない** |
 | `cli/src/medo_cli/main.py` | 既存を拡張。肥大化するため `commands/` へ分割する(Task 20) |
+| `cli/src/medo_cli/commands/workflow.py` | **新規**。進行記録の4コマンド。`main.py` を import しない |
 
 **`nodes.py` を `requirements.py` から分離する理由**: ノード型は `events.py`(`promoted_from` の検証)と `status.py`(診断)からも参照される。`requirements.py` に置くと `Store` の実装まで巻き込んだ循環参照になる。
 
@@ -151,6 +157,9 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'medo_core.watermark'`
 
 直前バージョンの最大ID+1で採番すると、最大IDのノードを削除した後に
 そのIDを再利用してしまう。採番簿を永続化してこれを防ぐ。
+
+load → allocate → save はトランザクションではない。並行保存が起きると同じIDを
+二重に割り当てうる。利用スコープが本人のみで同時保存が起きない前提に依存している。
 """
 
 from pydantic import BaseModel, Field
@@ -183,6 +192,8 @@ class IdWatermarkStore:
     def save(self, project_id: str, watermark: IdWatermark) -> None:
         self._storage.put(self._path(project_id), watermark.model_dump(mode="json"))
 ```
+
+**Firestoreでの並行保存はこの実装では保護されない**。設計正本は採番簿の更新をトランザクションで行うと定めているが、`Storage` プロトコルに `transact` が無く、追加すると `LocalJsonStorage` にも実装が要る。**利用スコープが本人のみ(不変条件5)で同時保存が起きないため、本計画では対応しない**。モジュールのdocstringにこの制約を明記し、[範囲外](#本計画の範囲外)に記録する。
 
 - [ ] **Step 5: ノード基底のテストを書く**
 
@@ -591,6 +602,7 @@ from medo_core.manifest import (
     SectionChange,
     changed_sections,
     fold_substantive_sections,
+    is_text_only_change,
 )
 from medo_core.storage import LocalJsonStorage
 
@@ -618,6 +630,14 @@ def _doc(**kw) -> dict:
     }
     base.update(kw)
     return base
+
+
+def test_first_version_reports_only_filled_sections():
+    """初版で空のセクションまで変更扱いにすると、round_countが1周目から
+    進んでしまう。"""
+    new = _doc(as_is=[{"id": "as-1", "text": "手作業", "visibility": "internal"}])
+
+    assert changed_sections({}, new) == ["as_is"]
 
 
 def test_changed_sections_detects_added_node():
@@ -672,6 +692,29 @@ def test_fold_ignores_versions_at_or_before_from_version():
     ]
 
     assert fold_substantive_sections(manifests, from_version=2) == {"to_be"}
+
+
+def test_text_only_edit_can_be_declared_editorial():
+    old = _doc(as_is=[{"id": "as-1", "text": "手作業", "visibility": "internal"}])
+    new = _doc(as_is=[{"id": "as-1", "text": "紙の伝票を手入力", "visibility": "internal"}])
+
+    assert is_text_only_change("as_is", old, new) is True
+
+
+def test_added_node_cannot_be_declared_editorial():
+    """宣言を無条件に信じると、追加・削除まで陳腐化判定から隠せてしまう。"""
+    old = _doc(as_is=[{"id": "as-1", "text": "手作業", "visibility": "internal"}])
+    new = _doc(as_is=[{"id": "as-1", "text": "手作業", "visibility": "internal"},
+                      {"id": "as-2", "text": "追加", "visibility": "internal"}])
+
+    assert is_text_only_change("as_is", old, new) is False
+
+
+def test_confidence_change_cannot_be_declared_editorial():
+    old = _doc(to_be=[{"id": "tb-1", "text": "自動化", "confidence": "assumed"}])
+    new = _doc(to_be=[{"id": "tb-1", "text": "自動化", "confidence": "confirmed"}])
+
+    assert is_text_only_change("to_be", old, new) is False
 
 
 def test_fold_excludes_editorial_declarations():
@@ -750,24 +793,56 @@ class ChangeManifest(BaseModel):
     recorded_on: str
 
 
+EMPTY_SECTION = {"non_functional": {}, "industry": "", "background": "", "goal": ""}
+
+
 def changed_sections(old: dict, new: dict) -> list[str]:
     """2つの要件ドキュメント(dict)で値が異なるセクション名を返す。
 
     意味差の推測はしない。値が異なるかどうかだけを見る。
+    初版(old={})では、既定値のまま埋まっていないセクションを変更として数えない。
     """
-    return [s for s in TRACKED_SECTIONS if old.get(s) != new.get(s)]
+    def value(doc: dict, section: str):
+        return doc.get(section, EMPTY_SECTION.get(section, []))
+
+    return [s for s in TRACKED_SECTIONS if value(old, s) != value(new, s)]
+
+
+def is_text_only_change(section: str, old: dict, new: dict) -> bool:
+    """そのセクションの差分が text の書き換えだけかを判定する。
+
+    editorial 宣言を無条件に信じると、ノードの追加・削除や confidence 変更まで
+    「誤字修正」として陳腐化判定から隠せてしまう。宣言できる範囲を機械的に絞る。
+    """
+    old_nodes = old.get(section) or []
+    new_nodes = new.get(section) or []
+    if not isinstance(old_nodes, list) or not isinstance(new_nodes, list):
+        return section in ("goal", "background", "industry")
+    if len(old_nodes) != len(new_nodes):
+        return False
+    for before, after in zip(old_nodes, new_nodes, strict=True):
+        if {k: v for k, v in before.items() if k != "text"} != \
+                {k: v for k, v in after.items() if k != "text"}:
+            return False
+    return True
+
+
+def fold_sections(
+    manifests: list[ChangeManifest], from_version: int, change_kind: str
+) -> set[str]:
+    """from_version より後の全manifestを畳み込み、指定種別の変更セクションを返す。"""
+    sections: set[str] = set()
+    for m in manifests:
+        if m.version <= from_version or m.id_only_migration:
+            continue
+        sections.update(c.section for c in m.changes if c.change_kind == change_kind)
+    return sections
 
 
 def fold_substantive_sections(
     manifests: list[ChangeManifest], from_version: int
 ) -> set[str]:
-    """from_version より後の全manifestを畳み込み、実質変更のあったセクションを返す。"""
-    sections: set[str] = set()
-    for m in manifests:
-        if m.version <= from_version or m.id_only_migration:
-            continue
-        sections.update(c.section for c in m.changes if c.change_kind == "substantive")
-    return sections
+    return fold_sections(manifests, from_version, "substantive")
 
 
 class ManifestStore:
@@ -875,6 +950,20 @@ def test_holds_as_is_nodes():
     assert doc.as_is[0].visibility == "internal"
 
 
+def test_diff_compares_open_questions_by_text():
+    """pydanticモデルはhashableでないため、既存のset比較では落ちる。"""
+    from medo_core.storage import LocalJsonStorage
+
+    store = RequirementsStore(LocalJsonStorage(tmp_path_factory.mktemp("d")))
+    store.save("p1", RequirementsDoc(project="p1",
+        open_questions=[OpenQuestion(text="予算は未確定")]))
+    doc = store.get("p1")
+    doc.open_questions.append(OpenQuestion(text="体制は未確定"))
+    store.save("p1", doc)
+
+    assert store.diff("p1")["open_questions_added"] == ["体制は未確定"]
+
+
 def test_challenge_and_open_question_are_node_types():
     doc = RequirementsDoc(
         project="p1",
@@ -948,6 +1037,15 @@ class RequirementsDoc(BaseModel):
 ```
 
 `ConfidenceItem` と `FunctionalRequirement` は既存のまま残す(`principles` / `functional` が使う)。`Confidence` は `nodes.py` からの再エクスポートに切り替え、既存のimport経路(`from medo_core.requirements import Confidence`)を壊さない。
+
+**`diff()` を同時に直す**。既存実装は `set(old.open_questions)` を使っており、`OpenQuestion` は pydantic モデルで hashable でないため `TypeError` になる。テキストで比較する:
+
+```python
+        old_q = {q.text for q in old.open_questions}
+        new_q = {q.text for q in new.open_questions}
+```
+
+CLIの digest 出力(`? {q}`)も `q.text` に変える。
 
 - [ ] **Step 4: テストが通ることを確認**
 
@@ -1129,6 +1227,41 @@ def test_save_rejects_perception_gap_without_both_visibilities(tmp_path):
         store.save("p1", doc, today=TODAY)
 
 
+def test_save_rejects_bottleneck_promoted_from_unvalidated_hypothesis(tmp_path):
+    from medo_core.nodes import Bottleneck, Hypothesis
+
+    store = _store(tmp_path)
+    store.save("p1", RequirementsDoc(project="p1",
+        hypotheses=[Hypothesis(kind="cause", statement="承認階層が原因")]), today=TODAY)
+    hyp = store.get("p1").hypotheses[0]
+
+    doc = RequirementsDoc(project="p1", hypotheses=[hyp],
+        bottlenecks=[Bottleneck(text="承認3階層", confidence="confirmed",
+                                from_hypothesis=hyp.id)])
+
+    with pytest.raises(ValueError, match="validated"):
+        store.save("p1", doc, today=TODAY)
+
+
+def test_save_rejects_evidenced_by_pointing_to_unknown_node(tmp_path):
+    store = _store(tmp_path)
+    doc = RequirementsDoc(project="p1",
+        to_be=[ToBe(text="自動化", evidenced_by=["as-99"])])
+
+    with pytest.raises(ValueError, match="as-99"):
+        store.save("p1", doc, today=TODAY)
+
+
+def test_save_accepts_evidenced_by_pointing_to_event(tmp_path):
+    """誰の発言が理想像を形にしたかをイベントまで遡れるようにする。"""
+    store = _store(tmp_path)
+
+    store.save("p1", RequirementsDoc(project="p1",
+        to_be=[ToBe(text="自動化", evidenced_by=["ev-3"])]), today=TODAY)
+
+    assert store.get("p1").to_be[0].evidenced_by == ["ev-3"]
+
+
 def test_save_rejects_promotion_source_pointing_to_goal_gap(tmp_path):
     from medo_core.nodes import PromotionSource
 
@@ -1280,7 +1413,7 @@ class RequirementsStore:
                     )
             if gap.kind == "internal_conflict":
                 internals = [n for n in refs if n.visibility == "internal"]
-                stakeholder_sets = {tuple(n.source_stakeholder_ids) for n in internals}
+                stakeholder_sets = {frozenset(n.source_stakeholder_ids) for n in internals}
                 if len(internals) < 2 or len(stakeholder_sets) < 2:
                     raise ValueError(
                         "internal_conflict gap は視点の異なる internal な AsIs を"
@@ -1308,9 +1441,28 @@ class RequirementsStore:
                     f"promoted_from(internal_conflict)の参照先が"
                     f"internal_conflict gap ではありません: {src.ref}"
                 )
+
+        validated_causes = {
+            h.id for h in doc.hypotheses
+            if h.kind == "cause" and h.status == "validated"
+        }
+        for bn in doc.bottlenecks:
+            if bn.from_hypothesis and bn.from_hypothesis not in validated_causes:
+                raise ValueError(
+                    "from_hypothesis は kind='cause' かつ status='validated' の仮説のみ"
+                    f"参照できます: {bn.from_hypothesis}"
+                )
+
+        node_ids = {n.id for _, nodes in self._iter_sections(doc) for n in nodes}
+        for tb in doc.to_be:
+            for ref in tb.evidenced_by:
+                if not ref.startswith("ev-") and ref not in node_ids:
+                    raise ValueError(f"evidenced_by の参照先が存在しません: {ref}")
 ```
 
-**注**: `promoted_from(kind="undeterminable")` のイベント実在検証は Task 12(EventStore)完成後に追加する。この時点では `internal_conflict` のみ検証する。
+**イベントID(`ev-N`)を参照する検証は Task 12 で追加する**。この時点では EventStore が存在しないため `ev-` 始まりは通過させる。対象は `ToBe.evidenced_by` と `PromotionSource(kind="undeterminable")` の2つ。
+
+**`fermi_ref` の検証は別ストアを参照する**。`RequirementsStore` が `ArtifactStore` を持つと依存が増えるため、**Task 12 の `WorkflowRecorder.save_requirements` 側で検証する**(そこは既に両ストアを持つ)。
 
 manifest記録:
 
@@ -1326,6 +1478,9 @@ manifest記録:
         old = previous.model_dump(mode="json") if previous else {}
         new = saved.model_dump(mode="json")
         sections = changed_sections(old, new)
+        editorial_sections = tuple(
+            s for s in editorial_sections if is_text_only_change(s, old, new)
+        )
         id_only = previous is not None and self._is_id_only_change(previous, saved)
         self._manifests.save(project_id, ChangeManifest(
             version=saved.version,
@@ -1447,7 +1602,9 @@ def requirements_save(
     project: str = typer.Option(..., "--project"),
     file: Path = typer.Option(..., "--file"),
     editorial: list[str] = typer.Option(
-        [], "--editorial", help="誤字・言い回しの修正のみと宣言するセクション名"
+        [], "--editorial",
+        help="誤字・言い回しの修正のみと宣言するセクション名"
+             "(text以外に差分があるセクションの宣言は無視される)",
     ),
 ) -> None:
     """要件ドキュメントを保存する(バージョンは自動採番)。"""
@@ -1459,7 +1616,9 @@ def requirements_save(
     typer.echo(f"saved: v{version}")
 ```
 
-既存の例外ハンドリング(`ValueError` → `error: ...` + exit 1)がこのコマンドにも適用されることを確認する。適用されていなければ既存の共通ハンドラに合わせる。
+**この時点では `RequirementsStore.save` を直接呼ぶ**。`WorkflowRecorder` は Task 12 で作るため、節目検出への切り替えは **Task 16 Step 4** で行う(それまで `medo requirements save` は節目を記録しない)。
+
+**例外は既存の `_fail()` パターンで扱う**。`main.py` には共通ハンドラが無く、各コマンドが `try/except` で `_fail(...)` を呼んでstderrへ `error: ` を出して exit 1 する。追加・変更するコマンドすべてで同じ形にする。
 
 - [ ] **Step 4: テストが通ることを確認**
 
@@ -1559,6 +1718,29 @@ def test_save_rejects_discussion_slides_without_exactly_one_parent(tmp_path):
         store.save("p1", _artifact(type="slides", slide_kind="discussion"))
 
 
+def test_save_rejects_as_is_report_with_multiple_research_parents(tmp_path):
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    store.save("p1", _artifact(type="research", content="調査1"))
+    store.save("p1", _artifact(type="research", content="調査2"))
+
+    with pytest.raises(ValueError, match="0または1件"):
+        store.save("p1", _artifact(derived_from=["research-v1", "research-v2"]))
+
+
+def test_save_rejects_grown_from_option_absent_from_candidate_set(tmp_path):
+    from medo_core.artifacts import GrownFrom, OptionMeta
+
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    store.save("p1", _artifact(type="mini-prfaq", options=[OptionMeta(name="A案")],
+                               content="候補"))
+
+    with pytest.raises(ValueError, match="B案"):
+        store.save("p1", _artifact(type="prfaq",
+                                   grown_from=GrownFrom(artifact="mini-prfaq-v1",
+                                                        option="B案"),
+                                   content="育成"))
+
+
 def test_save_rejects_older_requirements_version_than_latest_of_same_type(tmp_path):
     """祖先判定は requirements_version の単調性で行うため、逆行を拒否する。"""
     store = ArtifactStore(LocalJsonStorage(tmp_path))
@@ -1585,7 +1767,7 @@ def test_save_rejects_cyclic_dependency(tmp_path):
 - [ ] **Step 2: テストが失敗することを確認**
 
 Run: `uv run pytest core/tests/test_artifacts.py -v`
-Expected: FAIL — `slide_kind` が未定義のため `_artifact(type="slides", slide_kind=...)` で `ValidationError`(extra field)
+Expected: FAIL — `slide_kind` は未定義フィールドとして無視されるため、`test_slides_require_slide_kind` が `ValidationError` を上げず `Failed: DID NOT RAISE`、`test_slides_accept_discussion_kind` が `AttributeError: 'Artifact' object has no attribute 'slide_kind'`
 
 - [ ] **Step 3: `Artifact` を拡張**
 
@@ -1649,6 +1831,7 @@ class Artifact(BaseModel):
     def save(self, project_id: str, artifact: Artifact) -> str:
         existing = {a_id: a for a_id, a in self._load_all(project_id).items()}
         self._validate_parents(artifact, existing)
+        self._validate_grown_from(artifact, existing)
         self._validate_version_monotonicity(artifact, existing)
 
         versions = [
@@ -1682,6 +1865,8 @@ class Artifact(BaseModel):
             raise ValueError(
                 f"{artifact.type}({artifact.slide_kind})の親はちょうど1件必要です"
             )
+        if not required and len(artifact.derived_from) > 1:
+            raise ValueError(f"{artifact.type} の親は0または1件です")
         for parent_id in artifact.derived_from:
             parent = existing.get(parent_id)
             if parent is None:
@@ -1690,6 +1875,18 @@ class Artifact(BaseModel):
                 raise ValueError(
                     f"derived_from に許容されない親typeです: {parent_id}({parent.type})"
                 )
+
+    def _validate_grown_from(self, artifact: Artifact, existing: dict[str, Artifact]) -> None:
+        if artifact.grown_from is None:
+            return
+        parent = existing.get(artifact.grown_from.artifact)
+        if parent is None:
+            raise ValueError(f"grown_from の候補セットが存在しません: "
+                             f"{artifact.grown_from.artifact}")
+        if artifact.grown_from.option not in {o.name for o in parent.options}:
+            raise ValueError(
+                f"grown_from の打ち手が候補セットに存在しません: {artifact.grown_from.option}"
+            )
 
     def _validate_version_monotonicity(
         self, artifact: Artifact, existing: dict[str, Artifact]
@@ -1806,7 +2003,8 @@ def test_as_is_report_is_current_when_unrelated_section_changed(tmp_path):
     assert freshness["as-is-report-v1"].state == "current"
 
 
-def test_editorial_change_does_not_make_artifact_stale(tmp_path):
+def test_editorial_change_marks_artifact_outdated_not_stale(tmp_path):
+    """再生成は要らないが、差分の確認は促す。"""
     storage = LocalJsonStorage(tmp_path)
     store = ArtifactStore(storage)
     store.save("p1", _artifact(type="as-is-report", requirements_version=1))
@@ -1814,7 +2012,7 @@ def test_editorial_change_does_not_make_artifact_stale(tmp_path):
 
     freshness = store.freshness("p1", latest_requirements_version=2, core_challenge_ids=set())
 
-    assert freshness["as-is-report-v1"].state == "current"
+    assert freshness["as-is-report-v1"].state == "outdated"
 
 
 def test_stale_propagates_from_parent_to_child(tmp_path):
@@ -1893,7 +2091,9 @@ Expected: FAIL — `AttributeError: 'ArtifactStore' object has no attribute 'fre
 `core/src/medo_core/artifacts.py` に追記:
 
 ```python
-from medo_core.manifest import ManifestStore, fold_substantive_sections
+from datetime import date
+
+from medo_core.manifest import ManifestStore, fold_sections, fold_substantive_sections
 
 # 型ごとの依存セクション。生成物側の宣言ではなく core が固定ルールとして持つ。
 DEPENDENT_SECTIONS: dict[tuple[str, str | None], tuple[str, ...]] = {
@@ -1929,6 +2129,9 @@ class Freshness(BaseModel):
         project_id: str,
         latest_requirements_version: int,
         core_challenge_ids: set[str],
+        *,
+        is_citation_stale=None,
+        today: date | None = None,
     ) -> dict[str, Freshness]:
         """全生成物の鮮度を、親を再帰評価して返す。
 
@@ -1952,6 +2155,13 @@ class Freshness(BaseModel):
             uncovered: list[str] = []
             state = "current"
 
+            stale_citations = (
+                is_citation_stale(artifact, today) if is_citation_stale else []
+            )
+            if stale_citations:
+                state = "stale"
+                reasons.append(f"引用が古くなっています: {', '.join(stale_citations)}")
+
             sections = DEPENDENT_SECTIONS.get((artifact.type, artifact.slide_kind), ())
             changed = fold_substantive_sections(
                 manifests, from_version=artifact.requirements_version
@@ -1960,6 +2170,13 @@ class Freshness(BaseModel):
             if hit:
                 state = "stale"
                 reasons.append(f"依存セクションが変更されました: {', '.join(hit)}")
+            else:
+                editorial = sorted(set(sections) & fold_sections(
+                    manifests, artifact.requirements_version, "editorial"
+                ))
+                if editorial:
+                    state = "outdated"
+                    reasons.append(f"依存セクションの文言が変わりました: {', '.join(editorial)}")
 
             if artifact.type in COVERAGE_TYPES:
                 if artifact.covered_challenge_ids is None:
@@ -1991,7 +2208,25 @@ class Freshness(BaseModel):
         return {a_id: evaluate(a_id, frozenset()) for a_id in artifacts}
 ```
 
+**`is_citation_stale` を注入で受け取る**(`Callable[[Artifact, date | None], list[str]]`)。`ArtifactStore` が `FactStore` / `KnowledgeStore` を直接持つと、生成物ストアが知識層に依存して逆流する([structure.md](../../.claude/steering/structure.md) の依存方向)。既存 `status.py` の `_artifact_stale` が持つファクト・ナリッジの鮮度判定ロジックをこの関数として切り出し、`status.py` 側から渡す。
+
 **注**: `stale_artifacts()` はフェーズ1の `status` が使っているため残す(Task 19で `freshness` へ切り替える)。
+
+追加のテスト:
+
+```python
+def test_stale_citation_makes_artifact_stale(tmp_path):
+    """researchは要件に依存しないが、引用ファクトの鮮度切れでは陳腐化する。"""
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    store.save("p1", _artifact(type="research", cited_facts=["fact-1"], content="調査"))
+
+    freshness = store.freshness(
+        "p1", latest_requirements_version=1, core_challenge_ids=set(),
+        is_citation_stale=lambda a, today: list(a.cited_facts),
+    )
+
+    assert freshness["research-v1"].state == "stale"
+```
 
 - [ ] **Step 4: テストが通ることを確認**
 
@@ -2083,40 +2318,37 @@ def test_artifacts_save_records_covered_challenges(tmp_path, runner):
 Run: `uv run pytest cli/tests/test_cli.py -k artifacts_save -v`
 Expected: FAIL — `no such option: --slide-kind`
 
-- [ ] **Step 3: CLIにオプションを追加**
+- [ ] **Step 3: 既存の `artifacts save` にオプションを追加**
+
+**関数を書き換えず、既存シグネチャに引数を足す**。既存の `--cites` / `--cites-facts` / `--options` / `--grown-from` を落とすと、`prfaq`(`grown_from` 必須)がCLIから保存できなくなる。
 
 ```python
 @artifacts_app.command("save")
 def artifacts_save(
-    project: str = typer.Option(..., "--project"),
-    type_: str = typer.Option(..., "--type"),
-    requirements_version: int = typer.Option(..., "--requirements-version"),
-    file: Path = typer.Option(..., "--file"),
-    generated_by: str | None = typer.Option(None, "--generated-by"),
-    slide_kind: str | None = typer.Option(None, "--slide-kind"),
-    derived_from: str = typer.Option("", "--derived-from", help="親artifact ID(カンマ区切り)"),
+    project: str = typer.Option(...),
+    artifact_type: str = typer.Option(..., "--type"),
+    file: Path = typer.Option(..., exists=True, readable=True),
+    cites: str = typer.Option("", help="引用ナレッジエントリID(カンマ区切り)"),
+    cites_facts: str = typer.Option("", help="引用ファクトID(カンマ区切り)"),
+    options: str = typer.Option("", help="mini-prfaq用: name:approach_type をカンマ区切り"),
+    grown_from: str = typer.Option("", help="prfaq用: <mini-prfaq-vN>:<打ち手名>"),
+    generated_by: str | None = typer.Option(None),
+    requirements_version: int = typer.Option(...),
+    # --- ここから追加 ---
+    slide_kind: str | None = typer.Option(None, "--slide-kind",
+                                          help="slides用: discussion|final"),
+    derived_from: str = typer.Option("", "--derived-from",
+                                     help="内容依存の親artifact ID(カンマ区切り)"),
     covers: str = typer.Option("", "--covers", help="扱った課題ID(カンマ区切り)"),
-    cited_facts: str = typer.Option("", "--cited-facts"),
-    cited_knowledge: str = typer.Option("", "--cited-knowledge"),
-) -> None:
-    """生成物を保存する(型ごとにバージョン自動採番)。"""
-    def _split(value: str) -> list[str]:
-        return [v.strip() for v in value.split(",") if v.strip()]
+):
+```
 
-    artifact = Artifact(
-        project=project,
-        type=type_,
-        requirements_version=requirements_version,
-        generated_by=generated_by,
-        slide_kind=slide_kind,
-        derived_from=_split(derived_from),
-        covered_challenge_ids=_split(covers) if covers else None,
-        cited_facts=_split(cited_facts),
-        cited_knowledge=_split(cited_knowledge),
-        content=file.read_text(encoding="utf-8"),
-    )
-    artifact_id = _artifact_store().save(project, artifact)
-    typer.echo(f"saved: {artifact_id}")
+`Artifact(...)` の生成箇所に3フィールドを足す(既存フィールドはそのまま):
+
+```python
+            slide_kind=slide_kind,
+            derived_from=[c for c in derived_from.split(",") if c],
+            covered_challenge_ids=[c for c in covers.split(",") if c] if covers else None,
 ```
 
 既存の `artifacts save` の引数名・挙動は維持する(追加のみ)。
@@ -2279,9 +2511,10 @@ v3への反応を記録するとその保存自体がv4を作り、記録した�
 したがって要件の版とは独立した追記型イベントとして持つ。
 """
 
+from datetime import date
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 from medo_core.storage import Storage
 
@@ -2318,10 +2551,18 @@ class RequirementsTarget(BaseModel):
 TargetRef = Annotated[ArtifactTarget | RequirementsTarget, Field(discriminator="kind")]
 
 
+def _iso_date(value: str) -> str:
+    date.fromisoformat(value)
+    return value
+
+
+IsoDate = Annotated[str, AfterValidator(_iso_date)]
+
+
 class WorkflowEventBase(BaseModel):
     id: str = ""
     target: TargetRef
-    occurred_on: str
+    occurred_on: IsoDate
     requirements_version: int
     round_id: int
 
@@ -2461,6 +2702,8 @@ git commit -m "feat(core): 進行記録のイベントモデルを追加
 `core/tests/test_workflow.py`:
 
 ```python
+from datetime import date
+
 import pytest
 
 from medo_core.artifacts import Artifact, ArtifactStore
@@ -2479,7 +2722,8 @@ from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.storage import LocalJsonStorage
 from medo_core.workflow import WorkflowRecorder
 
-TODAY = "2026-08-30"
+TODAY = "2026-08-30"          # イベントの occurred_on(ISO文字列)
+TODAY_DATE = date(2026, 8, 30)  # 要件保存の today(date型)
 
 
 @pytest.fixture
@@ -2637,6 +2881,7 @@ EventStore は要件・生成物を知らない純粋な追記ストアに保つ
 from medo_core.artifacts import ArtifactStore
 from medo_core.events import (
     AsIsReportReviewed,
+    CheckRecorded,
     EventStore,
     MilestoneDetected,
     StakeholderResponded,
@@ -2733,6 +2978,35 @@ class WorkflowRecorder:
             self._validate_review(project_id, event)
         elif isinstance(event, ToBeCheckpointRecorded):
             self._validate_checkpoint(event, existing)
+        elif isinstance(event, CheckRecorded):
+            self._validate_check(project_id, event)
+        elif isinstance(event, MilestoneDetected) and event.focus_hypothesis_id:
+            self._validate_hypothesis(project_id, event.focus_hypothesis_id)
+
+    def _validate_check(self, project_id: str, event: CheckRecorded) -> None:
+        """artifact束縛のcheckは、registryが定める型の生成物だけを対象にできる。"""
+        from medo_core.checks import CHECK_REGISTRY
+
+        spec = CHECK_REGISTRY[event.check]
+        if spec.binding != "artifact_bound":
+            if event.target.kind != "requirements":
+                raise ValueError(f"{event.check} の target は requirements です")
+            return
+        if event.target.kind != "artifact":
+            raise ValueError(f"{event.check} の target は artifact です")
+        artifact = self._artifacts.get(project_id, event.target.artifact_id)
+        if artifact is None or artifact.type != spec.target_type or (
+            spec.slide_kind and artifact.slide_kind != spec.slide_kind
+        ):
+            raise ValueError(
+                f"{event.check} の対象は {spec.target_type} である必要があります: "
+                f"{event.target.artifact_id}"
+            )
+
+    def _validate_hypothesis(self, project_id: str, hypothesis_id: str) -> None:
+        doc = self._requirements.get(project_id)
+        if not doc or hypothesis_id not in {h.id for h in doc.hypotheses}:
+            raise ValueError(f"仮説が存在しません: {hypothesis_id}")
 
     def _validate_response(self, project_id: str, event: StakeholderResponded) -> None:
         doc = self._requirements.get(project_id)
@@ -2768,6 +3042,15 @@ class WorkflowRecorder:
                 "reviewed_slides_id は当該レポートから生成された討議用スライドである"
                 f"必要があります: {event.reviewed_slides_id}"
             )
+        doc = self._requirements.get(project_id)
+        known = {
+            n.id
+            for section in ("gaps", "challenges", "open_questions")
+            for n in getattr(doc, section)
+        } if doc else set()
+        for ref in event.finding_refs:
+            if ref not in known:
+                raise ValueError(f"所見の参照先が存在しません: {ref}")
 
     def _validate_checkpoint(self, event: ToBeCheckpointRecorded, existing: list) -> None:
         milestones = {e.id for e in existing if e.kind == "milestone"}
@@ -2838,7 +3121,7 @@ from medo_core.workflow import detect_milestone
 
 def _saved(storage, **kw) -> int:
     doc = RequirementsDoc(project="p1", **kw)
-    return WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY)
+    return WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
 
 
 def test_detects_first_internal_as_is(tmp_path):
@@ -2846,7 +3129,7 @@ def test_detects_first_internal_as_is(tmp_path):
     _saved(storage, as_is=[AsIs(text="公表", visibility="public")])
     doc = RequirementsStore(storage).get("p1")
     doc.as_is.append(AsIs(text="実は手作業", visibility="internal"))
-    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY)
+    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
 
     conditions = [e.condition for e in EventStore(storage).list("p1") if e.kind == "milestone"]
     assert conditions == ["internal_as_is_first_added"]
@@ -2857,7 +3140,7 @@ def test_detects_new_constraint(tmp_path):
     _saved(storage)
     doc = RequirementsStore(storage).get("p1")
     doc.constraints.append(Constraint(text="親会社の内規で外部SaaS禁止"))
-    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY)
+    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
 
     conditions = [e.condition for e in EventStore(storage).list("p1") if e.kind == "milestone"]
     assert conditions == ["constraint_added"]
@@ -2869,7 +3152,7 @@ def test_detects_stalled_attempt(tmp_path):
     doc = RequirementsStore(storage).get("p1")
     doc.attempts.append(Attempt(description="RPA導入", outcome="stalled",
                                 blocker="情シスが反対"))
-    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY)
+    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
 
     conditions = [e.condition for e in EventStore(storage).list("p1") if e.kind == "milestone"]
     assert conditions == ["stalled_attempt_added"]
@@ -2881,7 +3164,7 @@ def test_detects_to_be_promoted_to_confirmed(tmp_path):
     _saved(storage, to_be=[ToBe(text="自動化されている", confidence="assumed")])
     doc = RequirementsStore(storage).get("p1")
     doc.to_be[0] = doc.to_be[0].model_copy(update={"confidence": "confirmed"})
-    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY)
+    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
 
     conditions = [e.condition for e in EventStore(storage).list("p1") if e.kind == "milestone"]
     assert conditions == ["to_be_confirmed"]
@@ -2892,7 +3175,7 @@ def test_detects_hypothesis_validated(tmp_path):
     _saved(storage, hypotheses=[Hypothesis(kind="cause", statement="承認階層が原因")])
     doc = RequirementsStore(storage).get("p1")
     doc.hypotheses[0] = doc.hypotheses[0].model_copy(update={"status": "validated"})
-    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY)
+    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
 
     conditions = [e.condition for e in EventStore(storage).list("p1") if e.kind == "milestone"]
     assert conditions == ["hypothesis_validated"]
@@ -2905,7 +3188,7 @@ def test_records_only_one_milestone_when_several_conditions_hold(tmp_path):
     doc = RequirementsStore(storage).get("p1")
     doc.as_is.append(AsIs(text="実は手作業", visibility="internal"))
     doc.constraints.append(Constraint(text="予算300万円"))
-    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY)
+    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
 
     milestones = [e for e in EventStore(storage).list("p1") if e.kind == "milestone"]
     assert len(milestones) == 1
@@ -2917,13 +3200,21 @@ def test_text_only_edit_is_not_a_milestone(tmp_path):
     _saved(storage, as_is=[AsIs(text="手作業", visibility="internal")])
     doc = RequirementsStore(storage).get("p1")
     doc.as_is[0] = doc.as_is[0].model_copy(update={"text": "紙の伝票を手入力"})
-    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY)
+    WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
 
     milestones = [e for e in EventStore(storage).list("p1") if e.kind == "milestone"]
     assert milestones == []
 
 
-def test_detect_milestone_returns_none_for_first_save():
+def test_detect_milestone_fires_on_first_save_with_internal_as_is():
+    """「0件→1件以上」は初回保存でも成立する。"""
+    saved = RequirementsDoc(project="p1",
+                            as_is=[AsIs(id="as-1", text="実態", visibility="internal")])
+
+    assert detect_milestone(None, saved) == "internal_as_is_first_added"
+
+
+def test_detect_milestone_returns_none_for_empty_first_save():
     assert detect_milestone(None, RequirementsDoc(project="p1")) is None
 ```
 
@@ -2949,8 +3240,7 @@ def detect_milestone(
 
     単なる本文の微修正や既存項目の言い換えは節目にしない。
     """
-    if previous is None:
-        return None
+    previous = previous or RequirementsDoc(project=saved.project)
 
     def new_ids(section: str) -> set[str]:
         old = {n.id for n in getattr(previous, section)}
@@ -3255,6 +3545,7 @@ EXPIRY_SECTIONS = {
 class ConvergenceTarget(BaseModel):
     requirements_version: int
     as_is_report_id: str | None = None
+    final_slides_id: str | None = None
 
 
 class EffectiveResponse(BaseModel):
@@ -3277,8 +3568,16 @@ def resolve_convergence_target(
         and a.requirements_version == latest_requirements_version
     ]
     newest = max(candidates, key=lambda a_id: artifacts[a_id].version, default=None)
+    final_slides = [
+        a_id for a_id, a in artifacts.items()
+        if a.type == "slides" and a.slide_kind == "final"
+    ]
     return ConvergenceTarget(
-        requirements_version=latest_requirements_version, as_is_report_id=newest
+        requirements_version=latest_requirements_version,
+        as_is_report_id=newest,
+        final_slides_id=max(
+            final_slides, key=lambda a_id: artifacts[a_id].version, default=None
+        ),
     )
 
 
@@ -3290,9 +3589,14 @@ def _target_version(event, artifacts: dict[str, Artifact]) -> int | None:
 
 
 def _is_current(event, target: ConvergenceTarget) -> bool:
+    """purpose ごとに現在対象の種別が違う。phase_signoff は最終提案スライド宛て。"""
     if event.target.kind == "requirements":
         return event.target.version == target.requirements_version
-    return event.target.artifact_id == target.as_is_report_id
+    current = (
+        target.final_slides_id if event.purpose == "phase_signoff"
+        else target.as_is_report_id
+    )
+    return event.target.artifact_id == current
 
 
 def fold_responses(
@@ -3717,8 +4021,11 @@ def detect_ritualized(events: list, manifests: list[ChangeManifest]) -> list[str
 
     変更が無い周回を数に入れない。限定された案件では completed が続くのが正常。
     """
-    changed_rounds = {m.version for m in manifests
-                      if any(c.change_kind == "substantive" for c in m.changes)}
+    changed_rounds = {
+        m.version for m in manifests
+        if not m.id_only_migration
+        and any(c.change_kind == "substantive" for c in m.changes)
+    }
     by_check: dict[str, list] = {}
     for e in events:
         if e.kind == "check" and e.requirements_version in changed_rounds:
@@ -3726,7 +4033,10 @@ def detect_ritualized(events: list, manifests: list[ChangeManifest]) -> list[str
 
     ritualized = []
     for check, group in by_check.items():
-        ordered = sorted(group, key=lambda e: e.round_id)[-3:]
+        latest_per_round: dict[int, object] = {}
+        for e in sorted(group, key=lambda e: int(e.id.rsplit("-", 1)[1])):
+            latest_per_round[e.round_id] = e
+        ordered = [latest_per_round[r] for r in sorted(latest_per_round)][-3:]
         if len(ordered) == 3 and all(e.result == "completed" for e in ordered):
             ritualized.append(check)
     return sorted(ritualized)
@@ -3953,12 +4263,37 @@ def checkpoint_answer(
 
 `WorkflowRecorder.set_focus(project_id, milestone_id, hypothesis_id)` を追加する — 対象の `MilestoneDetected` の `focus_hypothesis_id` を更新し、参照先が実在する仮説であることを検証する。
 
-- [ ] **Step 4: テストが通ることを確認**
+- [ ] **Step 4: 要件保存を節目検出経路へ切り替える**
+
+`medo requirements save`(Task 7)を `RequirementsStore.save` から `WorkflowRecorder.save_requirements` に差し替える。**これをしないと実利用で `MilestoneDetected` が一切作られず、`actions` の先頭が永久に `answer_tobe_checkpoint` にならない**。
+
+```python
+    version = WorkflowRecorder(get_storage()).save_requirements(
+        project, doc, editorial_sections=tuple(editorial)
+    )
+```
+
+テストを追加する:
+
+```python
+def test_requirements_save_records_milestone_through_cli(tmp_path, runner):
+    """実利用の経路で節目が記録されないと、actionsが機能しない。"""
+    doc = {"project": "p1", "as_is": [{"text": "実態", "visibility": "internal"}]}
+    f = tmp_path / "req.json"
+    f.write_text(json.dumps(doc), encoding="utf-8")
+    runner.invoke(app, ["requirements", "save", "--project", "p1", "--file", str(f)])
+
+    result = runner.invoke(app, ["status", "--project", "p1", "--format", "json"])
+
+    assert "answer_tobe_checkpoint" in result.stdout
+```
+
+- [ ] **Step 5: テストが通ることを確認**
 
 Run: `uv run pytest cli/tests/ -v`
 Expected: 全て pass
 
-- [ ] **Step 5: リントとコミット**
+- [ ] **Step 6: リントとコミット**
 
 ```bash
 uv run ruff check .
@@ -4458,7 +4793,8 @@ def test_subsumed_objection_does_not_block():
 
 
 def test_phase_readiness_is_not_evaluable_without_prfaq():
-    result = phase_readiness("ready", artifacts={}, freshness={}, responses=[])
+    result = phase_readiness("ready", artifacts={}, freshness={}, responses=[],
+                             target=_target())
 
     assert result["state"] == "not_evaluable"
 
@@ -4493,6 +4829,7 @@ Expected: FAIL — `ImportError: cannot import name 'readiness'`
 `core/src/medo_core/diagnostics.py` に追記:
 
 ```python
+from medo_core.artifacts import Freshness
 from medo_core.checks import CheckState, checks_for_phase
 from medo_core.responses import ConvergenceTarget
 
@@ -4598,9 +4935,17 @@ def _response_conditions(doc: RequirementsDoc, responses: list) -> list[dict]:
 
 ```python
 def phase_readiness(
-    readiness_state: str, artifacts: dict, freshness: dict, responses: list
+    readiness_state: str,
+    artifacts: dict,
+    freshness: dict,
+    responses: list,
+    target: ConvergenceTarget,
 ) -> dict:
-    """フェーズ完了ゲート。最終提案スライドを提示した後に評価する。"""
+    """フェーズ完了ゲート。最終提案スライドを提示した後に評価する。
+
+    「何を見て承認したか」を一意に決めるため、現在の最終提案スライドへの
+    signoff だけを有効とする(fold_responses が現在対象で畳み込む)。
+    """
     prfaq = [a_id for a_id, a in artifacts.items() if a.type == "prfaq"]
     if not prfaq:
         return {"state": "not_evaluable", "failed_conditions": []}
@@ -4611,12 +4956,8 @@ def phase_readiness(
     if not any(freshness.get(a_id, None) and freshness[a_id].state != "stale" for a_id in prfaq):
         failed.append({"code": "prfaq_missing_or_stale", "refs": []})
 
-    final_slides = [
-        a_id for a_id, a in artifacts.items()
-        if a.type == "slides" and a.slide_kind == "final"
-        and freshness.get(a_id) and freshness[a_id].state != "stale"
-    ]
-    if not final_slides:
+    current_final = target.final_slides_id
+    if current_final is None or freshness.get(current_final, Freshness()).state == "stale":
         failed.append({"code": "final_slides_missing_or_stale", "refs": []})
     elif not any(
         r.purpose == "phase_signoff" and r.reaction == "agreed" and not r.expired
@@ -4632,8 +4973,14 @@ def round_delta(
     saved: RequirementsDoc,
     events: list,
     round_id: int,
+    resolved_objections: int = 0,
 ) -> dict:
-    """その周回で新たに得られたものを返す。回ること自体が価値であることを示す。"""
+    """その周回で新たに得られたものを返す。回ること自体が価値であることを示す。
+
+    resolved_objections は「有効値から外れた objected の件数」であり、畳み込みの
+    前後を比較しないと決まらないため、呼び出し側(status)が算出して渡す。
+    既存Challengeへ後付けした昇格も promoted_challenges に数える。
+    """
     def added(section: str) -> list:
         old = {n.id for n in getattr(previous, section)} if previous else set()
         return [n for n in getattr(saved, section) if n.id not in old]
@@ -4651,14 +4998,18 @@ def round_delta(
         and _confidence_rank(n.confidence) > _confidence_rank(old_confidence[n.id])
     )
 
+    old_promoted = (
+        {c.id for c in previous.challenges if c.promoted_from} if previous else set()
+    )
+    newly_promoted = [
+        c for c in saved.challenges if c.promoted_from and c.id not in old_promoted
+    ]
+
     delta = {
         "new_internal_as_is": len([a for a in added("as_is") if a.visibility == "internal"]),
         "new_constraints": len(added("constraints")),
-        "resolved_objections": len([
-            e for e in events
-            if e.kind == "response" and e.round_id == round_id and e.reaction == "agreed"
-        ]),
-        "promoted_challenges": len([c for c in added("challenges") if c.promoted_from]),
+        "resolved_objections": resolved_objections,
+        "promoted_challenges": len(newly_promoted),
         "confidence_raised": raised,
         "undeterminable_found": _first_undeterminable(events, round_id),
     }
@@ -4704,129 +5055,448 @@ git commit -m "feat(core): 収束判定と周回成果の算出を追加
 
 ---
 
-## Task 19: statusの4階層合成とactions
+## Task 19: statusコンテキストの収集とworkflow枝
 
 **Files:**
-- Modify: `core/src/medo_core/status.py`
-- Modify: `core/tests/test_status.py`
+- Create: `core/src/medo_core/context.py`
+- Create: `core/tests/test_context.py`
 
 **Interfaces:**
-- Consumes: Task 8〜18 のすべて
-- Produces: `project_status(storage, project_id, *, view="summary", include_scope=("core",), today=None) -> dict`(既存シグネチャを拡張)、`build_actions(...) -> list[dict]`
+- Consumes: Task 4・8〜18 のすべて
+- Produces: `StatusContext`(下記の全フィールド)/ `collect(storage, project_id, *, include_scope, today) -> StatusContext` / `workflow_branch(ctx) -> dict`
+
+**分割の理由**: `status.py` に収集・診断・action合成を全部置くと、1関数が3つの責務を持ち、テストが「何を検証しているか」を表せない。収集(このタスク)と提示(Task 20)を分ける。
+
+`StatusContext` は診断に必要な素材をすべて解決済みで持つ。**後続が新たな判断を挟まないよう、曖昧さの残るものはここで確定させる**。
+
+```python
+class StatusContext(BaseModel):
+    project_id: str
+    doc: RequirementsDoc
+    previous_doc: RequirementsDoc | None
+    phase: str                             # discovery | convergence
+    include_scope: tuple[str, ...]
+    target: ConvergenceTarget
+    artifacts: dict[str, Artifact]
+    freshness: dict[str, Freshness]
+    manifests: list[ChangeManifest]
+    events: list
+    checks: dict[str, CheckState]
+    responses: list[EffectiveResponse]
+    round_count: int
+    pending_milestones: list[str]          # 未回答の MilestoneDetected のID
+    focus_hypothesis: str
+    open_review_findings: list[str]
+    resolved_objections: int
+```
 
 - [ ] **Step 1: 失敗するテストを書く**
 
-`core/tests/test_status.py` に追記:
+`core/tests/test_context.py`:
 
 ```python
+from datetime import date
+
+from medo_core.artifacts import Artifact, ArtifactStore
+from medo_core.context import collect, workflow_branch
+from medo_core.events import ArtifactTarget, AsIsReportReviewed, StakeholderResponded
 from medo_core.nodes import AsIs, Stakeholder, ToBe
 from medo_core.requirements import RequirementsDoc
-from medo_core.status import project_status
 from medo_core.storage import LocalJsonStorage
 from medo_core.workflow import WorkflowRecorder
 
 TODAY = date(2026, 8, 30)
 
 
+def _project(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    WorkflowRecorder(storage).save_requirements("p1", RequirementsDoc(
+        project="p1",
+        as_is=[AsIs(text="実態", visibility="internal")],
+        stakeholders=[Stakeholder(text="部長", is_decision_maker=True)],
+    ), today=TODAY)
+    return storage
+
+
+def _report(storage, requirements_version=1) -> str:
+    return ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="as-is-report", requirements_version=requirements_version,
+        generated_by="claude", content="# 現状",
+    ))
+
+
+def test_collect_resolves_current_target_from_latest_version(tmp_path):
+    storage = _project(tmp_path)
+    report_id = _report(storage)
+
+    ctx = collect(storage, "p1", include_scope=("core",), today=TODAY)
+
+    assert ctx.target.as_is_report_id == report_id
+
+
+def test_collect_reports_unanswered_milestone(tmp_path):
+    """未回答は「対応する回答を持たない MilestoneDetected」として一意に導く。"""
+    storage = _project(tmp_path)
+
+    ctx = collect(storage, "p1", include_scope=("core",), today=TODAY)
+
+    assert len(ctx.pending_milestones) == 1
+
+
+def test_collect_clears_pending_after_checkpoint_answer(tmp_path):
+    from medo_core.events import RequirementsTarget, ToBeCheckpointRecorded
+
+    storage = _project(tmp_path)
+    ctx = collect(storage, "p1", include_scope=("core",), today=TODAY)
+    WorkflowRecorder(storage).record("p1", ToBeCheckpointRecorded(
+        target=RequirementsTarget(version=1), occurred_on="2026-08-30",
+        requirements_version=1, round_id=0, answer="generate",
+        responds_to=ctx.pending_milestones[0],
+    ))
+
+    assert collect(storage, "p1", include_scope=("core",), today=TODAY).pending_milestones == []
+
+
+def test_open_review_finding_is_cleared_by_approval_of_successor(tmp_path):
+    """収束条件は「レビューがある」ではなく「未解決の差し戻しが無い」。"""
+    storage = _project(tmp_path)
+    report_v1 = _report(storage)
+    slides_v1 = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="slides", slide_kind="discussion", requirements_version=1,
+        derived_from=[report_v1], generated_by="claude", content="# 討議",
+    ))
+    rec = WorkflowRecorder(storage)
+    rec.record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id=report_v1), occurred_on="2026-08-30",
+        requirements_version=1, round_id=0, outcome="changes_requested",
+        reviewed_slides_id=slides_v1, slide_findings=["見出しが非難調"],
+    ))
+    assert collect(storage, "p1", include_scope=("core",),
+                   today=TODAY).open_review_findings != []
+
+    report_v2 = _report(storage)
+    slides_v2 = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="slides", slide_kind="discussion", requirements_version=1,
+        derived_from=[report_v2], generated_by="claude", content="# 討議2",
+    ))
+    rec.record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id=report_v2), occurred_on="2026-08-31",
+        requirements_version=1, round_id=0, outcome="approved",
+        reviewed_slides_id=slides_v2,
+    ))
+
+    assert collect(storage, "p1", include_scope=("core",),
+                   today=TODAY).open_review_findings == []
+
+
+def test_resolved_objections_counts_objections_no_longer_effective(tmp_path):
+    storage = _project(tmp_path)
+    report_v1 = _report(storage)
+    rec = WorkflowRecorder(storage)
+    rec.record("p1", StakeholderResponded(
+        target=ArtifactTarget(artifact_id=report_v1), occurred_on="2026-08-30",
+        requirements_version=1, round_id=0,
+        stakeholder_id="sh-1", purpose="as_is_alignment", reaction="objected",
+    ))
+    report_v2 = _report(storage)
+    rec.record("p1", StakeholderResponded(
+        target=ArtifactTarget(artifact_id=report_v2), occurred_on="2026-08-31",
+        requirements_version=1, round_id=0,
+        stakeholder_id="sh-1", purpose="as_is_alignment", reaction="agreed",
+    ))
+
+    ctx = collect(storage, "p1", include_scope=("core",), today=TODAY)
+
+    assert ctx.resolved_objections == 1
+
+
+def test_workflow_branch_reports_divergence_after_two_empty_rounds(tmp_path):
+    """発散は停止条件ではなく、論点を絞る合図として報告する。"""
+    storage = _project(tmp_path)
+    ctx = collect(storage, "p1", include_scope=("core",), today=TODAY)
+
+    branch = workflow_branch(ctx)
+
+    assert branch["loop"]["divergence_warning"] is False
+
+
+def test_workflow_branch_carries_checks_and_responses(tmp_path):
+    storage = _project(tmp_path)
+    ctx = collect(storage, "p1", include_scope=("core",), today=TODAY)
+
+    branch = workflow_branch(ctx)
+
+    assert set(branch) == {"checks", "review", "responses", "loop"}
+    assert "states" in branch["checks"]
+```
+
+- [ ] **Step 2: テストが失敗することを確認**
+
+Run: `uv run pytest core/tests/test_context.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'medo_core.context'`
+
+- [ ] **Step 3: `collect` を実装**
+
+```python
+"""診断の素材を1回の走査で解決する。
+
+status.py が収集と提示を兼ねると、1関数が3つの責務を持ちテストが
+「何を検証しているか」を表せなくなる。
+"""
+
+
+def collect(
+    storage: Storage,
+    project_id: str,
+    *,
+    include_scope: tuple[str, ...] = ("core",),
+    today: date | None = None,
+) -> StatusContext:
+    reqs = RequirementsStore(storage)
+    version = reqs.latest_version(project_id)
+    doc = reqs.get(project_id)
+    if doc is None:
+        raise ValueError(f"プロジェクトが存在しません: {project_id}")
+
+    artifacts = ArtifactStore(storage)._load_all(project_id)
+    manifests = ManifestStore(storage).list(project_id)
+    events = EventStore(storage).list(project_id)
+    target = resolve_convergence_target(version, artifacts)
+
+    core_challenge_ids = {
+        c.id for c in doc.challenges if c.scope in include_scope
+    }
+    freshness = ArtifactStore(storage).freshness(
+        project_id, version, core_challenge_ids,
+        is_citation_stale=make_citation_checker(storage, project_id),
+        today=today,
+    )
+
+    responses = fold_responses(events, target, artifacts, manifests)
+    checks = effective_checks(
+        events, phase=diagnostic_phase(doc), latest_requirements_version=version,
+        manifests=manifests, current_artifact_ids=_current_artifact_ids(artifacts),
+    )
+    return StatusContext(
+        project_id=project_id, doc=doc,
+        previous_doc=reqs.get(project_id, version - 1) if version > 1 else None,
+        phase=diagnostic_phase(doc), include_scope=include_scope,
+        target=target, artifacts=artifacts, freshness=freshness,
+        manifests=manifests, events=events, checks=checks, responses=responses,
+        round_count=WorkflowRecorder(storage).round_count(project_id),
+        pending_milestones=_pending_milestones(events),
+        focus_hypothesis=_focus_hypothesis(events),
+        open_review_findings=_open_review_findings(events, artifacts, doc),
+        resolved_objections=_resolved_objections(events, responses),
+    )
+```
+
+補助関数:
+
+```python
+def _current_artifact_ids(artifacts: dict) -> dict[str, str]:
+    """型ごとの最新版ID。artifact束縛checkの失効判定に使う。"""
+    latest: dict[str, str] = {}
+    for a_id, a in artifacts.items():
+        key = a.type
+        if key not in latest or artifacts[latest[key]].version < a.version:
+            latest[key] = a_id
+    return latest
+
+
+def _pending_milestones(events: list) -> list[str]:
+    answered = {e.responds_to for e in events if e.kind == "tobe_checkpoint"}
+    return [e.id for e in events if e.kind == "milestone" and e.id not in answered]
+
+
+def _focus_hypothesis(events: list) -> str:
+    for e in reversed(events):
+        if e.kind == "milestone" and e.focus_hypothesis_id:
+            return e.focus_hypothesis_id
+    return ""
+
+
+def _open_review_findings(events: list, artifacts: dict, doc) -> list[str]:
+    """未解決の changes_requested を返す。
+
+    解消は (1) 同系列の後継への approved (2) finding_refs が指すノードが
+    すべて解消(削除または confirmed)されたとき。slide_findings は
+    機械判定できないため (1) でのみ解消する。
+    """
+    reviews = [e for e in events if e.kind == "asis_review"]
+    approved_versions = {
+        artifacts[e.target.artifact_id].requirements_version
+        for e in reviews
+        if e.outcome == "approved" and e.target.artifact_id in artifacts
+    }
+    node_state = {
+        n.id: n.confidence
+        for section in ("gaps", "challenges", "open_questions")
+        for n in getattr(doc, section)
+    }
+    open_refs: list[str] = []
+    for e in reviews:
+        if e.outcome != "changes_requested":
+            continue
+        version = artifacts.get(e.target.artifact_id)
+        if version and any(v >= version.requirements_version for v in approved_versions):
+            continue
+        if e.slide_findings:
+            open_refs.append(e.id)
+        open_refs.extend(
+            ref for ref in e.finding_refs
+            if node_state.get(ref) not in (None, "confirmed")
+        )
+    return sorted(set(open_refs))
+
+
+def _resolved_objections(events: list, responses: list) -> int:
+    """記録された objected のうち、有効値から外れたものの件数。"""
+    recorded = {e.id for e in events if e.kind == "response" and e.reaction == "objected"}
+    still_effective = {
+        r.event_id for r in responses if r.reaction == "objected" and not r.subsumed_by
+    }
+    return len(recorded - still_effective)
+```
+
+- [ ] **Step 4: `workflow_branch` を実装**
+
+```python
+def workflow_branch(ctx: StatusContext) -> dict:
+    delta = round_delta(
+        ctx.previous_doc, ctx.doc, ctx.events, ctx.round_count,
+        resolved_objections=ctx.resolved_objections,
+    )
+    return {
+        "checks": {
+            "states": {name: s.state for name, s in ctx.checks.items()},
+            "inconsistent": detect_inconsistency(ctx.checks, ctx.doc),
+            "ritualized": detect_ritualized(ctx.events, ctx.manifests),
+        },
+        "review": {
+            "current_target": ctx.target.as_is_report_id,
+            "open_findings": ctx.open_review_findings,
+        },
+        "responses": {
+            "effective": [
+                {"stakeholder_id": r.stakeholder_id, "purpose": r.purpose,
+                 "reaction": r.reaction}
+                for r in ctx.responses if not r.subsumed_by and not r.expired
+            ],
+            "open_objections": sorted(
+                r.event_id for r in ctx.responses
+                if r.reaction == "objected" and not r.subsumed_by
+            ),
+            "go_ahead": _go_ahead_summary(ctx),
+            "subsumed": sorted(r.event_id for r in ctx.responses if r.subsumed_by),
+        },
+        "loop": {
+            "round_count": ctx.round_count,
+            "focus_hypothesis": ctx.focus_hypothesis,
+            "round_delta": delta,
+            "checkpoint": {
+                "state": "pending" if ctx.pending_milestones else "answered",
+                "pending_ids": ctx.pending_milestones,
+            },
+            "divergence_warning": _is_diverging(ctx, delta),
+        },
+    }
+```
+
+`_is_diverging` は**直近2周の `progress_count` がいずれも0**のときTrue。各周回の `progress_count` は、その周回の要件版と `previous_doc` から `round_delta` を再計算して得る。周回が2未満のときはFalse。
+
+- [ ] **Step 5: テストが通ることを確認**
+
+Run: `uv run pytest core/tests/test_context.py -v`
+Expected: 7 passed
+
+- [ ] **Step 6: リントとコミット**
+
+```bash
+uv run ruff check .
+git add core/src/medo_core/context.py core/tests/test_context.py
+git commit -m "feat(core): 診断素材の収集を分離
+
+status が収集と提示を兼ねると、1関数が3つの責務を持ちテストが
+何を検証しているか表せなくなる。曖昧さの残る解決(現在対象・未回答の
+節目・未解決の差し戻し)を収集側で確定させ、提示側が判断を挟まないようにする。"
+```
+
+---
+
+## Task 19b: statusの4階層とactions
+
+**Files:**
+- Modify: `core/src/medo_core/status.py`
+- Modify: `core/tests/test_status.py`
+
+**Interfaces:**
+- Consumes: Task 19 の `collect` / `workflow_branch`、Task 17〜18 の診断
+- Produces: `project_status(storage, project_id, knowledge_root=None, today=None, *, view="summary", include_scope=("core",)) -> dict` / `build_actions(ctx, model, readiness_result) -> list[dict]`
+
+**既存シグネチャを壊さない**: 現行は `project_status(storage, project_id, knowledge_root, today=None)` で、`knowledge_root` は位置引数。**位置引数のまま残し、新規は全てキーワード専用にする**。要件が存在しないプロジェクトは、例外にせず現行どおり `next_step: "hearing"` を返す(CLIの既存挙動を壊さないため)。
+
+- [ ] **Step 1: 失敗するテストを書く**
+
+`core/tests/test_status.py` に追記(既存テストは変更しない):
+
+```python
 def _codes(status: dict) -> list[str]:
     return [a["code"] for a in status["actions"]]
 
 
 def test_status_returns_four_branches_in_full_view(tmp_path):
-    storage = LocalJsonStorage(tmp_path)
-    WorkflowRecorder(storage).save_requirements(
-        "p1", RequirementsDoc(project="p1"), today=TODAY)
+    storage = _project(tmp_path)
 
-    status = project_status(storage, "p1", view="full", today=TODAY)
+    status = project_status(storage, "p1", tmp_path, view="full")
 
     assert set(status) >= {"model", "workflow", "readiness", "actions", "diagnostic_phase"}
 
 
 def test_summary_view_puts_actions_first(tmp_path):
     """Skillが最初に読むものを「足りない」ではなく「次にできること」にする。"""
-    storage = LocalJsonStorage(tmp_path)
-    WorkflowRecorder(storage).save_requirements(
-        "p1", RequirementsDoc(project="p1"), today=TODAY)
+    storage = _project(tmp_path)
 
-    status = project_status(storage, "p1", view="summary", today=TODAY)
+    status = project_status(storage, "p1", tmp_path)
 
     assert list(status)[0] == "actions"
 
 
 def test_summary_view_omits_failed_conditions(tmp_path):
-    storage = LocalJsonStorage(tmp_path)
-    WorkflowRecorder(storage).save_requirements(
-        "p1", RequirementsDoc(project="p1"), today=TODAY)
-
-    status = project_status(storage, "p1", view="summary", today=TODAY)
+    status = project_status(_project(tmp_path), "p1", tmp_path)
 
     assert "failed_conditions" not in status["readiness"]
 
 
 def test_branch_view_returns_only_that_branch(tmp_path):
-    storage = LocalJsonStorage(tmp_path)
-    WorkflowRecorder(storage).save_requirements(
-        "p1", RequirementsDoc(project="p1"), today=TODAY)
-
-    status = project_status(storage, "p1", view="model", today=TODAY)
+    status = project_status(_project(tmp_path), "p1", tmp_path, view="model")
 
     assert set(status) == {"project", "diagnostic_phase", "model"}
 
 
+def test_missing_project_still_returns_phase1_shape(tmp_path):
+    """既存CLIの挙動を壊さない。"""
+    status = project_status(LocalJsonStorage(tmp_path), "unknown", tmp_path)
+
+    assert status["next_step"] == "hearing"
+
+
 def test_discovery_phase_still_returns_actions(tmp_path):
     """readiness を出さない段階でも、次に何をすべきかは示す。"""
-    storage = LocalJsonStorage(tmp_path)
-    WorkflowRecorder(storage).save_requirements(
-        "p1",
-        RequirementsDoc(project="p1",
-                        as_is=[AsIs(text="実態", visibility="internal")]),
-        today=TODAY)
+    status = project_status(_project(tmp_path), "p1", tmp_path)
 
-    status = project_status(storage, "p1", today=TODAY)
-
-    assert status["actions"] != []
     assert "draft_strawman_to_be" in _codes(status)
 
 
 def test_unanswered_milestone_is_the_top_action(tmp_path):
-    storage = LocalJsonStorage(tmp_path)
-    rec = WorkflowRecorder(storage)
-    rec.save_requirements("p1", RequirementsDoc(project="p1"), today=TODAY)
-    doc = RequirementsStore(storage).get("p1")
-    doc.as_is.append(AsIs(text="実態", visibility="internal"))
-    rec.save_requirements("p1", doc, today=TODAY)
-
-    status = project_status(storage, "p1", today=TODAY)
+    status = project_status(_project(tmp_path), "p1", tmp_path)
 
     assert _codes(status)[0] == "answer_tobe_checkpoint"
 
 
-def test_proceed_action_appears_even_with_deferred_undeterminable(tmp_path):
-    """disposition を決めれば 6b は消え、次ステージへの行動が出る。"""
-    storage = _ready_project(tmp_path)
-
-    status = project_status(storage, "p1", today=TODAY)
-
-    assert "proceed_to_propose_options" in _codes(status)
-    assert "explore_undeterminable" not in _codes(status)
-
-
-def test_stale_regeneration_is_deprioritized_while_loop_is_pending(tmp_path):
-    """往復中に stale再生成を最優先にすると、周回ごとに再生成へ誘導される。"""
-    storage = _loop_pending_project_with_stale_artifact(tmp_path)
-
-    codes = _codes(project_status(storage, "p1", today=TODAY))
-
-    assert codes.index("answer_tobe_checkpoint") < codes.index("regenerate_stale_artifacts")
-
-
 def test_next_step_keeps_phase1_vocabulary(tmp_path):
     """フェーズ1のSkillは next_step を完全一致で分岐している。"""
-    storage = LocalJsonStorage(tmp_path)
-    WorkflowRecorder(storage).save_requirements(
-        "p1", RequirementsDoc(project="p1"), today=TODAY)
-
-    status = project_status(storage, "p1", today=TODAY)
+    status = project_status(_project(tmp_path), "p1", tmp_path)
 
     assert status["next_step"] in {
         "hearing", "propose-options", "grow-prfaq",
@@ -4835,129 +5505,131 @@ def test_next_step_keeps_phase1_vocabulary(tmp_path):
 
 
 def test_summary_view_keeps_phase1_compatibility_fields(tmp_path):
-    storage = LocalJsonStorage(tmp_path)
-    WorkflowRecorder(storage).save_requirements(
-        "p1", RequirementsDoc(project="p1"), today=TODAY)
-
-    status = project_status(storage, "p1", today=TODAY)
+    status = project_status(_project(tmp_path), "p1", tmp_path)
 
     assert set(status) >= {"requirements", "facts", "artifacts", "next_step"}
-```
 
-`_ready_project` と `_loop_pending_project_with_stale_artifact` はテスト内のヘルパーとして、必要な要件・生成物・イベントを組み立てて `LocalJsonStorage` を返す。
+
+def test_run_check_is_not_offered_without_its_target(tmp_path):
+    """討議用スライドが無い状態で expression_safety を求めても実行できない。"""
+    codes_with_refs = [
+        a for a in project_status(_project(tmp_path), "p1", tmp_path)["actions"]
+        if a["code"] == "run_check"
+    ]
+
+    assert all("expression_safety" not in a.get("refs", []) for a in codes_with_refs)
+```
 
 - [ ] **Step 2: テストが失敗することを確認**
 
 Run: `uv run pytest core/tests/test_status.py -v`
 Expected: FAIL — `TypeError: project_status() got an unexpected keyword argument 'view'`
 
-- [ ] **Step 3: `status.py` を再構成**
+- [ ] **Step 3: `project_status` を再構成**
 
 ```python
 def project_status(
     storage: Storage,
     project_id: str,
+    knowledge_root: Path | None = None,
+    today: date | None = None,
     *,
     view: str = "summary",
     include_scope: tuple[str, ...] = ("core",),
-    today: date | None = None,
 ) -> dict:
     """現在地と次にできることを返す。診断は報告であって強制ではない。"""
-    doc = RequirementsStore(storage).get(project_id)
-    if doc is None:
-        raise ValueError(f"プロジェクトが存在しません: {project_id}")
+    if RequirementsStore(storage).latest_version(project_id) == 0:
+        return _empty_status(project_id)
 
-    context = _collect(storage, project_id, doc, include_scope, today)
-    branches = {
-        "model": context.model,
-        "workflow": context.workflow,
-        "readiness": context.readiness,
-        "actions": context.actions,
-    }
+    ctx = collect(storage, project_id, include_scope=include_scope, today=today)
+    model = model_diagnostics(ctx.doc, ctx.artifacts, ctx.freshness, include_scope)
+    workflow = workflow_branch(ctx)
+    ready = readiness(ctx.doc, ctx.target, ctx.checks, ctx.responses,
+                      ctx.open_review_findings, include_scope)
+    actions = build_actions(ctx, model, ready)
+
+    branches = {"model": model, "workflow": workflow,
+                "readiness": ready, "actions": actions}
+    head = {"project": project_id, "diagnostic_phase": ctx.phase}
     if view in branches:
-        return {"project": project_id, "diagnostic_phase": context.phase, view: branches[view]}
+        return {**head, view: branches[view]}
+    compat = _phase1_fields(storage, ctx, knowledge_root, today)
     if view == "full":
-        return {"project": project_id, "diagnostic_phase": context.phase,
-                **branches, **_phase1_fields(context)}
-    return _summary(project_id, context)
-
-
-def _summary(project_id: str, context) -> dict:
-    """actions を先頭に置く。Skillが最初に読むものを変える。"""
-    return {
-        "actions": context.actions,
-        "project": project_id,
-        "diagnostic_phase": context.phase,
-        "workflow": {
-            "loop": {
-                "round_count": context.workflow["loop"]["round_count"],
-                "round_delta": context.workflow["loop"]["round_delta"],
-                "checkpoint": context.workflow["loop"]["checkpoint"],
-            },
-            "responses": {"open_objections":
-                          context.workflow["responses"]["open_objections"]},
-            "review": {"open_findings": context.workflow["review"]["open_findings"]},
-        },
-        "readiness": {"state": context.readiness["state"]},
-        **_phase1_fields(context),
-    }
+        return {**head, **branches,
+                "phase_readiness": phase_readiness(
+                    ready["state"], ctx.artifacts, ctx.freshness,
+                    ctx.responses, ctx.target),
+                **compat}
+    return _summary(project_id, ctx, workflow, ready, actions, compat)
 ```
 
-`_phase1_fields` はフェーズ1の `requirements` / `facts` / `artifacts` / `next_step` をそのまま返す。**`next_step` は既存のフェーズ1ロジックを変更せずに再利用する**(値域が異なるため `actions[0]` にしない)。
+`_phase1_fields` は**既存の `project_status` 本体をそのまま関数として切り出す**(`requirements` / `facts` / `artifacts` / `next_step`)。**`next_step` のロジックは一切変更しない**。
 
-`build_actions` は設計の優先順位表([status契約](../specs/phase2-status-contract.md) §3)の順に評価する:
+- [ ] **Step 4: `build_actions` を実装**
+
+優先順位表([status契約](../specs/phase2-status-contract.md) §3)の順に評価する。
 
 ```python
-def build_actions(context) -> list[dict]:
-    """次にできることを優先順に並べる。"""
+def build_actions(ctx, model: dict, ready: dict) -> list[dict]:
+    """次にできることを優先順に並べる。必ず1件以上返す。"""
+    failed = {c["code"]: c["refs"] for c in ready["failed_conditions"]}
+    stale = sorted(a for a, f in ctx.freshness.items() if f.state == "stale")
+    loop_in_progress = bool(ctx.pending_milestones) or \
+        model["structure"]["to_be"]["confirmed"] == 0
+
     actions: list[dict] = []
-    loop_in_progress = (
-        context.workflow["loop"]["checkpoint"]["state"] == "pending"
-        or context.model["structure"]["to_be"]["confirmed"] == 0
-    )
 
     def add(code: str, refs: list[str] | None = None, **extra) -> None:
         actions.append({"code": code, **({"refs": refs} if refs else {}), **extra})
 
-    if context.pending_milestones:
-        add("answer_tobe_checkpoint", reason="節目で未回答")
-    if context.open_objections:
-        add("resolve_objection", context.open_objections)
-    if context.review_findings:
-        add("address_review_findings", context.review_findings)
-    if not context.doc.to_be and context.has_internal_as_is:
+    if ctx.pending_milestones:
+        add("answer_tobe_checkpoint", ctx.pending_milestones, reason="節目で未回答")
+    if objections := [r.event_id for r in ctx.responses
+                      if r.reaction == "objected" and not r.subsumed_by]:
+        add("resolve_objection", sorted(objections))
+    if ctx.open_review_findings:
+        add("address_review_findings", ctx.open_review_findings)
+    if not ctx.doc.to_be and any(a.visibility == "internal" for a in ctx.doc.as_is):
         add("draft_strawman_to_be")
-    if context.target.as_is_report_id is None:
+    if ctx.target.as_is_report_id is None:
         add("generate_as_is_report")
-    for name in context.unverified_checks_with_target:
-        add("run_check", [name])
-    if context.open_undeterminable:
-        add("explore_undeterminable", context.open_undeterminable)
-    if context.unpromoted_conflicts:
-        add("consider_promotion", context.unpromoted_conflicts)
-    if context.stale_artifacts and not loop_in_progress:
-        add("regenerate_stale_artifacts", context.stale_artifacts)
-    for code in _readiness_driven_actions(context):
-        add(code["code"], code.get("refs"))
-    if context.stale_artifacts and loop_in_progress:
-        add("regenerate_stale_artifacts", context.stale_artifacts)
-    if context.readiness["state"] == "ready":
+    if runnable := _runnable_checks(ctx):
+        add("run_check", runnable)
+    if open_undeterminable := failed.get("undeterminable_open"):
+        add("explore_undeterminable", open_undeterminable)
+    if unpromoted := _unpromoted_conflicts(ctx.doc):
+        add("consider_promotion", unpromoted)
+    if stale and not loop_in_progress:
+        add("regenerate_stale_artifacts", stale)
+    if "internal_as_is_missing" in failed:
+        add("elicit_internal_as_is")
+    if refs := failed.get("unsupported_confirmed_to_be"):
+        add("ground_confirmed_to_be", refs)
+    if _needs_discussion_slides(ctx):
+        add("generate_discussion_slides")
+    if refs := failed.get("to_be_go_ahead_missing"):
+        add("request_to_be_go_ahead", refs)
+    if stale and loop_in_progress:
+        add("regenerate_stale_artifacts", stale)
+    if ready["state"] == "ready":
         add("proceed_to_propose_options")
     if not actions:
         add("continue_hearing")
     return actions
 ```
 
-`_readiness_driven_actions` は `readiness.failed_conditions` を対応するactionへ写す(`internal_as_is_missing` → `elicit_internal_as_is` / `unsupported_confirmed_to_be` → `ground_confirmed_to_be` / `to_be_go_ahead_missing` → `request_to_be_go_ahead`)。討議用スライドが未生成なら `generate_discussion_slides` を加える。
+`_runnable_checks(ctx)` は `unverified` の check のうち**対象が存在するものだけ**を返す(`CHECK_REGISTRY[name].binding == "artifact_bound"` の場合、`_current_artifact_ids` に該当typeがあること)。
 
-**`run_check` は対象が存在するときだけ出す** — `expression_safety` は討議用スライドが存在する場合のみ。
+`_unpromoted_conflicts(doc)` は `Gap(kind="internal_conflict")` のうち、どの `Challenge.promoted_from.ref` からも参照されていないもの。
 
-- [ ] **Step 4: テストが通ることを確認**
+`_needs_discussion_slides(ctx)` は最新 `as-is-report` を `derived_from` に持つ `slide_kind="discussion"` の生成物が無いときTrue。
 
-Run: `uv run pytest core/tests/ -v`
-Expected: 全て pass
+- [ ] **Step 5: テストが通ることを確認**
 
-- [ ] **Step 5: リントとコミット**
+Run: `uv run pytest -v`
+Expected: 全て pass(既存の `test_status.py` も含む)
+
+- [ ] **Step 6: リントとコミット**
 
 ```bash
 uv run ruff check .
@@ -4965,7 +5637,8 @@ git add core/src/medo_core/status.py core/tests/test_status.py
 git commit -m "feat(core): 4階層診断とactionsの合成を追加
 
 「足りない」の列挙は監査人の視点になる。同じデータを返しつつ、
-Skillが最初に読むものを readiness から actions へ変える。"
+Skillが最初に読むものを readiness から actions へ変える。
+next_step はフェーズ1の値域のまま独立に計算し続ける。"
 ```
 
 ---
@@ -5060,14 +5733,18 @@ def status(
     include_scope: str = typer.Option(
         "", "--include-scope", help="診断対象に加えるscope(secondary,out)"
     ),
-    format_: str = typer.Option("digest", "--format", help="json|digest"),
+    format_: str = typer.Option("json", "--format", help="json|digest"),
 ) -> None:
     """現在地と次にできることを返す。"""
     if view not in VIEWS:
         raise ValueError(f"不明な view です: {view}(有効: {', '.join(VIEWS)})")
-    scopes = ("core",) + tuple(
-        s.strip() for s in include_scope.split(",") if s.strip()
-    )
+    if format_ not in ("json", "digest"):
+        raise ValueError(f"不明な format です: {format_}")
+    scopes = ("core",)
+    for s in (v.strip() for v in include_scope.split(",") if v.strip()):
+        if s not in ("secondary", "out"):
+            raise ValueError(f"不明な scope です: {s}(有効: secondary, out)")
+        scopes += (s,)
     payload = project_status(get_storage(), project, view=view, include_scope=scopes)
     if format_ == "json":
         typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -5077,7 +5754,9 @@ def status(
 
 `_echo_digest` は `actions` を先頭に1行ずつ出力し、続けて `diagnostic_phase` / `round_delta` / `checkpoint` を要約する。
 
-進行記録コマンドを `commands/workflow.py` へ移し、`main.py` からは登録のみ行う:
+**既定の `--format` は `json` のまま変えない**。フェーズ1のSkillはオプションなしの `medo status` がJSONを返す前提で書かれている。
+
+進行記録コマンドを `commands/workflow.py` へ移し、`main.py` からは登録のみ行う。**`commands/workflow.py` は `main.py` を import しない** — `get_storage` は `medo_core.config` から、`_fail` は `commands/_common.py` へ切り出して両者が参照する(逆流を避ける):
 
 ```python
 # cli/src/medo_cli/main.py
@@ -5129,7 +5808,7 @@ Skillは開始・終了ごとにstatusを呼ぶため、毎回全量を返すと
 | `projects/{id}/manifests/v{n}` | 変更manifest(セクション別の実質変更宣言) |
 | `projects/{id}/meta/id_watermark` | ID採番簿(プレフィックス別の high-water mark) |
 
-同 §2 のモジュール一覧に `nodes.py` / `watermark.py` / `manifest.py` / `events.py` / `workflow.py` / `checks.py` / `responses.py` / `diagnostics.py` を追加する。
+同 §2 のモジュール一覧に `nodes.py` / `watermark.py` / `manifest.py` / `events.py` / `workflow.py` / `checks.py` / `responses.py` / `diagnostics.py` / `context.py` を追加する。§8 の分割ガイドに `cli/src/medo_cli/commands/` を追記する。
 
 - [ ] **Step 2: コマンド一覧を更新**
 
@@ -5137,19 +5816,27 @@ Skillは開始・終了ごとにstatusを呼ぶため、毎回全量を返すと
 
 - [ ] **Step 3: フェーズ2のAgent向け要約を作る**
 
-`.claude/specs/phase2/spec.md` は正本([medo-phase2-design.md](../specs/medo-phase2-design.md))へのポインタと、標準周回4ステージ・不変条件7だけを持つ要約とする(二重管理を避ける)。`tasks.md` は本計画のTask 1〜21のチェックリストを持つ。
+`.claude/specs/phase2/spec.md` は正本([medo-phase2-design.md](../specs/medo-phase2-design.md))へのポインタと、標準周回4ステージ・不変条件7だけを持つ要約とする(二重管理を避ける)。`tasks.md` は本計画のTask 1〜21(19bを含む22件)のチェックリストを持つ。
 
 - [ ] **Step 4: 手動スモークを実行して結果を記録**
 
 実案件(`medo-ops`)に対して標準周回を1周させ、以下を確認する。**自動テストでは検出できない、実データでの通し動作を見る**:
 
+**2回に分けて保存する**。ID初回採番と内容追加を同じ保存で行うと `id_only_migration` が立たず、確認項目2を検証できない。
+
 ```bash
 export MEDO_BACKEND=local
 uv run medo status --project medo-ops --format json | head -40
+
+# 1回目: 読んでそのまま保存する(ID採番のみ)
 uv run medo requirements get --project medo-ops --format json > /tmp/req.json
-# as_is に internal を1件足して保存
 uv run medo requirements save --project medo-ops --file /tmp/req.json
-uv run medo status --project medo-ops   # 節目が pending になっているか
+uv run medo status --project medo-ops --view model   # 生成物がstaleになっていないこと
+
+# 2回目: as_is に internal を1件足して保存
+#   (/tmp/req.json を編集。既存ノードのIDは書き換えない)
+uv run medo requirements save --project medo-ops --file /tmp/req.json
+uv run medo status --project medo-ops                # actions先頭が節目回答か
 ```
 
 確認項目:
@@ -5183,6 +5870,9 @@ git commit -m "docs: フェーズ2決定論層の完成に伴う参照先を同�
 - [ ] `medo status --view full` が4階層(`model` / `workflow` / `readiness` / `actions`)を返す
 - [ ] フェーズ1のSkill(`medo-hearing` / `medo-propose-options` / `medo-grow-prfaq`)が `next_step` の値域変更なしに動く
 - [ ] 実案件1件で標準周回を1周させ、節目の記録と `actions` の変化を確認した(Task 21 Step 4)
+- [ ] `medo requirements save` が `WorkflowRecorder` 経由で節目を記録する(Task 16 Step 4)
+- [ ] `medo artifacts save` の既存オプション(`--cites` / `--cites-facts` / `--options` / `--grown-from`)がすべて残っている
+- [ ] `project_status` の既存呼び出し(`knowledge_root` 位置引数・要件なしで `next_step: "hearing"`)が壊れていない
 
 ## 本計画の範囲外
 
@@ -5192,3 +5882,4 @@ git commit -m "docs: フェーズ2決定論層の完成に伴う参照先を同�
 | 最終提案スライド + `phase_signoff` ゲート | 優先度6。`prfaq` が前提 |
 | 出典検証の強化(URLフェッチ + 数値突合) | 並行項目だが詳細設計が未了([設計索引](../specs/medo-phase2-design.md#詳細設計が未了の項目)) |
 | ナレッジ来歴 / `knowledge-digest` / `decision-roadmap` / pricing / `build-mock` / `propose-architecture` / 簡易Webアプリ | 後続。いずれも詳細正本を持たない |
+| Firestoreでの採番簿トランザクション | `Storage` プロトコルへの `transact` 追加が要る。利用スコープが本人のみ(不変条件5)で同時保存が起きないため見送る。Firestoreを複数プロセスから使う段階で対応する |
