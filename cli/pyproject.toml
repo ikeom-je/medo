@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-medo = "medo_cli.main:app"
+medo = "medo_cli.main:main"
 
 [build-system]
 requires = ["hatchling"]

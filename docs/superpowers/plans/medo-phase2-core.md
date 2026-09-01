@@ -6227,7 +6227,17 @@ class Tracer:
 
 
 def _command(argv: list[str]) -> list[str]:
-    return [a for a in argv if not a.startswith("-")][:2] if argv else []
+    """先頭からオプションが現れるまでの語をコマンド名とする。
+
+    clickはサブコマンドをオプションより前に取るため、最初のオプション以降の
+    非オプション語はすべてオプションの値である(`--project p1` の `p1` など)。
+    """
+    words: list[str] = []
+    for token in argv:
+        if token.startswith("-"):
+            break
+        words.append(token)
+    return words[:2]
 
 
 def _options(argv: list[str]) -> dict[str, str]:
@@ -6240,7 +6250,7 @@ def _options(argv: list[str]) -> dict[str, str]:
     return options
 ```
 
-**`_command` が先頭2つの非オプション語を取るのは、`medo check add` のようなサブコマンド2階層に合わせるため**。`--project` の値は非オプション語ではないので混入しない。
+**`_command` が最初のオプションで打ち切るのは、`--project p1` の `p1` を拾わないため**。argv全体から非オプション語を集めると、オプションの値がコマンド名に混入する。先頭2語までとするのは `medo check add` のサブコマンド2階層に合わせるため。
 
 - [ ] **Step 4: エントリポイントを `main()` に変える**
 

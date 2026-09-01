@@ -2,6 +2,7 @@
 
 import os
 import json
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Literal
@@ -20,6 +21,7 @@ from medo_core.knowledge import (
 )
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.status import project_status, stale_artifact_ids
+from medo_cli.trace import Tracer
 
 app = typer.Typer(no_args_is_help=True, help="Medo(目処) — クラウド非依存の上流工程Agent CLI")
 requirements_app = typer.Typer(no_args_is_help=True)
@@ -373,5 +375,19 @@ def fermi_calc(
     typer.echo(f"{result.name} = {result.value}")
 
 
+def main() -> None:
+    """console_script のエントリーポイント。MEDO_TRACE 指定時は呼び出しを記録する。"""
+    tracer = Tracer.from_env()
+    code = 0
+    try:
+        app()
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        raise
+    finally:
+        if tracer:
+            tracer.record(sys.argv[1:], exit_code=code)
+
+
 if __name__ == "__main__":
-    app()
+    main()
