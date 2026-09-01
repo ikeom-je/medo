@@ -815,11 +815,15 @@ def is_text_only_change(section: str, old: dict, new: dict) -> bool:
     editorial 宣言を無条件に信じると、ノードの追加・削除や confidence 変更まで
     「誤字修正」として陳腐化判定から隠せてしまう。宣言できる範囲を機械的に絞る。
     """
+    if section in SCALAR_TEXT_SECTIONS:
+        return True
     old_nodes = old.get(section) or []
     new_nodes = new.get(section) or []
     if not isinstance(old_nodes, list) or not isinstance(new_nodes, list):
-        return section in ("goal", "background", "industry")
+        return False
     if len(old_nodes) != len(new_nodes):
+        return False
+    if not all(isinstance(n, dict) for n in (*old_nodes, *new_nodes)):
         return False
     for before, after in zip(old_nodes, new_nodes, strict=True):
         if {k: v for k, v in before.items() if k != "text"} != \
