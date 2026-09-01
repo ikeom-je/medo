@@ -2,11 +2,23 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from medo_core.nodes import (
+    AsIs,
+    Attempt,
+    Bottleneck,
+    Challenge,
+    Confidence,
+    Constraint,
+    Gap,
+    Hypothesis,
+    Kpi,
+    OpenQuestion,
+    Stakeholder,
+    ToBe,
+)
 from medo_core.storage import Storage
-
-Confidence = Literal["confirmed", "assumed", "open"]
 
 
 class ConfidenceItem(BaseModel):
@@ -25,12 +37,30 @@ class RequirementsDoc(BaseModel):
     background: str = ""  # 業界・ビジネス状況の要約
     goal: str = ""
     principles: list[ConfidenceItem] = Field(default_factory=list)  # 経営思想・理念・方針
-    challenges: list[ConfidenceItem] = Field(default_factory=list)  # 課題(What/Whyの起点)
     functional: list[FunctionalRequirement] = Field(default_factory=list)
     non_functional: dict[str, str] = Field(default_factory=dict)
-    open_questions: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
     knowledge_backend: Literal["markdown", "sqlite"] = "markdown"
+
+    challenges: list[Challenge] = Field(default_factory=list)
+    open_questions: list[OpenQuestion] = Field(default_factory=list)
+
+    as_is: list[AsIs] = Field(default_factory=list)
+    to_be: list[ToBe] = Field(default_factory=list)
+    kpis: list[Kpi] = Field(default_factory=list)
+    stakeholders: list[Stakeholder] = Field(default_factory=list)
+    gaps: list[Gap] = Field(default_factory=list)
+    bottlenecks: list[Bottleneck] = Field(default_factory=list)
+    constraints: list[Constraint] = Field(default_factory=list)
+    attempts: list[Attempt] = Field(default_factory=list)
+    hypotheses: list[Hypothesis] = Field(default_factory=list)
+
+    @field_validator("open_questions", mode="before")
+    @classmethod
+    def _accept_legacy_string_list(cls, value):
+        if isinstance(value, list):
+            return [{"text": v} if isinstance(v, str) else v for v in value]
+        return value
 
 
 class RequirementsStore:
@@ -76,8 +106,8 @@ class RequirementsStore:
         new = self.get(project_id, to_v)
         old_f = {f.text for f in old.functional}
         new_f = {f.text for f in new.functional}
-        old_q = set(old.open_questions)
-        new_q = set(new.open_questions)
+        old_q = {q.text for q in old.open_questions}
+        new_q = {q.text for q in new.open_questions}
         empty.update(
             functional_added=sorted(new_f - old_f),
             functional_removed=sorted(old_f - new_f),
