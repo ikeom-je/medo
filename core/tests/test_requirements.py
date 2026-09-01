@@ -1,13 +1,20 @@
+from datetime import date
 from pathlib import Path
 
 import pytest
-from medo_core.nodes import AsIs, Challenge, OpenQuestion
+from medo_core.nodes import AsIs, Challenge, Gap, OpenQuestion, ToBe
 from medo_core.requirements import FunctionalRequirement, RequirementsDoc, RequirementsStore
 from medo_core.storage import LocalJsonStorage
+
+TODAY = date(2026, 8, 30)
 
 
 @pytest.fixture
 def store(tmp_path: Path) -> RequirementsStore:
+    return RequirementsStore(LocalJsonStorage(tmp_path))
+
+
+def _store(tmp_path) -> RequirementsStore:
     return RequirementsStore(LocalJsonStorage(tmp_path))
 
 
@@ -183,3 +190,266 @@ def test_challenge_and_open_question_are_node_types():
 
     assert isinstance(doc.challenges[0], Challenge)
     assert isinstance(doc.open_questions[0], OpenQuestion)
+
+
+def test_save_assigns_ids_to_empty_id_nodes(tmp_path):
+    store = _store(tmp_path)
+    doc = RequirementsDoc(
+        project="p1",
+        as_is=[
+            AsIs(text="手作業", visibility="internal"),
+            AsIs(text="公表", visibility="public"),
+        ],
+    )
+
+    store.save("p1", doc, today=TODAY)
+
+    saved = store.get("p1")
+    assert [n.id for n in saved.as_is] == ["as-1", "as-2"]
+
+
+def test_save_does_not_reuse_id_of_deleted_node(tmp_path):
+    store = _store(tmp_path)
+    store.save(
+        "p1",
+        RequirementsDoc(
+            project="p1",
+            as_is=[
+                AsIs(text="a", visibility="internal"),
+                AsIs(text="b", visibility="internal"),
+            ],
+        ),
+        today=TODAY,
+    )
+    kept = store.get("p1").as_is[0]
+
+    store.save("p1", RequirementsDoc(project="p1", as_is=[kept]), today=TODAY)
+    store.save(
+        "p1",
+        RequirementsDoc(
+            project="p1",
+            as_is=[kept, AsIs(text="c", visibility="internal")],
+        ),
+        today=TODAY,
+    )
+
+    assert [n.id for n in store.get("p1").as_is] == ["as-1", "as-3"]
+
+
+def test_save_rejects_duplicate_ids_within_document(tmp_path):
+    store = _store(tmp_path)
+    doc = RequirementsDoc(
+        project="p1",
+        as_is=[
+            AsIs(id="as-1", text="a", visibility="internal"),
+            AsIs(id="as-1", text="b", visibility="internal"),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="重複"):
+        store.save("p1", doc, today=TODAY)
+
+
+def test_save_rejects_id_absent_from_previous_version(tmp_path):
+    """ホストLLMが書き写す際の勝手なリナンバリングを機械的に検出する。"""
+    store = _store(tmp_path)
+    store.save(
+        "p1",
+        RequirementsDoc(
+            project="p1", as_is=[AsIs(text="a", visibility="internal")]
+        ),
+        today=TODAY,
+    )
+
+    doc = RequirementsDoc(
+        project="p1", as_is=[AsIs(id="as-9", text="a", visibility="internal")]
+    )
+
+    with pytest.raises(ValueError, match="as-9"):
+        store.save("p1", doc, today=TODAY)
+
+
+def test_save_rejects_link_to_unknown_node(tmp_path):
+    store = _store(tmp_path)
+    doc = RequirementsDoc(
+        project="p1", gaps=[Gap(text="乖離", kind="goal", from_as_is=["as-99"])]
+    )
+
+    with pytest.raises(ValueError, match="as-99"):
+        store.save("p1", doc, today=TODAY)
+
+
+def test_save_records_manifest_of_changed_sections(tmp_path):
+    from medo_core.manifest import ManifestStore
+
+    storage = LocalJsonStorage(tmp_path)
+    store = RequirementsStore(storage)
+    store.save("p1", RequirementsDoc(project="p1"), today=TODAY)
+    store.save(
+        "p1",
+        RequirementsDoc(project="p1", to_be=[ToBe(text="自動化されている")]),
+        today=TODAY,
+    )
+
+    manifests = ManifestStore(storage).list("p1")
+    assert [c.section for c in manifests[1].changes] == ["to_be"]
+
+
+def test_save_marks_declared_sections_as_editorial(tmp_path):
+    from medo_core.manifest import ManifestStore
+
+    storage = LocalJsonStorage(tmp_path)
+    store = RequirementsStore(storage)
+    store.save(
+        "p1",
+        RequirementsDoc(project="p1", to_be=[ToBe(id="", text="自動化")]),
+        today=TODAY,
+    )
+    kept = store.get("p1").to_be[0]
+    store.save(
+        "p1",
+        RequirementsDoc(
+            project="p1",
+            to_be=[kept.model_copy(update={"text": "自動化されている"})],
+        ),
+        editorial_sections=("to_be",),
+        today=TODAY,
+    )
+
+    manifests = ManifestStore(storage).list("p1")
+    assert manifests[1].changes[0].change_kind == "editorial"
+
+
+def test_save_flags_first_id_assignment_as_id_only_migration(tmp_path):
+    """初回ID採番だけの保存は陳腐化を引き起こさない。"""
+    from medo_core.manifest import ManifestStore
+
+    storage = LocalJsonStorage(tmp_path)
+    storage.put(
+        "projects/p1/requirements/v1",
+        {
+            "project": "p1",
+            "version": 1,
+            "challenges": [{"text": "後戻りが起きる", "confidence": "confirmed"}],
+        },
+    )
+    store = RequirementsStore(storage)
+    doc = store.get("p1")
+
+    store.save("p1", doc, today=TODAY)
+
+    manifests = ManifestStore(storage).list("p1")
+    assert manifests[-1].id_only_migration is True
+
+
+def test_save_rejects_bottleneck_that_is_not_confirmed(tmp_path):
+    """bottlenecks は検証・合意済みの真因のみを持つ。"""
+    from medo_core.nodes import Bottleneck
+
+    store = _store(tmp_path)
+    doc = RequirementsDoc(project="p1", bottlenecks=[Bottleneck(text="承認3階層")])
+
+    with pytest.raises(ValueError, match="confirmed"):
+        store.save("p1", doc, today=TODAY)
+
+
+def test_save_rejects_perception_gap_without_both_visibilities(tmp_path):
+    store = _store(tmp_path)
+    store.save(
+        "p1",
+        RequirementsDoc(
+            project="p1", as_is=[AsIs(text="公表", visibility="public")]
+        ),
+        today=TODAY,
+    )
+    public_id = store.get("p1").as_is[0].id
+
+    doc = RequirementsDoc(
+        project="p1",
+        as_is=[store.get("p1").as_is[0]],
+        gaps=[Gap(text="乖離", kind="perception", from_as_is=[public_id])],
+    )
+
+    with pytest.raises(ValueError, match="perception"):
+        store.save("p1", doc, today=TODAY)
+
+
+def test_save_rejects_bottleneck_promoted_from_unvalidated_hypothesis(tmp_path):
+    from medo_core.nodes import Bottleneck, Hypothesis
+
+    store = _store(tmp_path)
+    store.save(
+        "p1",
+        RequirementsDoc(
+            project="p1",
+            hypotheses=[Hypothesis(kind="cause", statement="承認階層が原因")],
+        ),
+        today=TODAY,
+    )
+    hyp = store.get("p1").hypotheses[0]
+
+    doc = RequirementsDoc(
+        project="p1",
+        hypotheses=[hyp],
+        bottlenecks=[
+            Bottleneck(
+                text="承認3階層",
+                confidence="confirmed",
+                from_hypothesis=hyp.id,
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="validated"):
+        store.save("p1", doc, today=TODAY)
+
+
+def test_save_rejects_evidenced_by_pointing_to_unknown_node(tmp_path):
+    store = _store(tmp_path)
+    doc = RequirementsDoc(
+        project="p1", to_be=[ToBe(text="自動化", evidenced_by=["as-99"])]
+    )
+
+    with pytest.raises(ValueError, match="as-99"):
+        store.save("p1", doc, today=TODAY)
+
+
+def test_save_accepts_evidenced_by_pointing_to_event(tmp_path):
+    """誰の発言が理想像を形にしたかをイベントまで遡れるようにする。"""
+    store = _store(tmp_path)
+
+    store.save(
+        "p1",
+        RequirementsDoc(
+            project="p1", to_be=[ToBe(text="自動化", evidenced_by=["ev-3"])]
+        ),
+        today=TODAY,
+    )
+
+    assert store.get("p1").to_be[0].evidenced_by == ["ev-3"]
+
+
+def test_save_rejects_promotion_source_pointing_to_goal_gap(tmp_path):
+    from medo_core.nodes import PromotionSource
+
+    store = _store(tmp_path)
+    store.save(
+        "p1",
+        RequirementsDoc(project="p1", gaps=[Gap(text="乖離", kind="goal")]),
+        today=TODAY,
+    )
+    gap_id = store.get("p1").gaps[0].id
+
+    doc = RequirementsDoc(
+        project="p1",
+        gaps=[store.get("p1").gaps[0]],
+        challenges=[
+            Challenge(
+                text="どちらを前提にするか",
+                promoted_from=PromotionSource(kind="internal_conflict", ref=gap_id),
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="internal_conflict"):
+        store.save("p1", doc, today=TODAY)
