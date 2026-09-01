@@ -119,6 +119,22 @@ def test_confidence_change_cannot_be_declared_editorial():
     assert is_text_only_change("to_be", old, new) is False
 
 
+def test_non_node_section_cannot_be_declared_editorial():
+    """sources は list[str] であってノード構造を持たない。textだけの差分を切り出せない。"""
+    assert is_text_only_change("sources", {"sources": ["https://a/1"]},
+                               {"sources": ["https://a/2"]}) is False
+
+
+def test_scalar_text_section_can_be_declared_editorial():
+    assert is_text_only_change("goal", {"goal": "半日で目処"}, {"goal": "半日で目処が立つ"}) is True
+
+
+def test_dict_section_cannot_be_declared_editorial():
+    """non_functional は値の変更が実質変更(陳腐化の粒度表)。"""
+    assert is_text_only_change("non_functional", {"non_functional": {"a": "1"}},
+                               {"non_functional": {"a": "2"}}) is False
+
+
 def test_fold_excludes_editorial_declarations():
     manifests = [
         ChangeManifest(
