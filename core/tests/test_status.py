@@ -3,7 +3,12 @@ from datetime import date
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom
 from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
 from medo_core.facts import Fact, FactStore
-from medo_core.requirements import ConfidenceItem, FunctionalRequirement, RequirementsDoc, RequirementsStore
+from medo_core.nodes import Challenge
+from medo_core.requirements import (
+    FunctionalRequirement,
+    RequirementsDoc,
+    RequirementsStore,
+)
 from medo_core.status import project_status, stale_artifact_ids
 from medo_core.storage import LocalJsonStorage
 
@@ -15,7 +20,7 @@ def _doc(**kw) -> RequirementsDoc:
         project="yoyaku",
         goal="飲食店の多言語対応AI自動音声予約システム",
         industry="飲食",
-        challenges=[ConfidenceItem(text="外国語の電話予約に対応できず機会損失", confidence="confirmed")],
+        challenges=[Challenge(text="外国語の電話予約に対応できず機会損失", confidence="confirmed")],
         functional=[FunctionalRequirement(text="ネット予約", confidence="confirmed")],
         open_questions=["ピーク時の同時電話着信数は?"],
     )

@@ -77,7 +77,7 @@ def requirements_get(
         for f in doc.functional:
             typer.echo(f"  - [{f.confidence}] {f.text}")
         for q in doc.open_questions:
-            typer.echo(f"  ? {q}")
+            typer.echo(f"  ? {q.text}")
 
 
 @requirements_app.command("diff")

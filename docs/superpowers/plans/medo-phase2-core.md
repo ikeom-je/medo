@@ -1052,16 +1052,30 @@ class RequirementsDoc(BaseModel):
 
 CLIの digest 出力(`? {q}`)も `q.text` に変える。
 
-- [ ] **Step 4: テストが通ることを確認**
+- [ ] **Step 4: 既存テストのfixtureを `Challenge` へ移行する**
+
+**既存JSONは読めるが、`ConfidenceItem` の*インスタンス*は読めない**。pydanticは別モデルのインスタンスを自動変換しないため、`challenges=[ConfidenceItem(...)]` と書いているテストが `ValidationError` になる。本番の経路(JSON読み込み)は dict なので影響を受けない。
+
+対象は2箇所:
+
+```python
+# core/tests/test_requirements.py / core/tests/test_status.py
+challenges=[Challenge(text="外国語の電話予約に対応できず機会損失")]
+```
+
+`principles` / `functional` は `ConfidenceItem` のままでよい(型を変えていない)。
+
+- [ ] **Step 5: テストが通ることを確認**
 
 Run: `uv run pytest core/tests/ -v`
-Expected: 全て pass(既存の `test_requirements.py` も含む)
+Expected: 全て pass(既存の `test_requirements.py` / `test_status.py` も含む)
 
-- [ ] **Step 5: リントとコミット**
+- [ ] **Step 6: リントとコミット**
 
 ```bash
 uv run ruff check .
-git add core/src/medo_core/requirements.py core/tests/test_requirements.py
+git add core/src/medo_core/requirements.py core/tests/test_requirements.py \
+        core/tests/test_status.py cli/src/medo_cli/main.py
 git commit -m "feat(core): 要件ドキュメントに論理連鎖のセクションを追加
 
 open_questions を list[str] からID付きへ変更する。レビュー所見が
