@@ -6,7 +6,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 Confidence = Literal["confirmed", "assumed", "open"]
 Scope = Literal["core", "secondary", "out"]
@@ -78,6 +78,66 @@ class Constraint(ScopedNode):
 
 class OpenQuestion(ScopedNode):
     """未確定事項。レビュー所見から参照されるためIDを持つ。"""
+
+
+class Kpi(Node):
+    name: str
+    current_fact_id: str = ""
+    target_value: float | None = None
+    target_text: str = ""
+    unit: str = ""
+    to_be_ids: list[str] = Field(default_factory=list)
+
+
+class Stakeholder(Node):
+    role: str = ""
+    pains: list[str] = Field(default_factory=list)
+    stance: Literal["unknown", "supportive", "neutral", "resistant"] = "unknown"
+    is_decision_maker: bool = False
+    influence: Literal["high", "medium", "low"] = "medium"
+    interest: Literal["high", "medium", "low"] = "medium"
+    surfaced_by: Literal["stated", "inferred"] = "stated"
+
+
+BlockerCategory = Literal[
+    "resource", "politics_incentive", "technical", "governance", "priority"
+]
+
+
+class Attempt(BaseModel):
+    id: str = ""
+    challenge_ids: list[str] = Field(default_factory=list)
+    gap_ids: list[str] = Field(default_factory=list)
+    description: str
+    outcome: Literal[
+        "not_attempted", "in_progress", "stalled", "failed", "partial", "succeeded"
+    ]
+    blocker: str = ""
+    blocker_category: list[BlockerCategory] = Field(default_factory=list)
+    confidence: Confidence = "open"
+    evidence_refs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _require_blocker_when_not_progressing(self) -> "Attempt":
+        if self.outcome in ("stalled", "failed") and not self.blocker:
+            raise ValueError(f"outcome={self.outcome} には blocker が必須です")
+        return self
+
+
+class FermiRef(BaseModel):
+    artifact_id: str
+    variable_name: str
+
+
+class Hypothesis(BaseModel):
+    id: str = ""
+    kind: Literal["cause", "solution", "impact"]
+    statement: str
+    validation_method: str = ""
+    status: Literal["unvalidated", "validating", "validated", "rejected"] = "unvalidated"
+    evidence_refs: list[str] = Field(default_factory=list)
+    challenge_ids: list[str] = Field(default_factory=list)
+    fermi_ref: FermiRef | None = None
 
 
 ID_PREFIXES = {
