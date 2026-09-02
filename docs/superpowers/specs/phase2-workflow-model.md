@@ -500,9 +500,11 @@ CLIが持つ registry で、項目ごとに次を定義する。
 | 1 | 標準周回の `readiness.state == "ready"` | `convergence_not_ready` |
 | 2 | `prfaq` が存在し stale でない | `prfaq_missing_or_stale` |
 | 3 | `slide_kind="final"` の `slides` が存在し stale でない | `final_slides_missing_or_stale` |
-| 4 | 決裁者から最新の最終提案スライドに対する `phase_signoff` の `agreed` | `phase_signoff_missing` |
+| 4 | 決裁者から**現在の**最終提案スライドに対する `phase_signoff` の `agreed` | `phase_signoff_missing` |
 
 `prfaq` が存在しない段階では `not_evaluable` を返す(標準周回のみを回している間は評価しない)。
+
+**条件4は祖先からの継承を認めない**。他のpurposeと違い、最終提案スライドを作り直したら旧スライドへの承認は無効になる。承認は「何を見て決めたか」と不可分であり、資料が変われば同じ承認とは言えない。畳み込みは `EffectiveResponse.on_current_target` でこれを表す。
 
 **条件2の「裏づけ済み」の判定式**: ToBeと内部実態を結ぶ経路を既存の `Gap(kind="goal")` で定義する。
 
