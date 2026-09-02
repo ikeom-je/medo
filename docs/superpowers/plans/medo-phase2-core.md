@@ -4864,7 +4864,7 @@ git commit -m "feat(core): 案件内容の構造・リンク・カバレッジ�
 
 **Interfaces:**
 - Consumes: Task 14 の `fold_responses` / `ConvergenceTarget`、Task 15 の `effective_checks`
-- Produces: `readiness(doc, target, checks, responses, review_findings, include_scope) -> dict` / `phase_readiness(readiness_state, artifacts, freshness, responses) -> dict` / `round_delta(previous, saved, events, round_id) -> dict` / `to_be_is_grounded(doc, to_be_id) -> bool`
+- Produces: `readiness(doc, target, checks, responses, review_findings, include_scope) -> dict` / `phase_readiness(readiness_state, artifacts, freshness, responses, target, decision_makers) -> dict` / `round_delta(previous, saved, events, round_id, resolved_objections) -> dict` / `to_be_is_grounded(doc, to_be_id) -> bool`
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -5173,6 +5173,7 @@ def phase_readiness(
     freshness: dict,
     responses: list,
     target: ConvergenceTarget,
+    decision_makers: set[str],
 ) -> dict:
     """フェーズ完了ゲート。最終提案スライドを提示した後に評価する。
 
@@ -5195,9 +5196,10 @@ def phase_readiness(
     elif not any(
         r.purpose == "phase_signoff" and r.reaction == "agreed"
         and not r.expired and r.on_current_target
+        and r.stakeholder_id in decision_makers
         for r in responses
     ):
-        failed.append({"code": "phase_signoff_missing", "refs": []})
+        failed.append({"code": "phase_signoff_missing", "refs": sorted(decision_makers)})
 
     return {"state": "ready" if not failed else "not_ready", "failed_conditions": failed}
 
