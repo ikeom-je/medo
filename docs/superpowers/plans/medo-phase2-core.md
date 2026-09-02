@@ -2153,8 +2153,8 @@ def test_coverage_is_ignored_for_non_coverage_types(tmp_path):
 
 - [ ] **Step 2: テストが失敗することを確認**
 
-Run: `uv run pytest core/tests/test_artifacts.py -k freshness -v`
-Expected: FAIL — `AttributeError: 'ArtifactStore' object has no attribute 'freshness'`
+Run: `uv run pytest core/tests/test_artifacts.py -v`
+Expected: FAIL — `AttributeError: 'ArtifactStore' object has no attribute 'freshness'`(テスト名に `freshness` を含まないため `-k` では選択されない)
 
 - [ ] **Step 3: 実装**
 
@@ -2181,6 +2181,12 @@ DEPENDENT_SECTIONS: dict[tuple[str, str | None], tuple[str, ...]] = {
     ("architecture", None): ("functional", "non_functional", "constraints"),
     ("mock", None): ("functional", "constraints"),
 }
+
+
+def _weaker_of(current: str, candidate: str) -> str:
+    """鮮度は最も重い状態を保つ。個別の判定が既存の判定を上書きしない。"""
+    order = {"current": 0, "outdated": 1, "stale": 2}
+    return current if order[current] >= order[candidate] else candidate
 
 
 class Freshness(BaseModel):
@@ -2245,13 +2251,13 @@ class Freshness(BaseModel):
                     manifests, artifact.requirements_version, "editorial"
                 ))
                 if editorial:
-                    state = "outdated"
+                    state = _weaker_of(state, "outdated")
                     reasons.append(f"依存セクションの文言が変わりました: {', '.join(editorial)}")
 
             if artifact.type in COVERAGE_TYPES:
                 if artifact.covered_challenge_ids is None:
-                    if core_challenge_ids and state == "current":
-                        state = "outdated"
+                    if core_challenge_ids:
+                        state = _weaker_of(state, "outdated")
                         reasons.append("カバレッジが未宣言のため差分を確認してください")
                 else:
                     missing = sorted(core_challenge_ids - set(artifact.covered_challenge_ids))
@@ -2265,8 +2271,8 @@ class Freshness(BaseModel):
                 if parent.state == "stale":
                     state = "stale"
                     reasons.append(f"親が古くなっています: {parent_id}")
-                elif parent.state == "outdated" and state == "current":
-                    state = "outdated"
+                elif parent.state == "outdated":
+                    state = _weaker_of(state, "outdated")
                     reasons.append(f"親の差分確認が必要です: {parent_id}")
 
             result = Freshness(

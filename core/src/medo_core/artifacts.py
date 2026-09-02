@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from medo_core.manifest import ManifestStore, fold_sections, fold_substantive_sections
 from medo_core.storage import Storage
 
 ArtifactType = Literal[
@@ -25,6 +27,24 @@ COVERAGE_TYPES = ("mini-prfaq", "prfaq", "comparison", "architecture", "mock")
 
 REJECTION_TYPES = ("mini-prfaq", "comparison", "prfaq")
 
+# 型ごとの依存セクション。
+# 生成物側の宣言ではなく core が固定ルールとして持つ。
+DEPENDENT_SECTIONS: dict[tuple[str, str | None], tuple[str, ...]] = {
+    ("fermi", None): (),
+    ("research", None): (),
+    ("as-is-report", None): ("as_is", "gaps", "constraints", "stakeholders", "attempts"),
+    ("mini-prfaq", None): ("goal", "challenges", "principles", "constraints", "to_be", "kpis"),
+    ("prfaq", None): (
+        "goal", "challenges", "principles", "constraints", "to_be", "kpis",
+        "as_is", "gaps", "bottlenecks", "hypotheses", "attempts", "stakeholders",
+    ),
+    ("comparison", None): ("challenges", "principles", "constraints", "kpis"),
+    ("slides", "discussion"): ("open_questions", "to_be", "kpis"),
+    ("slides", "final"): ("open_questions",),
+    ("architecture", None): ("functional", "non_functional", "constraints"),
+    ("mock", None): ("functional", "constraints"),
+}
+
 
 class OptionMeta(BaseModel):
     name: str
@@ -40,6 +60,18 @@ class RejectedOption(BaseModel):
     name: str
     reason: str
     accepted_risk: str = ""
+
+
+def _weaker_of(current: str, candidate: str) -> str:
+    """鮮度は最も重い状態を保つ。個別の判定が既存の判定を上書きしない。"""
+    order = {"current": 0, "outdated": 1, "stale": 2}
+    return current if order[current] >= order[candidate] else candidate
+
+
+class Freshness(BaseModel):
+    state: Literal["current", "outdated", "stale"] = "current"
+    reasons: list[str] = Field(default_factory=list)
+    uncovered_challenge_ids: list[str] = Field(default_factory=list)
 
 
 class Artifact(BaseModel):
@@ -193,3 +225,92 @@ class ArtifactStore:
             a for a in self.list(project_id)
             if a.requirements_version < current_requirements_version
         ]
+
+    def freshness(
+        self,
+        project_id: str,
+        latest_requirements_version: int,
+        core_challenge_ids: set[str],
+        *,
+        is_citation_stale=None,
+        today: date | None = None,
+    ) -> dict[str, Freshness]:
+        """全生成物の鮮度を、親を再帰評価して返す。
+
+        型ごと最新版のみを保持すると、親が旧版のPRFAQだと
+        解決できないため
+        全Artifactを保持して評価する。
+        """
+        artifacts = self._load_all(project_id)
+        manifests = ManifestStore(self._storage).list(project_id)
+        resolved: dict[str, Freshness] = {}
+
+        def evaluate(a_id: str, seen: frozenset[str]) -> Freshness:
+            if a_id in resolved:
+                return resolved[a_id]
+            if a_id in seen:
+                return Freshness(state="stale", reasons=[f"依存が循環しています: {a_id}"])
+            artifact = artifacts.get(a_id)
+            if artifact is None:
+                return Freshness(state="stale", reasons=[f"親が存在しません: {a_id}"])
+
+            reasons: list[str] = []
+            uncovered: list[str] = []
+            state = "current"
+
+            stale_citations = (
+                is_citation_stale(artifact, today) if is_citation_stale else []
+            )
+            if stale_citations:
+                state = "stale"
+                reasons.append(f"引用が古くなっています: {', '.join(stale_citations)}")
+
+            sections = DEPENDENT_SECTIONS.get((artifact.type, artifact.slide_kind), ())
+            changed = fold_substantive_sections(
+                manifests, from_version=artifact.requirements_version
+            )
+            hit = sorted(set(sections) & changed)
+            if hit:
+                state = "stale"
+                reasons.append(f"依存セクションが変更されました: {', '.join(hit)}")
+            else:
+                editorial = sorted(set(sections) & fold_sections(
+                    manifests, artifact.requirements_version, "editorial"
+                ))
+                if editorial:
+                    state = _weaker_of(state, "outdated")
+                    reasons.append(
+                        f"依存セクションの文言が変わりました: "
+                        f"{', '.join(editorial)}"
+                    )
+
+            if artifact.type in COVERAGE_TYPES:
+                if artifact.covered_challenge_ids is None:
+                    if core_challenge_ids:
+                        state = _weaker_of(state, "outdated")
+                        reasons.append(
+                            "カバレッジが未宣言のため差分を確認してください"
+                        )
+                else:
+                    missing = sorted(core_challenge_ids - set(artifact.covered_challenge_ids))
+                    if missing:
+                        state = "stale"
+                        uncovered = missing
+                        reasons.append(f"未対応の課題があります: {', '.join(missing)}")
+
+            for parent_id in artifact.derived_from:
+                parent = evaluate(parent_id, seen | {a_id})
+                if parent.state == "stale":
+                    state = "stale"
+                    reasons.append(f"親が古くなっています: {parent_id}")
+                elif parent.state == "outdated":
+                    state = _weaker_of(state, "outdated")
+                    reasons.append(f"親の差分確認が必要です: {parent_id}")
+
+            result = Freshness(
+                state=state, reasons=reasons, uncovered_challenge_ids=uncovered
+            )
+            resolved[a_id] = result
+            return result
+
+        return {a_id: evaluate(a_id, frozenset()) for a_id in artifacts}

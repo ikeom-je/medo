@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from medo_core.artifacts import Artifact, ArtifactStore
+from medo_core.manifest import ChangeManifest, ManifestStore, SectionChange
 from medo_core.storage import LocalJsonStorage
 
 
@@ -228,3 +229,174 @@ def test_save_rejects_cyclic_dependency(tmp_path):
     with pytest.raises(ValueError, match="循環"):
         store.save("p1", _artifact(type="slides", slide_kind="discussion",
                                    derived_from=["as-is-report-v1"]))
+
+
+def _manifest(version: int, *sections: str, editorial: bool = False) -> ChangeManifest:
+    return ChangeManifest(
+        version=version,
+        changes=[
+            SectionChange(
+                section=s, change_kind="editorial" if editorial else "substantive"
+            )
+            for s in sections
+        ],
+        recorded_on="2026-08-30",
+    )
+
+
+def test_research_is_not_stale_when_requirements_change(tmp_path):
+    """調査結果は要件が変わっても陳腐化しない。
+
+    引用ファクトの鮮度でのみ古くなる。
+    """
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="research", requirements_version=1, content="調査"))
+    ManifestStore(storage).save("p1", _manifest(2, "as_is", "to_be"))
+
+    freshness = store.freshness("p1", latest_requirements_version=2, core_challenge_ids=set())
+
+    assert freshness["research-v1"].state == "current"
+
+
+def test_as_is_report_is_stale_when_dependent_section_changed(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="as-is-report", requirements_version=1))
+    ManifestStore(storage).save("p1", _manifest(2, "as_is"))
+
+    freshness = store.freshness("p1", latest_requirements_version=2, core_challenge_ids=set())
+
+    assert freshness["as-is-report-v1"].state == "stale"
+    assert "as_is" in freshness["as-is-report-v1"].reasons[0]
+
+
+def test_as_is_report_is_current_when_unrelated_section_changed(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="as-is-report", requirements_version=1))
+    ManifestStore(storage).save("p1", _manifest(2, "functional"))
+
+    freshness = store.freshness("p1", latest_requirements_version=2, core_challenge_ids=set())
+
+    assert freshness["as-is-report-v1"].state == "current"
+
+
+def test_editorial_change_marks_artifact_outdated_not_stale(tmp_path):
+    """再生成は要らないが、差分の確認は促す。"""
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="as-is-report", requirements_version=1))
+    ManifestStore(storage).save("p1", _manifest(2, "as_is", editorial=True))
+
+    freshness = store.freshness("p1", latest_requirements_version=2, core_challenge_ids=set())
+
+    assert freshness["as-is-report-v1"].state == "outdated"
+
+
+def test_stale_propagates_from_parent_to_child(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="as-is-report", requirements_version=1))
+    store.save("p1", _artifact(type="slides", slide_kind="discussion",
+                               requirements_version=1, derived_from=["as-is-report-v1"]))
+    ManifestStore(storage).save("p1", _manifest(2, "as_is"))
+
+    freshness = store.freshness("p1", latest_requirements_version=2, core_challenge_ids=set())
+
+    assert freshness["slides-v1"].state == "stale"
+    assert "as-is-report-v1" in freshness["slides-v1"].reasons[0]
+
+
+def test_missing_parent_is_reported_as_stale_not_raised(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="as-is-report", requirements_version=1))
+    store.save("p1", _artifact(type="slides", slide_kind="discussion",
+                               requirements_version=1, derived_from=["as-is-report-v1"]))
+    storage.put("projects/p1/artifacts/slides-v1", {
+        **storage.get("projects/p1/artifacts/slides-v1"),
+        "derived_from": ["as-is-report-v9"],
+    })
+
+    freshness = store.freshness("p1", latest_requirements_version=1, core_challenge_ids=set())
+
+    assert freshness["slides-v1"].state == "stale"
+
+
+def test_uncovered_core_challenge_makes_prfaq_stale(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="mini-prfaq", requirements_version=1,
+                               covered_challenge_ids=["ch-1"]))
+
+    freshness = store.freshness("p1", latest_requirements_version=1,
+                                core_challenge_ids={"ch-1", "ch-2"})
+
+    assert freshness["mini-prfaq-v1"].state == "stale"
+    assert "ch-2" in freshness["mini-prfaq-v1"].reasons[0]
+
+
+def test_unset_coverage_is_outdated_not_stale(tmp_path):
+    """推測によるバックフィルはしない。"""
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="mini-prfaq", requirements_version=1))
+
+    freshness = store.freshness("p1", latest_requirements_version=1,
+                                core_challenge_ids={"ch-1"})
+
+    assert freshness["mini-prfaq-v1"].state == "outdated"
+
+
+def test_coverage_is_ignored_for_non_coverage_types(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="as-is-report", requirements_version=1))
+
+    freshness = store.freshness("p1", latest_requirements_version=1,
+                                core_challenge_ids={"ch-1"})
+
+    assert freshness["as-is-report-v1"].state == "current"
+
+
+def test_stale_citation_makes_artifact_stale(tmp_path):
+    """researchは要件に依存しない。
+
+    引用ファクトの鮮度切れでは陳腐化する。
+    """
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    store.save("p1", _artifact(type="research", cited_facts=["fact-1"], content="調査"))
+
+    freshness = store.freshness(
+        "p1", latest_requirements_version=1, core_challenge_ids=set(),
+        is_citation_stale=lambda a, today: list(a.cited_facts),
+    )
+
+    assert freshness["research-v1"].state == "stale"
+
+def test_stale_citation_is_not_downgraded_by_editorial_change(tmp_path):
+    """引用が古いのに文言修正だけで outdated へ降格してはならない。"""
+    storage = LocalJsonStorage(tmp_path)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="as-is-report", requirements_version=1,
+                               cited_facts=["fact-1"]))
+    ManifestStore(storage).save("p1", _manifest(2, "as_is", editorial=True))
+
+    freshness = store.freshness("p1", latest_requirements_version=2,
+                                core_challenge_ids=set(),
+                                is_citation_stale=lambda a, today: list(a.cited_facts))
+
+    assert freshness["as-is-report-v1"].state == "stale"
+
+
+def test_uncovered_challenges_are_exposed_as_structured_field(tmp_path):
+    """診断側が reasons の文字列一致で判定しないための構造化フィールド。"""
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    store.save("p1", _artifact(type="mini-prfaq", requirements_version=1,
+                               covered_challenge_ids=["ch-1"]))
+
+    freshness = store.freshness("p1", latest_requirements_version=1,
+                                core_challenge_ids={"ch-1", "ch-2"})
+
+    assert freshness["mini-prfaq-v1"].uncovered_challenge_ids == ["ch-2"]
