@@ -67,6 +67,16 @@ def _save_requirements(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
 
 
+def _save_minimal_requirements(tmp_path: Path, project: str) -> None:
+    doc = {"project": project}
+    f = tmp_path / f"{project}-req.json"
+    f.write_text(json.dumps(doc), encoding="utf-8")
+    result = runner.invoke(
+        app, ["requirements", "save", "--project", project, "--file", str(f)]
+    )
+    assert result.exit_code == 0, result.output
+
+
 def test_requirements_save_and_get(medo_home: Path):
     _save_requirements(medo_home)
     result = runner.invoke(app, ["requirements", "get", "--project", "yoyaku", "--format", "json"])
@@ -434,3 +444,78 @@ def test_requirements_save_declares_editorial_sections(tmp_path):
 
     assert result.exit_code == 0
     assert "saved: v2" in result.stdout
+
+
+def test_check_add_records_result(tmp_path):
+    _save_minimal_requirements(tmp_path, "p1")
+
+    result = runner.invoke(app, [
+        "check", "add", "--project", "p1", "--check", "reality_gap", "--result", "completed",
+    ])
+
+    assert result.exit_code == 0
+    assert "recorded: ev-" in result.stdout
+
+
+def test_check_add_rejects_undeterminable_without_note(tmp_path):
+    _save_minimal_requirements(tmp_path, "p1")
+
+    result = runner.invoke(app, [
+        "check", "add", "--project", "p1", "--check", "to_be_articulation",
+        "--result", "undeterminable",
+    ])
+
+    assert result.exit_code == 1
+    assert "note" in result.stderr
+
+
+def test_check_add_accepts_disposition(tmp_path):
+    _save_minimal_requirements(tmp_path, "p1")
+
+    result = runner.invoke(app, [
+        "check", "add", "--project", "p1", "--check", "to_be_articulation",
+        "--result", "undeterminable", "--note", "方向性が未定",
+        "--disposition", "promoted",
+    ])
+
+    assert result.exit_code == 0
+
+
+def test_respond_add_rejects_unknown_stakeholder(tmp_path):
+    _save_minimal_requirements(tmp_path, "p1")
+
+    result = runner.invoke(app, [
+        "respond", "add", "--project", "p1", "--stakeholder", "sh-99",
+        "--purpose", "to_be_go_ahead", "--reaction", "agreed",
+    ])
+
+    assert result.exit_code == 1
+    assert "sh-99" in result.stderr
+
+
+def test_checkpoint_answer_requires_existing_milestone(tmp_path):
+    _save_minimal_requirements(tmp_path, "p1")
+
+    result = runner.invoke(app, [
+        "checkpoint", "answer", "--project", "p1", "--responds-to", "ev-99",
+        "--answer", "generate",
+    ])
+
+    assert result.exit_code == 1
+
+
+def test_requirements_save_records_milestone_through_cli(tmp_path):
+    """実利用の経路で節目が記録されないと、actionsが機能しない。"""
+    from medo_core.config import get_storage
+    from medo_core.events import EventStore
+
+    doc = {"project": "p1", "as_is": [{"text": "実態", "visibility": "internal"}]}
+    f = tmp_path / "req.json"
+    f.write_text(json.dumps(doc), encoding="utf-8")
+    runner.invoke(app, ["requirements", "save", "--project", "p1", "--file", str(f)])
+
+    events = EventStore(get_storage()).list("p1")
+
+    assert [event.condition for event in events if event.kind == "milestone"] == [
+        "internal_as_is_first_added"
+    ]

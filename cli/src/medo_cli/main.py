@@ -13,6 +13,14 @@ from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta, 
 from medo_core.facts import Fact, FactStore
 from medo_core.fermi import FermiModel, evaluate
 from medo_core.config import get_knowledge_root, get_storage
+from medo_core.events import (
+    ArtifactTarget,
+    AsIsReportReviewed,
+    CheckRecorded,
+    RequirementsTarget,
+    StakeholderResponded,
+    ToBeCheckpointRecorded,
+)
 from medo_core.knowledge import (
     KnowledgeEntry,
     KnowledgeStore,
@@ -21,6 +29,7 @@ from medo_core.knowledge import (
 )
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.status import project_status, stale_artifact_ids
+from medo_core.workflow import WorkflowRecorder
 from medo_cli.trace import Tracer
 
 app = typer.Typer(no_args_is_help=True, help="Medo(目処) — クラウド非依存の上流工程Agent CLI")
@@ -29,16 +38,32 @@ knowledge_app = typer.Typer(no_args_is_help=True)
 artifacts_app = typer.Typer(no_args_is_help=True)
 facts_app = typer.Typer(no_args_is_help=True)
 fermi_app = typer.Typer(no_args_is_help=True)
+check_app = typer.Typer(help="発見プロセスの確認結果を記録する")
+review_app = typer.Typer(help="AsIsレポートと討議用スライドのレビューを記録する")
+respond_app = typer.Typer(help="ステークホルダーの反応を記録する")
+checkpoint_app = typer.Typer(help="ToBeチェックポイントに回答する")
 app.add_typer(requirements_app, name="requirements", help="要件ドキュメント(バージョン管理)")
 app.add_typer(knowledge_app, name="knowledge", help="技術ナレッジ(案件横断)/ 案件固有ナレッジ")
 app.add_typer(artifacts_app, name="artifacts", help="生成物の保存・一覧")
 app.add_typer(facts_app, name="facts", help="市場・国策・業界動向・個社ファクト(出典必須)")
 app.add_typer(fermi_app, name="fermi", help="フェルミ推定(仮定明示・コードが計算)")
+app.add_typer(check_app, name="check")
+app.add_typer(review_app, name="review")
+app.add_typer(respond_app, name="respond")
+app.add_typer(checkpoint_app, name="checkpoint")
 
 
 def _fail(reason: str) -> None:
     typer.echo(f"error: {reason}", err=True)
     raise typer.Exit(code=1)
+
+
+def _recorder() -> WorkflowRecorder:
+    return WorkflowRecorder(get_storage())
+
+
+def _latest_version(project: str) -> int:
+    return RequirementsStore(get_storage()).latest_version(project)
 
 
 @requirements_app.command("save")
@@ -59,12 +84,150 @@ def requirements_save(
         if not isinstance(data, dict):
             raise ValueError("YAMLのトップレベルはマッピングである必要があります")
         doc = RequirementsDoc.model_validate({**data, "project": project})
-        version = RequirementsStore(get_storage()).save(
+        version = WorkflowRecorder(get_storage()).save_requirements(
             project, doc, editorial_sections=tuple(editorial)
         )
     except Exception as e:  # yaml.YAMLError, ValueError, pydantic.ValidationError
         _fail(f"要件のスキーマ不正: {e}")
     typer.echo(f"saved: v{version}")
+
+
+@check_app.command("add")
+def check_add(
+    project: str = typer.Option(..., "--project"),
+    check: str = typer.Option(..., "--check"),
+    result: str = typer.Option(..., "--result", help="completed|finding|undeterminable"),
+    note: str = typer.Option("", "--note"),
+    refs: str = typer.Option("", "--refs", help="finding の該当ノードID(カンマ区切り)"),
+    disposition: str = typer.Option(
+        "open",
+        "--disposition",
+        help=(
+            "undeterminable の扱い: open|deferred|promoted。"
+            "変更時は同じ項目をrecordし直して更新する"
+        ),
+    ),
+    artifact: str | None = typer.Option(
+        None, "--artifact", help="artifact束縛の check の対象ID"
+    ),
+) -> None:
+    """チェック項目の確認結果を記録する。"""
+    try:
+        version = _latest_version(project)
+        target = (
+            ArtifactTarget(artifact_id=artifact)
+            if artifact
+            else RequirementsTarget(version=version)
+        )
+        event = CheckRecorded(
+            target=target,
+            occurred_on=date.today().isoformat(),
+            requirements_version=version,
+            round_id=0,
+            check=check,
+            result=result,
+            note=note,
+            finding_refs=[r.strip() for r in refs.split(",") if r.strip()],
+            disposition=disposition,
+        )
+        event_id = _recorder().record(project, event)
+    except Exception as e:
+        _fail(str(e))
+    typer.echo(f"recorded: {event_id}")
+
+
+@review_app.command("add")
+def review_add(
+    project: str = typer.Option(..., "--project"),
+    report: str = typer.Option(..., "--report", help="レビュー対象の as-is-report ID"),
+    slides: str = typer.Option(..., "--slides", help="同時にレビューした討議用スライドID"),
+    outcome: str = typer.Option(..., "--outcome", help="approved|changes_requested"),
+    refs: str = typer.Option("", "--refs", help="要件側の所見ノードID(カンマ区切り)"),
+    slide_findings: list[str] = typer.Option(
+        [], "--slide-finding", help="スライド固有の所見(複数可)"
+    ),
+    reviewed_by: str = typer.Option("human", "--reviewed-by"),
+) -> None:
+    """AsIsレポートと討議用スライドのレビュー結果を記録する。"""
+    try:
+        event = AsIsReportReviewed(
+            target=ArtifactTarget(artifact_id=report),
+            occurred_on=date.today().isoformat(),
+            requirements_version=_latest_version(project),
+            round_id=0,
+            outcome=outcome,
+            reviewed_slides_id=slides,
+            finding_refs=[r.strip() for r in refs.split(",") if r.strip()],
+            slide_findings=list(slide_findings),
+            reviewed_by=reviewed_by,
+        )
+        event_id = _recorder().record(project, event)
+    except Exception as e:
+        _fail(str(e))
+    typer.echo(f"recorded: {event_id}")
+
+
+@respond_app.command("add")
+def respond_add(
+    project: str = typer.Option(..., "--project"),
+    stakeholder: str = typer.Option(..., "--stakeholder"),
+    purpose: str = typer.Option(
+        ..., "--purpose", help="as_is_alignment|to_be_go_ahead|phase_signoff"
+    ),
+    reaction: str = typer.Option(
+        ..., "--reaction", help="empathized|acknowledged|agreed|objected|unclear"
+    ),
+    artifact: str | None = typer.Option(None, "--artifact", help="生成物宛ての場合の対象ID"),
+    note: str = typer.Option("", "--note"),
+) -> None:
+    """本人が対話で得た他者の反応を記録する(本人性の検証はしない)。"""
+    try:
+        version = _latest_version(project)
+        target = (
+            ArtifactTarget(artifact_id=artifact)
+            if artifact
+            else RequirementsTarget(version=version)
+        )
+        event = StakeholderResponded(
+            target=target,
+            occurred_on=date.today().isoformat(),
+            requirements_version=version,
+            round_id=0,
+            stakeholder_id=stakeholder,
+            purpose=purpose,
+            reaction=reaction,
+            note=note,
+        )
+        event_id = _recorder().record(project, event)
+    except Exception as e:
+        _fail(str(e))
+    typer.echo(f"recorded: {event_id}")
+
+
+@checkpoint_app.command("answer")
+def checkpoint_answer(
+    project: str = typer.Option(..., "--project"),
+    responds_to: str = typer.Option(..., "--responds-to", help="回答対象の節目イベントID"),
+    answer: str = typer.Option(..., "--answer", help="generate|defer"),
+    focus: str = typer.Option("", "--focus", help="この周回で検証する仮説ID"),
+) -> None:
+    """ToBeを出す/更新するかの判断を記録する。"""
+    try:
+        version = _latest_version(project)
+        event = ToBeCheckpointRecorded(
+            target=RequirementsTarget(version=version),
+            occurred_on=date.today().isoformat(),
+            requirements_version=version,
+            round_id=0,
+            answer=answer,
+            responds_to=responds_to,
+        )
+        event_id = _recorder().record(project, event)
+        if focus:
+            _recorder().set_focus(project, responds_to, focus)
+    except Exception as e:
+        _fail(str(e))
+    typer.echo(f"recorded: {event_id}")
 
 
 @requirements_app.command("get")
