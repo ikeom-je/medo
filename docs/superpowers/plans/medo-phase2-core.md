@@ -2568,6 +2568,32 @@ def test_list_returns_events_in_id_order(tmp_path):
     assert store.list("p1")[-1].id == "ev-11"
 
 
+def test_response_records_what_the_agreement_was_about():
+    """同じagreedでも「現状認識に納得」と「次工程を承認」は別物。"""
+    ev = StakeholderResponded(
+        target=ArtifactTarget(artifact_id="as-is-report-v1"), occurred_on="2026-08-30",
+        requirements_version=1, round_id=1,
+        stakeholder_id="sh-1", purpose="to_be_go_ahead", reaction="agreed",
+    )
+
+    assert ev.purpose == "to_be_go_ahead"
+
+
+def test_checkpoint_answer_points_at_the_milestone_it_answers():
+    ev = ToBeCheckpointRecorded(
+        target=RequirementsTarget(version=1), occurred_on="2026-08-30",
+        requirements_version=1, round_id=1, answer="generate", responds_to="ev-3",
+    )
+
+    assert ev.responds_to == "ev-3"
+
+
+def test_occurred_on_rejects_a_non_iso_date():
+    """日付が自由文だと、周回や祖先の判定が後から追えなくなる。"""
+    with pytest.raises(ValidationError):
+        _check(occurred_on="2026/08/30")
+
+
 def test_events_of_different_kinds_round_trip(tmp_path):
     store = EventStore(LocalJsonStorage(tmp_path))
     store.append("p1", _check())
