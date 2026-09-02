@@ -97,9 +97,30 @@ def detect_milestone(
 
 class WorkflowRecorder:
     def __init__(self, storage: Storage):
+        self._storage = storage
         self._events = EventStore(storage)
         self._artifacts = ArtifactStore(storage)
         self._requirements = RequirementsStore(storage)
+
+    def set_focus(
+        self, project_id: str, milestone_id: str, hypothesis_id: str
+    ) -> None:
+        self._validate_hypothesis(project_id, hypothesis_id)
+        milestone = next(
+            (
+                event
+                for event in self._events.list(project_id)
+                if event.id == milestone_id and isinstance(event, MilestoneDetected)
+            ),
+            None,
+        )
+        if milestone is None:
+            raise ValueError(f"節目イベントが存在しません: {milestone_id}")
+        updated = milestone.model_copy(update={"focus_hypothesis_id": hypothesis_id})
+        self._storage.put(
+            f"projects/{project_id}/events/{milestone_id}",
+            updated.model_dump(mode="json"),
+        )
 
     def record(self, project_id: str, event) -> str:
         existing = self._events.list(project_id)
