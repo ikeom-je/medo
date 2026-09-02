@@ -45,15 +45,25 @@ def _fail(reason: str) -> None:
 def requirements_save(
     project: str = typer.Option(...),
     file: Path = typer.Option(..., exists=True, readable=True),
-):
+    editorial: list[str] = typer.Option(
+        [],
+        "--editorial",
+        help=(
+            "誤字・言い回しの修正のみと宣言するセクション名"
+            "(text以外に差分があるセクションの宣言は無視される)"
+        ),
+    ),
+) -> None:
     try:
         data = yaml.safe_load(file.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("YAMLのトップレベルはマッピングである必要があります")
         doc = RequirementsDoc.model_validate({**data, "project": project})
+        version = RequirementsStore(get_storage()).save(
+            project, doc, editorial_sections=tuple(editorial)
+        )
     except Exception as e:  # yaml.YAMLError, ValueError, pydantic.ValidationError
         _fail(f"要件のスキーマ不正: {e}")
-    version = RequirementsStore(get_storage()).save(project, doc)
     typer.echo(f"saved: v{version}")
 
 

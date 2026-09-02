@@ -333,3 +333,55 @@ def test_fermi_calc_missing_fact_fails(medo_home: Path):
     model.write_text(FERMI_YAML, encoding="utf-8")
     result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--file", str(model)])
     assert result.exit_code == 1 and "error:" in result.output
+
+
+def test_requirements_save_accepts_new_sections(tmp_path):
+    doc = {
+        "project": "p1",
+        "as_is": [{"text": "紙の伝票を手入力", "visibility": "internal"}],
+    }
+    f = tmp_path / "req.json"
+    f.write_text(json.dumps(doc), encoding="utf-8")
+
+    result = runner.invoke(app, ["requirements", "save", "--project", "p1", "--file", str(f)])
+
+    assert result.exit_code == 0
+    assert "saved: v1" in result.stdout
+
+
+def test_requirements_save_reports_validation_error_without_guessing(tmp_path):
+    doc = {"project": "p1", "gaps": [{"text": "乖離", "from_as_is": ["as-99"]}]}
+    f = tmp_path / "req.json"
+    f.write_text(json.dumps(doc), encoding="utf-8")
+
+    result = runner.invoke(app, ["requirements", "save", "--project", "p1", "--file", str(f)])
+
+    assert result.exit_code == 1
+    assert "as-99" in result.stderr
+
+
+def test_requirements_save_declares_editorial_sections(tmp_path):
+    doc = {"project": "p1", "to_be": [{"text": "自動化"}]}
+    f = tmp_path / "req.json"
+    f.write_text(json.dumps(doc), encoding="utf-8")
+    runner.invoke(app, ["requirements", "save", "--project", "p1", "--file", str(f)])
+
+    saved = json.loads(f.read_text(encoding="utf-8"))
+    saved["to_be"] = [{"id": "tb-1", "text": "自動化されている"}]
+    f.write_text(json.dumps(saved), encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "requirements",
+            "save",
+            "--project",
+            "p1",
+            "--file",
+            str(f),
+            "--editorial",
+            "to_be",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "saved: v2" in result.stdout

@@ -1627,13 +1627,18 @@ def requirements_save(
     ),
 ) -> None:
     """要件ドキュメントを保存する(バージョンは自動採番)。"""
-    raw = json.loads(file.read_text(encoding="utf-8"))
-    doc = RequirementsDoc.model_validate(raw)
-    version = _requirements_store().save(
-        project, doc, editorial_sections=tuple(editorial)
-    )
+    try:
+        data = yaml.safe_load(file.read_text(encoding="utf-8"))
+        doc = RequirementsDoc.model_validate(data)
+        version = _requirements_store().save(
+            project, doc, editorial_sections=tuple(editorial)
+        )
+    except Exception as e:
+        _fail(f"要件の保存に失敗: {e}")
     typer.echo(f"saved: v{version}")
 ```
+
+**既存の `yaml.safe_load` を維持する**(YAMLはJSONの上位集合なので両方読める。`json.loads` に置き換えるとYAML入力が壊れる)。**保存時の検証例外も `_fail()` の対象に含める** — Task 6 で `save` が `ValueError` を投げるようになったため、囲まないとスタックトレースがそのまま出る。
 
 **この時点では `RequirementsStore.save` を直接呼ぶ**。`WorkflowRecorder` は Task 12 で作るため、節目検出への切り替えは **Task 16 Step 4** で行う(それまで `medo requirements save` は節目を記録しない)。
 
