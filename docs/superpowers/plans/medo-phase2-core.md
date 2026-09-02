@@ -5678,6 +5678,10 @@ status が収集と提示を兼ねると、1関数が3つの責務を持ちテ�
 
 **既存シグネチャを壊さない**: 現行は `project_status(storage, project_id, knowledge_root, today=None)` で、`knowledge_root` は位置引数。**位置引数のまま残し、新規は全てキーワード専用にする**。要件が存在しないプロジェクトは、例外にせず現行どおり `next_step: "hearing"` を返す(CLIの既存挙動を壊さないため)。
 
+**「`actions` は必ず1件以上返す」は要件が存在する場合の規則である**。要件が無いプロジェクトはフェーズ1のフラットな形をそのまま返し、`actions` を持たない。両立しないため後方互換を優先する — この段階で提示できる行動は `next_step: "hearing"` が既に表しており、`actions` を足す価値より既存Skillを壊さないことが勝る。
+
+**`phase_readiness` には決裁者IDの集合を渡す**(Task 18 で追加した引数)。`ctx.doc.stakeholders` から `is_decision_maker=True` のIDを集める。
+
 - [ ] **Step 1: 失敗するテストを書く**
 
 `core/tests/test_status.py` に追記(既存テストは変更しない):

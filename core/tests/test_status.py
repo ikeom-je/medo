@@ -3,7 +3,7 @@ from datetime import date
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta
 from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
 from medo_core.facts import Fact, FactStore
-from medo_core.nodes import Challenge
+from medo_core.nodes import AsIs, Challenge, Stakeholder
 from medo_core.requirements import (
     FunctionalRequirement,
     RequirementsDoc,
@@ -11,6 +11,7 @@ from medo_core.requirements import (
 )
 from medo_core.status import project_status, stale_artifact_ids
 from medo_core.storage import LocalJsonStorage
+from medo_core.workflow import WorkflowRecorder
 
 TODAY = date(2026, 7, 12)
 
@@ -49,6 +50,16 @@ def _prfaq(**kw) -> Artifact:
     )
     base.update(kw)
     return Artifact(**base)
+
+
+def _project(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    WorkflowRecorder(storage).save_requirements("p1", RequirementsDoc(
+        project="p1",
+        as_is=[AsIs(text="実態", visibility="internal")],
+        stakeholders=[Stakeholder(text="部長", is_decision_maker=True)],
+    ), today=TODAY)
+    return storage
 
 
 def test_no_requirements_suggests_hearing(tmp_path):
@@ -114,3 +125,82 @@ def test_regeneration_recovers_via_latest_per_type(tmp_path):
     assert project_status(s, "yoyaku", k, today=TODAY)["next_step"] == "regenerate-stale-artifacts"
     art.save("yoyaku", _mini(requirements_version=2))  # 再生成
     assert project_status(s, "yoyaku", k, today=TODAY)["next_step"] == "grow-prfaq"
+
+
+def _codes(status: dict) -> list[str]:
+    return [a["code"] for a in status["actions"]]
+
+
+def test_status_returns_four_branches_in_full_view(tmp_path):
+    storage = _project(tmp_path)
+
+    status = project_status(storage, "p1", tmp_path, view="full")
+
+    assert set(status) >= {"model", "workflow", "readiness", "actions", "diagnostic_phase"}
+
+
+def test_summary_view_puts_actions_first(tmp_path):
+    """Skillが最初に読むものを「足りない」ではなく「次にできること」にする。"""
+    storage = _project(tmp_path)
+
+    status = project_status(storage, "p1", tmp_path)
+
+    assert list(status)[0] == "actions"
+
+
+def test_summary_view_omits_failed_conditions(tmp_path):
+    status = project_status(_project(tmp_path), "p1", tmp_path)
+
+    assert "failed_conditions" not in status["readiness"]
+
+
+def test_branch_view_returns_only_that_branch(tmp_path):
+    status = project_status(_project(tmp_path), "p1", tmp_path, view="model")
+
+    assert set(status) == {"project", "diagnostic_phase", "model"}
+
+
+def test_missing_project_still_returns_phase1_shape(tmp_path):
+    """既存CLIの挙動を壊さない。"""
+    status = project_status(LocalJsonStorage(tmp_path), "unknown", tmp_path)
+
+    assert status["next_step"] == "hearing"
+
+
+def test_discovery_phase_still_returns_actions(tmp_path):
+    """readiness を出さない段階でも、次に何をすべきかは示す。"""
+    status = project_status(_project(tmp_path), "p1", tmp_path)
+
+    assert "draft_strawman_to_be" in _codes(status)
+
+
+def test_unanswered_milestone_is_the_top_action(tmp_path):
+    status = project_status(_project(tmp_path), "p1", tmp_path)
+
+    assert _codes(status)[0] == "answer_tobe_checkpoint"
+
+
+def test_next_step_keeps_phase1_vocabulary(tmp_path):
+    """フェーズ1のSkillは next_step を完全一致で分岐している。"""
+    status = project_status(_project(tmp_path), "p1", tmp_path)
+
+    assert status["next_step"] in {
+        "hearing", "propose-options", "grow-prfaq",
+        "regenerate-stale-artifacts", "up-to-date",
+    }
+
+
+def test_summary_view_keeps_phase1_compatibility_fields(tmp_path):
+    status = project_status(_project(tmp_path), "p1", tmp_path)
+
+    assert set(status) >= {"requirements", "facts", "artifacts", "next_step"}
+
+
+def test_run_check_is_not_offered_without_its_target(tmp_path):
+    """討議用スライドが無い状態で expression_safety を求めても実行できない。"""
+    codes_with_refs = [
+        a for a in project_status(_project(tmp_path), "p1", tmp_path)["actions"]
+        if a["code"] == "run_check"
+    ]
+
+    assert all("expression_safety" not in a.get("refs", []) for a in codes_with_refs)
