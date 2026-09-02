@@ -5558,13 +5558,16 @@ def _open_review_findings(events: list, artifacts: dict, doc) -> list[str]:
     解消は (1) 同系列の後継への approved (2) finding_refs が指すノードが
     すべて解消(削除または confirmed)されたとき。slide_findings は
     機械判定できないため (1) でのみ解消する。
+
+    「同系列の後継」は同じ type かつ大きい version で判定する。要件版だけで
+    比較すると、同じ要件版から作り直した別レポートへの承認まで解消扱いになる。
     """
     reviews = [e for e in events if e.kind == "asis_review"]
-    approved_versions = {
-        artifacts[e.target.artifact_id].requirements_version
+    approved = [
+        artifacts[e.target.artifact_id]
         for e in reviews
         if e.outcome == "approved" and e.target.artifact_id in artifacts
-    }
+    ]
     node_state = {
         n.id: n.confidence
         for section in ("gaps", "challenges", "open_questions")
@@ -5574,8 +5577,11 @@ def _open_review_findings(events: list, artifacts: dict, doc) -> list[str]:
     for e in reviews:
         if e.outcome != "changes_requested":
             continue
-        version = artifacts.get(e.target.artifact_id)
-        if version and any(v >= version.requirements_version for v in approved_versions):
+        reviewed = artifacts.get(e.target.artifact_id)
+        if reviewed and any(
+            successor.type == reviewed.type and successor.version > reviewed.version
+            for successor in approved
+        ):
             continue
         if e.slide_findings:
             open_refs.append(e.id)
