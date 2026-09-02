@@ -3781,6 +3781,7 @@ class EffectiveResponse(BaseModel):
     event_id: str
     subsumed_by: str | None = None
     expired: bool = False
+    on_current_target: bool = False
 
 
 def resolve_convergence_target(
@@ -3864,6 +3865,7 @@ def fold_responses(
         effective.append(EffectiveResponse(
             stakeholder_id=stakeholder_id, purpose=purpose,
             reaction=chosen.reaction, event_id=chosen.id, expired=expired,
+            on_current_target=bool(current),
         ))
 
     return _apply_subsumption(effective)
@@ -5188,7 +5190,8 @@ def phase_readiness(
     if current_final is None or freshness.get(current_final, Freshness()).state == "stale":
         failed.append({"code": "final_slides_missing_or_stale", "refs": []})
     elif not any(
-        r.purpose == "phase_signoff" and r.reaction == "agreed" and not r.expired
+        r.purpose == "phase_signoff" and r.reaction == "agreed"
+        and not r.expired and r.on_current_target
         for r in responses
     ):
         failed.append({"code": "phase_signoff_missing", "refs": []})
