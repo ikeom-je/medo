@@ -306,6 +306,55 @@ def test_artifacts_save_prfaq_requires_grown_from(medo_home: Path):
     assert result.exit_code == 1 and "error:" in result.output
 
 
+def test_artifacts_save_accepts_derived_from_and_slide_kind(tmp_path):
+    _save_requirements(tmp_path)
+    content = tmp_path / "report.md"
+    content.write_text("# 現状", encoding="utf-8")
+    runner.invoke(app, [
+        "artifacts", "save", "--project", "yoyaku", "--type", "as-is-report",
+        "--requirements-version", "1", "--generated-by", "claude", "--file", str(content),
+    ])
+    slides = tmp_path / "slides.md"
+    slides.write_text("---\nmarp: true\n---\n# 現状", encoding="utf-8")
+
+    result = runner.invoke(app, [
+        "artifacts", "save", "--project", "yoyaku", "--type", "slides",
+        "--slide-kind", "discussion", "--derived-from", "as-is-report-v1",
+        "--requirements-version", "1", "--generated-by", "gemini", "--file", str(slides),
+    ])
+
+    assert result.exit_code == 0
+    assert "saved: slides-v1" in result.stdout
+
+
+def test_artifacts_save_rejects_slides_without_slide_kind(tmp_path):
+    _save_requirements(tmp_path)
+    slides = tmp_path / "slides.md"
+    slides.write_text("# x", encoding="utf-8")
+
+    result = runner.invoke(app, [
+        "artifacts", "save", "--project", "yoyaku", "--type", "slides",
+        "--requirements-version", "1", "--generated-by", "claude", "--file", str(slides),
+    ])
+
+    assert result.exit_code == 1
+    assert "slide_kind" in result.stderr
+
+
+def test_artifacts_save_records_covered_challenges(tmp_path):
+    _save_requirements(tmp_path)
+    content = tmp_path / "c.md"
+    content.write_text("# 比較", encoding="utf-8")
+
+    result = runner.invoke(app, [
+        "artifacts", "save", "--project", "yoyaku", "--type", "comparison",
+        "--covers", "ch-1,ch-2", "--requirements-version", "1",
+        "--generated-by", "claude", "--file", str(content),
+    ])
+
+    assert result.exit_code == 0
+
+
 def test_fermi_calc_saves_artifact_and_recalcs(medo_home: Path):
     _save_requirements(medo_home)
     runner.invoke(

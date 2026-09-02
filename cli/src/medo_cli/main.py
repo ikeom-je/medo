@@ -9,7 +9,7 @@ from typing import Literal
 
 import typer
 import yaml
-from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta
+from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta, RejectedOption
 from medo_core.facts import Fact, FactStore
 from medo_core.fermi import FermiModel, evaluate
 from medo_core.config import get_knowledge_root, get_storage
@@ -298,6 +298,18 @@ def artifacts_save(
     grown_from: str = typer.Option("", help="prfaq用: <mini-prfaq-vN>:<打ち手名>"),
     generated_by: str | None = typer.Option(None),
     requirements_version: int = typer.Option(...),
+    slide_kind: str | None = typer.Option(
+        None, "--slide-kind", help="slides用: discussion|final"
+    ),
+    derived_from: str = typer.Option(
+        "", "--derived-from", help="内容依存の親artifact ID(カンマ区切り)"
+    ),
+    covers: str = typer.Option("", "--covers", help="扱った課題ID(カンマ区切り)"),
+    rejected: list[str] = typer.Option(
+        [],
+        "--rejected",
+        help="見送った案: <名前>:<理由>[:<受け入れたリスク>](複数可)",
+    ),
 ):
     try:
         option_metas = [
@@ -317,6 +329,15 @@ def artifacts_save(
             options=option_metas,
             grown_from=gf,
             generated_by=generated_by,
+            slide_kind=slide_kind,
+            derived_from=[c for c in derived_from.split(",") if c],
+            covered_challenge_ids=[c for c in covers.split(",") if c] if covers else None,
+            rejected_options=[
+                RejectedOption(name=n, reason=r, accepted_risk=risk)
+                for n, r, risk in (
+                    (*v.split(":", 2), "", "")[:3] for v in rejected
+                )
+            ],
             content=file.read_text(encoding="utf-8"),
         )
     except Exception as e:
