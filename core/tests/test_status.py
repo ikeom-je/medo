@@ -1,6 +1,6 @@
 from datetime import date
 
-from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom
+from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta
 from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
 from medo_core.facts import Fact, FactStore
 from medo_core.nodes import Challenge
@@ -32,6 +32,7 @@ def _mini(**kw) -> Artifact:
     base = dict(
         project="yoyaku", type="mini-prfaq", requirements_version=1,
         generated_by="claude", content="# 候補セット",
+        options=[OptionMeta(name="多言語AI音声予約")],
     )
     base.update(kw)
     return Artifact(**base)
