@@ -3361,14 +3361,17 @@ def test_records_only_one_milestone_when_several_conditions_hold(tmp_path):
 
 
 def test_text_only_edit_is_not_a_milestone(tmp_path):
+    """本文の精緻化そのものは節目にしない。初回保存で立った節目と区別する。"""
     storage = LocalJsonStorage(tmp_path)
     _saved(storage, as_is=[AsIs(text="手作業", visibility="internal")])
+    before = len([e for e in EventStore(storage).list("p1") if e.kind == "milestone"])
+
     doc = RequirementsStore(storage).get("p1")
     doc.as_is[0] = doc.as_is[0].model_copy(update={"text": "紙の伝票を手入力"})
     WorkflowRecorder(storage).save_requirements("p1", doc, today=TODAY_DATE)
 
-    milestones = [e for e in EventStore(storage).list("p1") if e.kind == "milestone"]
-    assert milestones == []
+    after = [e for e in EventStore(storage).list("p1") if e.kind == "milestone"]
+    assert len(after) == before
 
 
 def test_save_requirements_rejects_fermi_ref_to_missing_variable(tmp_path):
