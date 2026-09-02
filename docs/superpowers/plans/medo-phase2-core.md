@@ -1969,16 +1969,31 @@ class Artifact(BaseModel):
         walk(artifact_id)
 ```
 
-- [ ] **Step 5: テストが通ることを確認**
+- [ ] **Step 5: 既存テストのfixtureを有効な状態に直す**
 
-Run: `uv run pytest core/tests/test_artifacts.py -v`
-Expected: 全て pass(既存テストも含む)
+新しい `grown_from` 検証は、**既存fixtureが作っていた不正な状態を正しく拒否する**。`core/tests/test_status.py` の `_mini()` は `options` が空のまま、`_prfaq()` が存在しない打ち手を `grown_from.option` に指している。
 
-- [ ] **Step 6: リントとコミット**
+```python
+def _mini(**kw) -> Artifact:
+    base = dict(
+        project="yoyaku", type="mini-prfaq", requirements_version=1,
+        generated_by="claude", content="# 候補セット",
+        options=[OptionMeta(name="多言語AI音声予約")],
+    )
+```
+
+`core/tests/test_artifacts.py` の既存ヘルパー `_artifact` は、Task 8 で追加するヘルパーと同名になる。**既存側を改名して両方を残す**(既存テストの意図を壊さない)。
+
+- [ ] **Step 6: テストが通ることを確認**
+
+Run: `uv run pytest -v`
+Expected: 全て pass(既存の `test_status.py` も含む)
+
+- [ ] **Step 7: リントとコミット**
 
 ```bash
 uv run ruff check .
-git add core/src/medo_core/artifacts.py core/tests/test_artifacts.py
+git add core/src/medo_core/artifacts.py core/tests/test_artifacts.py core/tests/test_status.py
 git commit -m "feat(core): 生成物に複数依存と用途フィールドを追加
 
 単一の任意親では、依存を書き忘れたときに陳腐化が伝播しない穴が残る。
