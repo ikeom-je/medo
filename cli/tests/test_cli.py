@@ -519,3 +519,10 @@ def test_requirements_save_records_milestone_through_cli(tmp_path):
     assert [event.condition for event in events if event.kind == "milestone"] == [
         "internal_as_is_first_added"
     ]
+
+
+def test_workflow_commands_are_available_after_split():
+    """分割後もコマンド体系は変わらない(Skill契約を壊さない)。"""
+    result = runner.invoke(app, ["check", "--help"])
+
+    assert result.exit_code == 0
