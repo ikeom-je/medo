@@ -8,7 +8,7 @@ from medo_core.diagnostics import (
     round_delta,
 )
 from medo_core.nodes import (
-    AsIs, Attempt, Bottleneck, Challenge, Gap, Hypothesis, Kpi, PromotionSource,
+    AsIs, Attempt, Bottleneck, Challenge, Constraint, Gap, Hypothesis, Kpi, PromotionSource,
     Stakeholder, ToBe,
 )
 from medo_core.requirements import RequirementsDoc
@@ -327,6 +327,41 @@ def test_round_delta_counts_undeterminable_only_on_first_detection():
     assert round_delta(None, _doc(), events, round_id=1)["undeterminable_found"] == \
         ["to_be_articulation"]
     assert round_delta(None, _doc(), events, round_id=2)["undeterminable_found"] == []
+
+
+def test_round_delta_ignores_progress_from_nodes_without_ids():
+    previous = _doc(
+        as_is=[AsIs(text="手作業", visibility="internal", confidence="open")],
+        to_be=[ToBe(text="自動化", confidence="open")],
+        challenges=[Challenge(text="後戻り", confidence="open")],
+        constraints=[Constraint(text="3か月", confidence="open")],
+    )
+    saved = _doc(
+        as_is=[AsIs(text="手作業", visibility="internal", confidence="confirmed")],
+        to_be=[ToBe(text="自動化", confidence="confirmed")],
+        challenges=[Challenge(text="後戻り", confidence="confirmed")],
+        constraints=[Constraint(text="3か月", confidence="confirmed")],
+    )
+
+    delta = round_delta(previous, saved, [], round_id=0)
+
+    assert delta["progress_count"] == 0
+
+
+def test_round_delta_counts_numbered_confidence_raise_among_unnumbered_nodes():
+    previous = _doc(as_is=[
+        AsIs(id="as-1", text="手作業", visibility="internal", confidence="open"),
+        AsIs(text="未採番の現状", visibility="internal", confidence="open"),
+    ])
+    saved = _doc(as_is=[
+        AsIs(id="as-1", text="手作業", visibility="internal", confidence="confirmed"),
+        AsIs(text="未採番の現状", visibility="internal", confidence="confirmed"),
+    ])
+
+    delta = round_delta(previous, saved, [], round_id=0)
+
+    assert delta["confidence_raised"] == ["as-1"]
+    assert delta["progress_count"] == 1
 
 
 def _final_slides():

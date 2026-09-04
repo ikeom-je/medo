@@ -6,6 +6,7 @@ status.py が収集と提示を兼ねると、1関数が3つの責務を持ち�
 
 from collections.abc import Callable
 from datetime import date
+from pathlib import Path
 
 from pydantic import BaseModel, PrivateAttr
 
@@ -58,11 +59,13 @@ class StatusContext(BaseModel):
 
 
 def make_citation_checker(
-    storage: Storage, project_id: str
+    storage: Storage, project_id: str, knowledge_root: Path | None = None
 ) -> Callable[[Artifact, date | None], list[str]]:
     """生成物のうち、欠落またはstaleな引用IDを返す判定関数を作る。"""
     facts = FactStore(storage)
-    knowledge = KnowledgeStore(get_knowledge_root())
+    knowledge = KnowledgeStore(
+        knowledge_root if knowledge_root is not None else get_knowledge_root()
+    )
 
     def citation_checker(artifact: Artifact, today: date | None) -> list[str]:
         stale = []
@@ -89,6 +92,7 @@ def collect(
     *,
     include_scope: tuple[str, ...] = ("core",),
     today: date | None = None,
+    knowledge_root: Path | None = None,
 ) -> StatusContext:
     reqs = RequirementsStore(storage)
     version = reqs.latest_version(project_id)
@@ -106,7 +110,7 @@ def collect(
     }
     freshness = ArtifactStore(storage).freshness(
         project_id, version, core_challenge_ids,
-        is_citation_stale=make_citation_checker(storage, project_id),
+        is_citation_stale=make_citation_checker(storage, project_id, knowledge_root),
         today=today,
     )
 

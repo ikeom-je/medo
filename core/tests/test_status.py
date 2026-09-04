@@ -62,6 +62,10 @@ def _project(tmp_path):
     return storage
 
 
+def _codes(status: dict) -> list[str]:
+    return [a["code"] for a in status["actions"]]
+
+
 def test_no_requirements_suggests_hearing(tmp_path):
     report = project_status(LocalJsonStorage(tmp_path), "yoyaku", tmp_path / "knowledge", today=TODAY)
     assert report["requirements"] is None and report["next_step"] == "hearing"
@@ -75,11 +79,21 @@ def test_requirements_only_suggests_propose_options(tmp_path):
     assert report["requirements"]["confidence_counts"]["confirmed"] == 2  # challenges+functional
 
 
-def test_mini_prfaq_suggests_grow_prfaq(tmp_path):
+def test_outdated_coverage_suggests_grow_prfaq_instead_of_regeneration(tmp_path):
     s = LocalJsonStorage(tmp_path)
     RequirementsStore(s).save("yoyaku", _doc())
     ArtifactStore(s).save("yoyaku", _mini())
-    assert project_status(s, "yoyaku", tmp_path / "knowledge", today=TODAY)["next_step"] == "grow-prfaq"
+    report = project_status(s, "yoyaku", tmp_path / "knowledge", today=TODAY)
+
+    assert {
+        "next_step": report["next_step"],
+        "stale": report["artifacts"][0]["stale"],
+        "regeneration_action": "regenerate_stale_artifacts" in _codes(report),
+    } == {
+        "next_step": "grow-prfaq",
+        "stale": False,
+        "regeneration_action": False,
+    }
 
 
 def test_prfaq_reaches_up_to_date(tmp_path):
@@ -114,21 +128,73 @@ def test_stale_cited_knowledge_triggers_regenerate(tmp_path):
     assert project_status(s, "yoyaku", k, today=TODAY)["next_step"] == "regenerate-stale-artifacts"
 
 
-def test_regeneration_recovers_via_latest_per_type(tmp_path):
+def test_fermi_does_not_become_stale_when_requirements_sections_change(tmp_path):
+    s = LocalJsonStorage(tmp_path)
+    store = RequirementsStore(s)
+    store.save("yoyaku", _doc())
+    ArtifactStore(s).save("yoyaku", Artifact(
+        project="yoyaku", type="fermi", requirements_version=1, content="{}",
+    ))
+    saved = store.get("yoyaku")
+    assert saved is not None
+    store.save("yoyaku", saved.model_copy(update={"goal": "予約業務を完全自動化する"}))
+
+    report = project_status(s, "yoyaku", tmp_path / "knowledge", today=TODAY)
+
+    assert (
+        [(row["id"], row["stale"]) for row in report["artifacts"]],
+        stale_artifact_ids(s, "yoyaku", tmp_path / "knowledge", today=TODAY),
+    ) == ([
+        ("fermi-v1", False),
+    ], [])
+
+
+def test_id_only_migration_does_not_mark_artifact_stale(tmp_path):
+    s = LocalJsonStorage(tmp_path)
+    s.put("projects/yoyaku/requirements/v1", {
+        "project": "yoyaku",
+        "version": 1,
+        "as_is": [{"text": "電話予約を手作業で受けている", "visibility": "internal"}],
+    })
+    ArtifactStore(s).save("yoyaku", Artifact(
+        project="yoyaku", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状",
+    ))
+    store = RequirementsStore(s)
+    doc = store.get("yoyaku")
+    assert doc is not None
+    store.save("yoyaku", doc, today=TODAY)
+
+    report = project_status(s, "yoyaku", tmp_path / "knowledge", today=TODAY)
+
+    assert report["artifacts"][0]["stale"] is False
+
+
+def test_regenerating_latest_artifact_recovers_from_dependent_section_change(tmp_path):
     s = LocalJsonStorage(tmp_path)
     store = RequirementsStore(s)
     art = ArtifactStore(s)
     k = tmp_path / "knowledge"
-    store.save("yoyaku", _doc())                       # 要件v1
-    art.save("yoyaku", _mini())                        # mini-prfaq-v1
-    store.save("yoyaku", _doc(goal="改"))              # 要件v2 → v1候補セットが陳腐化
+    store.save("yoyaku", _doc())
+    art.save("yoyaku", _mini(covered_challenge_ids=["ch-1"]))
+    saved = store.get("yoyaku")
+    assert saved is not None
+    changed = saved.challenges[0].model_copy(update={"text": "予約の取りこぼしが常態化"})
+    store.save("yoyaku", saved.model_copy(update={"challenges": [changed]}))
+
     assert project_status(s, "yoyaku", k, today=TODAY)["next_step"] == "regenerate-stale-artifacts"
-    art.save("yoyaku", _mini(requirements_version=2))  # 再生成
-    assert project_status(s, "yoyaku", k, today=TODAY)["next_step"] == "grow-prfaq"
+    art.save("yoyaku", _mini(requirements_version=2, covered_challenge_ids=["ch-1"]))
 
+    report = project_status(s, "yoyaku", k, today=TODAY)
 
-def _codes(status: dict) -> list[str]:
-    return [a["code"] for a in status["actions"]]
+    assert report["next_step"] == "grow-prfaq"
+    assert "regenerate_stale_artifacts" not in _codes(report)
+    assert report["artifacts"] == [{
+        "id": "mini-prfaq-v2",
+        "type": "mini-prfaq",
+        "requirements_version": 2,
+        "stale": False,
+    }]
 
 
 def test_status_returns_four_branches_in_full_view(tmp_path):
