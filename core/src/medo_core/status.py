@@ -5,43 +5,12 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from medo_core.artifacts import Artifact, ArtifactStore
 from medo_core.checks import CHECK_REGISTRY
-from medo_core.config import get_knowledge_root
 from medo_core.context import StatusContext, _current_artifact_ids, collect, workflow_branch
 from medo_core.diagnostics import model_diagnostics, phase_readiness, readiness
-from medo_core.facts import Fact, FactStore
-from medo_core.knowledge import KnowledgeStore
+from medo_core.facts import FactStore
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.storage import Storage
-
-
-def _knowledge_entry_stale(store: KnowledgeStore, entry_id: str, today: date | None) -> bool:
-    """引用ナレッジエントリがstaleまたは欠落ならTrue。"""
-    if "-" not in entry_id:
-        return True
-    kind, _ = entry_id.rsplit("-", 1)
-    entry = store.get(kind, entry_id)
-    return entry is None or entry.is_stale(today=today)
-
-
-def _artifact_stale(
-    artifact: Artifact,
-    current_version: int,
-    facts_by_id: dict[str, Fact],
-    knowledge_store: KnowledgeStore,
-    today: date | None,
-) -> bool:
-    if artifact.requirements_version < current_version:
-        return True
-    for fact_id in artifact.cited_facts:
-        fact = facts_by_id.get(fact_id)
-        if fact is None or fact.is_stale(today=today):
-            return True
-    return any(
-        _knowledge_entry_stale(knowledge_store, entry_id, today)
-        for entry_id in artifact.cited_knowledge
-    )
 
 
 def project_status(
@@ -57,7 +26,13 @@ def project_status(
     if RequirementsStore(storage).latest_version(project_id) == 0:
         return _empty_status(project_id)
 
-    ctx = collect(storage, project_id, include_scope=include_scope, today=today)
+    ctx = collect(
+        storage,
+        project_id,
+        include_scope=include_scope,
+        today=today,
+        knowledge_root=knowledge_root,
+    )
     model = model_diagnostics(ctx.doc, ctx.artifacts, ctx.freshness, include_scope)
     workflow = workflow_branch(ctx)
     ready = readiness(
@@ -79,7 +54,7 @@ def project_status(
     head = {"project": project_id, "diagnostic_phase": ctx.phase}
     if view in branches:
         return {**head, view: branches[view]}
-    compat = _phase1_fields(storage, ctx, knowledge_root, today)
+    compat = _phase1_fields(storage, ctx, today)
     if view == "full":
         decision_makers = {
             stakeholder.id
@@ -146,7 +121,6 @@ def _empty_status(project_id: str) -> dict:
 def _phase1_fields(
     storage: Storage,
     ctx: StatusContext,
-    knowledge_root: Path | None,
     today: date | None,
 ) -> dict:
     """フェーズ1のstatusフィールドとnext_stepを従来どおり算出する。"""
@@ -159,22 +133,19 @@ def _phase1_fields(
         counts[item.confidence] += 1
 
     facts = FactStore(storage).list(ctx.project_id)
-    facts_by_id = {f.fact_id: f for f in facts}
-    knowledge_store = KnowledgeStore(knowledge_root or get_knowledge_root())
 
-    latest_by_type: dict[str, Artifact] = {}
-    for a in ArtifactStore(storage).list(ctx.project_id):
-        current = latest_by_type.get(a.type)
-        if current is None or a.version > current.version:
-            latest_by_type[a.type] = a
+    current_artifacts = [
+        (artifact_id, ctx.artifacts[artifact_id])
+        for artifact_id in _current_artifact_ids(ctx.artifacts).values()
+    ]
     artifact_rows = [
         {
-            "id": f"{a.type}-v{a.version}",
-            "type": a.type,
-            "requirements_version": a.requirements_version,
-            "stale": _artifact_stale(a, version, facts_by_id, knowledge_store, today),
+            "id": artifact_id,
+            "type": artifact.type,
+            "requirements_version": artifact.requirements_version,
+            "stale": ctx.freshness[artifact_id].state == "stale",
         }
-        for a in sorted(latest_by_type.values(), key=lambda a: a.type)
+        for artifact_id, artifact in sorted(current_artifacts, key=lambda item: item[1].type)
     ]
 
     types = {row["type"] for row in artifact_rows}
@@ -213,8 +184,8 @@ def build_actions(ctx: StatusContext, model: dict, ready: dict) -> list[dict]:
     }
     stale = sorted(
         artifact_id
-        for artifact_id, value in ctx.freshness.items()
-        if value.state == "stale"
+        for artifact_id in _current_artifact_ids(ctx.artifacts).values()
+        if ctx.freshness[artifact_id].state == "stale"
     )
     loop_in_progress = (
         bool(ctx.pending_milestones)

@@ -269,27 +269,29 @@ def round_delta(
     既存Challengeへ後付けした昇格も promoted_challenges に数える。
     """
     def added(section: str) -> list:
-        old = {n.id for n in getattr(previous, section)} if previous else set()
-        return [n for n in getattr(saved, section) if n.id not in old]
+        old = {n.id for n in getattr(previous, section) if n.id} if previous else set()
+        return [n for n in getattr(saved, section) if n.id and n.id not in old]
 
     old_confidence = (
         {n.id: n.confidence
-         for section in SCOPED_SECTIONS for n in getattr(previous, section)}
+         for section in SCOPED_SECTIONS for n in getattr(previous, section) if n.id}
         if previous else {}
     )
     raised = sorted(
         n.id
         for section in SCOPED_SECTIONS
         for n in getattr(saved, section)
-        if n.id in old_confidence
+        if n.id and n.id in old_confidence
         and _confidence_rank(n.confidence) > _confidence_rank(old_confidence[n.id])
     )
 
     old_promoted = (
-        {c.id for c in previous.challenges if c.promoted_from} if previous else set()
+        {c.id for c in previous.challenges if c.id and c.promoted_from}
+        if previous else set()
     )
     newly_promoted = [
-        c for c in saved.challenges if c.promoted_from and c.id not in old_promoted
+        c for c in saved.challenges
+        if c.id and c.promoted_from and c.id not in old_promoted
     ]
 
     delta = {
