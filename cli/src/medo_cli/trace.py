@@ -6,6 +6,7 @@
 
 import json
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,6 +20,9 @@ VALUE_SAFE_OPTIONS = frozenset({
     "--report", "--slides", "--derived-from", "--covers", "--focus", "--refs",
     "--from-artifact",
 })
+
+# startswith("--") だけでは自由文がキーに昇格するため使わない。
+_LONG_OPTION_NAME = re.compile(r"--[A-Za-z0-9][A-Za-z0-9-]*")
 
 
 class Tracer:
@@ -61,8 +65,18 @@ def _command(argv: list[str]) -> list[str]:
 def _options(argv: list[str]) -> dict[str, str]:
     options: dict[str, str] = {}
     for i, token in enumerate(argv):
-        if not token.startswith("--"):
+        parsed = _parse_long_option(token)
+        if parsed is None:
             continue
-        value = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else ""
-        options[token] = value if token in VALUE_SAFE_OPTIONS else "<redacted>"
+        option, value = parsed
+        if value is None:
+            value = argv[i + 1] if i + 1 < len(argv) and _parse_long_option(argv[i + 1]) is None else ""
+        options[option] = value if option in VALUE_SAFE_OPTIONS else "<redacted>"
     return options
+
+
+def _parse_long_option(token: str) -> tuple[str, str | None] | None:
+    option, separator, value = token.partition("=")
+    if _LONG_OPTION_NAME.fullmatch(option) is None:
+        return None
+    return option, value if separator else None
