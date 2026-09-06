@@ -748,13 +748,29 @@ def test_check_list_reports_which_checks_need_an_artifact(medo_home: Path):
             by_name["reality_gap"]["binding"]) == ("artifact_bound", "as-is-report", "persistent")
 
 
-def test_check_list_filters_by_confirmer(medo_home: Path):
-    """討議用スライドの章6には、確認者が顧客の項目だけを投影する。"""
+def test_check_list_includes_shared_checks_when_filtering_by_customer(medo_home: Path):
+    """confirmer=both は顧客にも確認する項目。完全一致で絞ると章6から漏れる。
+
+    スライド設計は convergence 段階の投影対象に feasibility を挙げているが、
+    registry 上の feasibility は both である。
+    """
     result = runner.invoke(app, ["check", "list", "--confirmer", "customer", "--format", "json"])
 
     assert [row["name"] for row in json.loads(result.output)] == [
-        "as_is_articulation", "to_be_articulation", "scope_agreement",
+        "reality_gap", "past_attempts", "hidden_stakeholders", "as_is_articulation",
+        "decision_maker", "to_be_articulation", "feasibility", "scope_agreement",
     ]
+
+
+def test_check_list_filtered_by_consultant_excludes_customer_only_checks(medo_home: Path):
+    """customer 専用の3項目だけが落ち、both は残る。"""
+    result = runner.invoke(
+        app, ["check", "list", "--confirmer", "consultant", "--format", "json"]
+    )
+    names = {row["name"] for row in json.loads(result.output)}
+
+    assert names & {"as_is_articulation", "to_be_articulation", "scope_agreement"} == set()
+    assert {"source_quality", "expression_safety", "feasibility"} <= names
 
 
 def test_check_list_digest_is_the_default(medo_home: Path):
@@ -808,7 +824,7 @@ def check_list(
             "phase": spec.phase,
         }
         for name, spec in CHECK_REGISTRY.items()
-        if not confirmer or spec.confirmer == confirmer
+        if not confirmer or spec.confirmer in (confirmer, "both")
     ]
     if format == "json":
         typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
@@ -908,18 +924,21 @@ Expected: FAIL — `KeyError: 'approved'`
 
 ```python
 def _is_approved(ctx: StatusContext) -> bool:
-    """現在のレビュー対象に approved のレビューがあるか。
+    """現在のレビュー対象に対する最新のレビューが approved か。
 
     open_findings が空でも「まだ誰も見ていない」場合があり、空を承認の
-    証拠にできない。
+    証拠にできない。過去に一度でも approved があれば真、としないのは、
+    その後に別のレビュアーが changes_requested を出しても覆らないため。
     """
-    return any(
-        event.kind == "asis_review"
-        and event.outcome == "approved"
-        and event.target.artifact_id == ctx.target.as_is_report_id
-        for event in ctx.events
-    )
+    reviews = [
+        event for event in ctx.events
+        if event.kind == "asis_review"
+        and getattr(event.target, "artifact_id", None) == ctx.target.as_is_report_id
+    ]
+    return bool(reviews) and reviews[-1].outcome == "approved"
 ```
+
+`ctx.events` は追記順であり `EventStore.list` が `ev-N` の順で返すため、末尾が最新である。`event.target` は `ArtifactTarget | RequirementsTarget` の共用型なので `getattr` で受ける。
 
 - [ ] **Step 4: テストが通ることを確認**
 
@@ -1033,14 +1052,14 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
    案件が未作成なら `actions` は返らず `next_step: hearing` になる。その場合は
    ユーザーと英数字slugのIDを合意してから進む。
 
-2. 業界・市場・国策・業界動向を検索し(自分の検索能力を使う)、判断に効くファクトを保存する:
+2. 業界・市場・国策・業界動向を検索し、判断に効くファクトを保存する:
 
        medo facts save --project <id> --kind <market|policy|trend|company> \
          --statement "<出典の記述に忠実な一文>" --source <出典URL> \
          --value <数値> --unit <単位> --retrieved <YYYY-MM-DD>
 
    数値は出典に忠実に転記し、加工しない。ヒアリング由来の個社情報は
-   `--kind company --source "ヒアリング(<日付> <相手>)"`。
+   `--kind company --source "ヒアリング(<日付> <相手>)"`。自分の検索能力を使う。
 
 3. 要件の雛形を取得して埋める:
 
@@ -1056,10 +1075,9 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
        medo requirements save --project <id> --file /tmp/req.yaml
        medo status --project <id> --view summary
 
-   **調査の初期はここで終えてよい**。`actions` を報告し、次に何を確かめるかを
-   ユーザーと決める。報告書とスライドは顧客にぶつける段で作る。
+   **調査の初期はここで終えてよい**。`actions` を報告し、次に何を確かめるかをユーザーと決める。
 
-5. 顧客に共有する段になったら、現状調査・分析報告書を書いて保存する:
+5. 共有する段になったら、現状調査・分析報告書を書いて保存する:
 
        medo artifacts save --project <id> --type as-is-report \
          --requirements-version <n> --generated-by <claude|codex|gemini> \
@@ -1089,7 +1107,7 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
        medo knowledge save --project <id> --statement "<ノウハウ>" \
          --source "medo-investigate <日付>対話"
 
-   スライドまで作れたら「次は medo-review で内部検証する」と案内して終える。
+   スライドまで作れたら「次は medo-review で内部検証」と案内して終える。
 
 ## 契約(必ず守る)
 
@@ -1311,9 +1329,13 @@ git commit -m "feat(skills): ステージ2のSkillを追加
 
 ```python
 def test_dialogue_does_not_attach_an_artifact_to_the_go_ahead(tmp_path):
-    """to_be_go_ahead は要件宛て。--artifact を付けると拒否される。"""
+    """to_be_go_ahead は要件宛て。--artifact を付けると拒否される。
+
+    手順5(顧客が答えたチェックの記録)には正当な --artifact が出るため、
+    手順4の go_ahead ブロックだけを切り出して見る。
+    """
     text = _built(tmp_path, "medo-dialogue")
-    go_ahead = text[text.index("to_be_go_ahead") :][:400]
+    go_ahead = text[text.index("--purpose to_be_go_ahead") : text.index("5. 顧客が答えた")]
 
     assert "--artifact" not in go_ahead
 
@@ -1796,12 +1818,19 @@ medo respond add --project smoke --stakeholder sh-1 --purpose to_be_go_ahead \
 # ステージ4
 medo status --project smoke --view workflow                   # loop.round_delta
 medo requirements get --project smoke --format json > /tmp/req2.json
-# as_is を1件足して保存 → 節目が記録される
+# gaps に kind: perception を1件足して保存する。
+#   internal_as_is_first_added は「internal な as_is が 0件→1件以上」の初回だけ
+#   発火するため、v1 保存で既に ev-1 が出ている。v2 で新しい節目を起こすには
+#   perception_gap_added など別の条件を満たす必要がある。
 medo requirements save --project smoke --file /tmp/req2.json
 medo status --project smoke --view summary                    # actions[0]
-medo checkpoint answer --project smoke --responds-to <ev-N> --answer generate --focus hyp-1
+medo status --project smoke --view workflow                   # loop.checkpoint.pending_ids
+medo checkpoint answer --project smoke --responds-to <未回答のev-N> \
+  --answer generate --focus hyp-1
 medo status --project smoke --view full
 ```
+
+未回答の節目IDは `workflow.loop.checkpoint.pending_ids` が返す。**推測で `ev-1` と決め打たない**。
 
 確認項目:
 
@@ -1812,6 +1841,7 @@ medo status --project smoke --view full
 5. `workflow.review.approved` が、レビュー前は `false`、`approved` 記録後は `true`
 6. `workflow.loop.round_delta.progress_count` が 0 でない
 7. `medo artifacts outline --type slides --slide-kind final` が exit 1 + `error:`
+8. `medo check list --confirmer customer` に `feasibility`(`confirmer: both`)が含まれる
 
 **1つでも失敗したら、失敗として記録し推測で補完しない**。SKILL.md 側の記述を実CLIに合わせて直す。
 
