@@ -51,7 +51,9 @@ def test_investigate_can_stop_after_recording_requirements(tmp_path):
 
 def test_review_reads_the_current_target_from_the_workflow_branch(tmp_path):
     """current_target は summary にも model にも無い。workflow 枝にしかない。"""
-    assert "--view workflow" in _built(tmp_path, "medo-review")
+    text = _built(tmp_path, "medo-review")
+
+    assert "--view workflow" in text and "current_target" in text
 
 
 def test_review_looks_up_which_checks_need_an_artifact(tmp_path):
@@ -136,11 +138,16 @@ def test_every_skill_reports_actions_from_status(tmp_path):
 
 
 def test_every_skill_records_codex_as_a_possible_author(tmp_path):
-    """3ホストで実行できる設計なのに、Codexが自分を記録できないと来歴が追えない。"""
+    """3ホストで実行できる設計なのに、Codexが自分を記録できないと来歴が追えない。
+
+    レビューの来歴は --reviewed-by が持つため、生成側だけを見ると
+    medo-review が検査から外れる。
+    """
     missing = [
         name
         for name in SKILL_NAMES
-        if "--generated-by" in _built(tmp_path, name) and "codex" not in _built(tmp_path, name)
+        if any(opt in _built(tmp_path, name) for opt in ("--generated-by", "--reviewed-by"))
+        and "codex" not in _built(tmp_path, name)
     ]
 
     assert missing == []
@@ -151,14 +158,16 @@ def test_grow_prfaq_applies_the_reframing_rule(tmp_path):
     assert "medo artifacts outline" in _built(tmp_path, "medo-grow-prfaq")
 
 
-def test_no_skill_carries_more_than_three_contract_items(tmp_path):
-    """4項目以上の行動規範は遵守率が落ちる(移植性 §4)。"""
-    over = {}
-    for name in SKILL_NAMES:
-        text = _built(tmp_path, name)
-        if "## 契約" not in text:
-            continue
-        body = text[text.index("## 契約") :]
-        over[name] = len([line for line in body.splitlines() if line.startswith("- ")])
+def test_every_skill_but_the_pointer_carries_exactly_three_contract_items(tmp_path):
+    """4項目以上は遵守率が落ち、欠けると担保が消える(移植性 §4)。
 
-    assert {name: n for name, n in over.items() if n > 3} == {}
+    見出しの誤字で契約ごと素通りしないよう、wrapper 以外は存在も必須とする。
+    """
+    counts = {}
+    for name in SKILL_NAMES:
+        if name == "medo-hearing":  # medo-investigate へのポインタで手順を持たない
+            continue
+        body = _built(tmp_path, name).partition("## 契約")[2]
+        counts[name] = len([line for line in body.splitlines() if line.startswith("- ")])
+
+    assert counts == dict.fromkeys(counts, 3)

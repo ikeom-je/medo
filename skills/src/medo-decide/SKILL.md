@@ -38,7 +38,8 @@ description: 顧客の反応とレビュー所見を要件ドキュメントに�
 
    保存すると節目(`MilestoneDetected`)が自動で記録されることがある。
 
-4. 節目が未回答なら回答する。`actions` の先頭が `answer_tobe_checkpoint` になる:
+4. 節目が未回答なら回答する。`actions` の先頭が `answer_tobe_checkpoint` になり、
+   その `refs`(= `workflow.loop.checkpoint.pending_ids`)が回答対象の `ev-N`:
 
        medo checkpoint answer --project <id> --responds-to <ev-N> \
          --answer <generate|defer> --focus <hyp-N>
@@ -57,7 +58,7 @@ description: 顧客の反応とレビュー所見を要件ドキュメントに�
    - `readiness.state` が `ready` なら「収束条件を満たした。medo-propose-options で
      打ち手候補に進める」と案内する
    - そうでなければ「次の周回を medo-investigate から回す」と案内する
-   - 詳しい理由が要るときだけ `medo status --view readiness` を呼び、
+   - 詳しい理由が要るときだけ `medo status --project <id> --view readiness` を呼び、
      `failed_conditions` を報告する
 
 ## 契約(必ず守る)

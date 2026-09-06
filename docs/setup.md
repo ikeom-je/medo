@@ -257,6 +257,14 @@ error: 要件のスキーマ不正: perception gap は public と internal の A
 
 要件が v3 まで進んだ結果、`review.current_target` が `None` になり `actions` が `generate_as_is_report` と `regenerate_stale_artifacts` を返した。旧版の要件から作った報告書は次の周回で作り直す、という設計どおりの挙動である。
 
+**`medo-dialogue` が単独セッションでスライドIDを解決できなかった(修正済み)**
+
+相互レビュー(agy)の指摘。`medo-dialogue` の手順2は `medo artifacts get --id <slides-vN>` を実行するが、直前の `status --view summary` / `--view workflow` の出力に討議用スライドのIDは含まれない(`workflow.review.current_target` が返すのは `as-is-report` のIDだけ)。**別のホストがまっさらなセッションでステージ3から始めると、対象を特定できない**。設計の移植性条件2(どのSkillも status から単独で開始できる)と条件3(受け渡しはCLI経由のみ)の違反である。
+
+`medo artifacts list` と `medo requirements get` を手順に足し、**先行する文脈を持たない状態で `slides-v1` と `sh-1` を解決できることを実行して確認した**。
+
+**私の通し確認で検出できなかった理由**: 同一セッションで手順1から続けて実行したため、スライドIDが自分の文脈に残っていた。**手順書のテストは、手順書だけを読んで実行できるかで見なければならない**。
+
 ### 6.7 ハマりどころ
 
 - 雛形の `as_is: []` は `from_as_is: []` の部分文字列である。雛形を**文字列置換で**編集するスクリプトを書くと、`gaps` のコメント例の中まで書き換えて壊れる。行全体の一致で置換するか、エディタで該当行のコメントを外す

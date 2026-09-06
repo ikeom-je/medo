@@ -20,8 +20,10 @@ description: レビュー済みの討議用スライドを顧客に提示する�
      そのまま提示するか先に直すかをユーザーに確認する
    - `workflow.loop.focus_hypothesis` がその周回で検証したい論点
 
-2. 提示する討議用スライドを読む:
+2. 提示する討議用スライドを読む。IDは `medo artifacts list` で確認する
+   (`workflow.review.current_target` が返すのは as-is-report のIDだけ):
 
+       medo artifacts list --project <id>
        medo artifacts get --project <id> --id <slides-vN>
 
    章3(立場による見え方の違い)を含む場合、**提示相手に応じた開示制御をユーザーに問う**。
@@ -32,7 +34,8 @@ description: レビュー済みの討議用スライドを顧客に提示する�
 
        medo check list --confirmer customer
 
-4. 得られた反応を、**ステークホルダーごとに1件ずつ**記録する。
+4. 得られた反応を、**ステークホルダーごとに1件ずつ**記録する。`sh-N` は
+   `medo requirements get --project <id> --format json` の `stakeholders` が返す。
    **purpose によって対象の指定が変わる**:
 
    現状認識への反応(対象は as-is-report):
@@ -50,9 +53,7 @@ description: レビュー済みの討議用スライドを顧客に提示する�
          --note "<相手の言葉に近い形で>"
 
    `unclear` は「反応が読み取れなかった」であり失敗ではない。沈黙や曖昧な同意を
-   `agreed` に丸めない。
-   語られた内容が要件の訂正・追加を含む場合、ここでは記録に留める。要件への反映は
-   medo-decide が行う。
+   `agreed` に丸めない。要件の訂正・追加はここでは記録に留め、反映は medo-decide が行う。
 
 5. 顧客が答えたチェック項目を記録する。**artifact束縛の項目は `--artifact` が必須**
    (`medo check list` の `binding` を見る):
