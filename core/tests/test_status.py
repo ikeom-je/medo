@@ -261,6 +261,33 @@ def test_review_is_not_approved_after_changes_requested_for_the_current_target(t
     assert status["workflow"]["review"]["approved"] is False
 
 
+def test_review_approval_does_not_carry_over_to_a_regenerated_report(tmp_path):
+    """再生成した版は別物。前の版の承認を引き継ぐと未検証の資料を顧客に出す。"""
+    storage = _project(tmp_path)
+    report = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状",
+    ))
+    slides = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="slides", slide_kind="discussion", requirements_version=1,
+        derived_from=[report], generated_by="claude", content="# 討議",
+    ))
+    WorkflowRecorder(storage).record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id=report), occurred_on="2026-07-12",
+        requirements_version=1, round_id=0, outcome="approved",
+        reviewed_slides_id=slides,
+    ))
+    ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状(改訂)",
+    ))
+
+    status = project_status(storage, "p1", tmp_path, view="workflow")
+
+    assert (status["workflow"]["review"]["current_target"],
+            status["workflow"]["review"]["approved"]) == ("as-is-report-v2", False)
+
+
 def test_summary_view_puts_actions_first(tmp_path):
     """Skillが最初に読むものを「足りない」ではなく「次にできること」にする。"""
     storage = _project(tmp_path)

@@ -9,6 +9,7 @@ from medo_core.nodes import (
     AsIs, Attempt, Bottleneck, Challenge, Constraint, Gap, Hypothesis, Kpi,
     OpenQuestion, Stakeholder, ToBe,
 )
+from medo_core.requirements import ConfidenceItem
 
 WRITABLE_SECTIONS = (
     "industry", "background", "goal", "principles", "functional", "non_functional",
@@ -17,7 +18,10 @@ WRITABLE_SECTIONS = (
     "constraints", "attempts", "hypotheses",
 )
 
+# 雛形がコメントで例示しているセクションと、その型。
+# ここに載らないセクションは例の乖離検査から漏れるため、テストで一致を縛る。
 NODE_EXAMPLES = {
+    "principles": ConfidenceItem,
     "as_is": AsIs, "to_be": ToBe, "gaps": Gap, "bottlenecks": Bottleneck,
     "challenges": Challenge, "constraints": Constraint, "open_questions": OpenQuestion,
     "kpis": Kpi, "stakeholders": Stakeholder, "attempts": Attempt,

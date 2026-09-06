@@ -34,7 +34,10 @@ def artifacts_outline(
 
 
 def check_list(
-    confirmer: str = typer.Option("", "--confirmer", help="consultant|customer|both"),
+    confirmer: str = typer.Option(
+        "", "--confirmer",
+        help="consultant|customer|both。指定すると both の項目も含む。全件は省略",
+    ),
     format: str = typer.Option("digest", "--format", help="json|digest"),
 ) -> None:
     """checkの束縛・対象生成物type・確認者・段階を出力する。"""

@@ -2,8 +2,13 @@ import yaml
 
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.storage import LocalJsonStorage
-from medo_core.templates import NODE_EXAMPLES, REQUIREMENTS_TEMPLATE, WRITABLE_SECTIONS
-from medo_core.templates import DISCUSSION_CHAPTER_INPUTS, DISCUSSION_SLIDES_OUTLINE
+from medo_core.templates import (
+    DISCUSSION_CHAPTER_INPUTS,
+    DISCUSSION_SLIDES_OUTLINE,
+    NODE_EXAMPLES,
+    REQUIREMENTS_TEMPLATE,
+    WRITABLE_SECTIONS,
+)
 
 
 def _example_of(section: str) -> dict:
@@ -45,7 +50,17 @@ def test_saving_the_template_verbatim_creates_no_nodes(tmp_path):
     assert [len(getattr(saved, s)) for s in NODE_EXAMPLES] == [0] * len(NODE_EXAMPLES)
 
 
-def test_every_example_matches_its_node_model(tmp_path):
+def test_every_commented_example_is_covered_by_the_drift_check():
+    """雛形に例を足しても NODE_EXAMPLES に載せ忘れると、乖離検査から漏れる。"""
+    commented = {
+        line[2:-1] for line in REQUIREMENTS_TEMPLATE.splitlines()
+        if line.startswith("# ") and line.endswith(":") and " " not in line[2:-1]
+    }
+
+    assert commented == set(NODE_EXAMPLES)
+
+
+def test_every_example_matches_its_node_model():
     """ノード型のフィールド改名を雛形へ反映し忘れると、Skillが誤った案内をする。"""
     unknown = {
         section: sorted(set(_example_of(section)) - set(model.model_fields))
