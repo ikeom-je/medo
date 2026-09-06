@@ -30,30 +30,85 @@
 ```
 [ホスト] Claude Code(Claude) / Codex / agy(Gemini)   ← 会話・判断をするのはここだけ
     │ シェル実行
-[Skill]  hearing / propose-options / grow-prfaq  ← 手順書(生成的)
+[Skill]  investigate → review → dialogue → decide   ← 標準周回の手順書(生成的)
+         + propose-options / grow-prfaq
     │ 手順の中で呼ぶ
 [CLI]    medo requirements / facts / fermi / knowledge / artifacts / status
+         medo check / review / respond / checkpoint
 ```
 
 自律的なmulti-agent構成は意図的に採らない設計方針(差別化軸を参照)。会話Agentは1体(ホストLLM)のみで、CLIは決定論的な道具箱として振る舞います。
 
+## セットアップ: 各Agentツールに対応させる
+
+Skillは3ホスト共通の `<name>/SKILL.md` 形式(YAML frontmatter + 本文)です。**ホスト別の変換は不要**で、ビルドして各ホストの配置先へコピーするだけです。
+
+```bash
+uv sync --all-packages       # 依存解決(medo CLI が使えるようになる)
+python skills/build.py       # skills/src/ を検証して skills/dist/ へ出力
+```
+
+| ホスト | 配置先 | スコープ | 備考 |
+|---|---|---|---|
+| Claude Code | `~/.claude/skills/` | ユーザーレベル | コピーが必要 |
+| Codex CLI | `~/.codex/skills/` | ユーザーレベル | コピーが必要 |
+| agy(Antigravity) | `<リポジトリ直下>/.agents/skills/` | プロジェクトレベル | リポジトリ直下から自動検出 |
+
+```bash
+mkdir -p ~/.claude/skills ~/.codex/skills .agents/skills
+cp -r skills/dist/* ~/.claude/skills/
+cp -r skills/dist/* ~/.codex/skills/
+cp -r skills/dist/* .agents/skills/
+```
+
+`medo` CLI にPATHが通っていれば、どのホストからでも同じ手順が動きます(`uv run medo` でも可)。**Skill本文を変更したら `python skills/build.py` からやり直して再配布します**。
+
+`skills/dist/` と `.agents/skills/` はビルド成果物で `.gitignore` 対象です。`git worktree` で新しい作業ディレクトリを作った直後は存在しないため、その都度ビルドし直してください。
+
+### どのホストで何を実行してもよい
+
+案件の状態(要件・ファクト・生成物・進行記録)はすべて `MEDO_HOME`(既定 `~/.medo`)のストアにあり、ホストのコンテキストには何も残りません。そのため**ステージごとに違うホストで実行できます** — 調査はagy、現状整理はClaude、内部レビューはCodex、といった使い分けが成立し、途中でモデルが変わっても `medo status` を読めば再開できます。
+
+誰が実行したかは生成物の `--generated-by claude|codex|gemini` とレビューの `--reviewed-by`(+ `human`)に記録されます。
+
+## 標準周回(4ステージ)
+
+暗黙知は現状(AsIs)と理想(ToBe)を何度も往復して初めて出てきます。往復は頭の中では回らず、**各ステージで成果物を出し、レビューし、顧客にぶつけて反応を得る**ことで進みます。
+
+| Skill | ステージ | やること |
+|---|---|---|
+| `medo-investigate` | 調べる・仕立てる | 公開情報と生の声を集め、現状を整理して報告書と討議用スライドまで作る |
+| `medo-review` | 内部検証 | 顧客に見せる前に論理矛盾・GAP・表現上の懸念を洗い出す |
+| `medo-dialogue` | ぶつける・反応を得る | 提示して確認・共感・異議を記録する |
+| `medo-decide` | 振り返る・次へ進む | 反応を要件に反映し、往復継続か次段階かを判断する |
+
+**固定の状態機械ではありません**。どのステージから始めても成立し、CLIは順序を強制せず現在地(`medo status` の `actions`)だけを返します。合意後は `medo-propose-options` → `medo-grow-prfaq` で打ち手の比較と完全版PRFAQへ進みます。
+
+**回ること自体が価値**です。チェックリストが埋まらなくても周回を重ねること自体が解像度を上げるため、周回ごとに「今回新たに分かったこと」(`round_delta`)を返します。「顧客があるべき姿を語れないと分かった」ことも成果として数えます。
+
 ## ステータス
 
-**フェーズ1(What/Why縦切りMVP)完了。** core(要件・ファクト・フェルミ・技術ナレッジ・生成物・status)・CLI・Skill 3本を実装し、実案件での統合スモーク(Medo自身の運用課題をドッグフーディング対象に、Claude Code/agy双方でWhat/Why縦切りを実行)まで完了。
+**フェーズ2の決定論層(優先度1〜4)とSkill(優先度5)まで完了。** フェーズ1のWhat/Why縦切りに加えて、標準周回を回すためのドメインモデル(現状・あるべき姿・GAP・真因・課題・仮説)・進行記録・4階層診断・Skill 4本を実装し、まっさらな環境からの通し確認を完了しています。
 
-| フェーズ | 内容 |
-|---|---|
-| 1 | core(要件・ファクト・フェルミ・技術ナレッジ)+ `medo` CLI + Skill 3本(hearing / propose-options / grow-prfaq)を Claude Code / Codex / agy 対応で |
-| 2 | スライド生成(Claude/Gemini比較)・MVPモック・アーキ詳細・pricing計算機・knowledge-digest・簡易Webアプリ |
-| 3 | 運用自動化: 類似案件検索 /(必要になれば)特定クラウドAPI連携ETLをプラグインとして追加 |
-| バックログ | AWS比較・MCPアダプタ・A2A(Gemini Enterprise)・チーム展開 |
+| フェーズ | 内容 | 状態 |
+|---|---|---|
+| 1 | core(要件・ファクト・フェルミ・技術ナレッジ)+ `medo` CLI + Skill(hearing / propose-options / grow-prfaq) | 完了 |
+| 2(優先度1〜4) | ドメインモデル・ID規約・変更manifest・生成物の依存グラフ・進行記録・収束判定・4階層診断 | 完了 |
+| 2(優先度5) | 標準周回のSkill 4本 + 討議用スライド生成 | 完了 |
+| 2(優先度6) | 最終提案スライド + `phase_signoff` ゲート | 未着手 |
+| 2(後続) | knowledge-digest・decision-roadmap・build-mock・propose-architecture・pricing・簡易Webアプリ | 詳細設計が未了 |
+| 3 | 運用自動化: 類似案件検索 /(必要になれば)特定クラウドAPI連携ETLをプラグインとして追加 | 未着手 |
+| バックログ | AWS比較・MCPアダプタ・A2A(Gemini Enterprise)・チーム展開 | — |
 
 ## ドキュメント
 
 | 対象 | 場所 |
 |---|---|
-| 設計ドキュメント(PRFAQ含む) | [docs/superpowers/specs/medo-design.md](docs/superpowers/specs/medo-design.md) |
-| フェーズ1実装計画 | [docs/superpowers/plans/medo-phase1.md](docs/superpowers/plans/medo-phase1.md) |
+| フェーズ1の設計(PRFAQ含む) | [docs/superpowers/specs/medo-design.md](docs/superpowers/specs/medo-design.md) |
+| フェーズ2の設計(索引) | [docs/superpowers/specs/medo-phase2-design.md](docs/superpowers/specs/medo-phase2-design.md) |
+| 実装計画 | [medo-phase1.md](docs/superpowers/plans/medo-phase1.md) / [medo-phase2-core.md](docs/superpowers/plans/medo-phase2-core.md) / [medo-phase2-skills.md](docs/superpowers/plans/medo-phase2-skills.md) |
+| セットアップと通し確認の記録 | [docs/setup.md](docs/setup.md) |
+| 使い方 | [docs/usage.md](docs/usage.md) |
 | Agent向けエントリポイント | [CLAUDE.md](CLAUDE.md)(Claude Code) / [AGENTS.md](AGENTS.md)(agy等) |
 | Agent向け規約(steering) | `.claude/steering/` |
 
@@ -62,8 +117,15 @@
 ```bash
 uv sync --all-packages       # 依存解決
 uv run pytest                # テスト
+uv run ruff check .          # リント
 uv run medo --help           # CLI
 python skills/build.py       # Skill配布物のビルド(Claude Code/Codex/agy共通形式)
+```
+
+Skillの再現性は `MEDO_TRACE` で測れます。同じ初期状態から各ホストに1周させ、CLI呼び出し列のJSONLをdiffすると、Skillが飛ばした操作が見えます。**値が残るのは選択肢を表すオプション(`--result` / `--reaction` / `--outcome` 等)だけ**で、自由文・ファイルパス・案件IDは `<redacted>` になるため、トレースはそのまま共有できます。
+
+```bash
+MEDO_TRACE=/tmp/claude.jsonl uv run medo status --project <id>
 ```
 
 技術スタック: Python 3.12+ / uv workspace / pydantic / typer / Firestore(本番ストレージに選ぶ場合のみ、任意)
