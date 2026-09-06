@@ -102,9 +102,6 @@ def test_build_generates_skill_md_per_name(tmp_path):
         assert f"name: {name}" in text
         assert "description:" in text
 
-    hearing = (tmp_path / "medo-hearing" / "SKILL.md").read_text(encoding="utf-8")
-    assert "medo requirements save" in hearing
-
 
 def test_build_rejects_missing_frontmatter(tmp_path):
     src = tmp_path / "src"
@@ -118,3 +115,50 @@ def test_build_rejects_missing_frontmatter(tmp_path):
     )
     assert result.returncode != 0
     assert "frontmatter" in (result.stdout + result.stderr)
+
+
+def test_hearing_is_a_pointer_to_investigate(tmp_path):
+    """旧スキーマのYAMLを案内し続けると、フェーズ2の要件を保存できない。"""
+    text = _built(tmp_path, "medo-hearing")
+
+    assert "medo-investigate" in text and "medo requirements save" not in text
+
+
+def test_every_skill_reports_actions_from_status(tmp_path):
+    """次に何をすべきかはCLIが返す。Skillが自前で判断すると本文が肥大する。"""
+    missing = [
+        name
+        for name in SKILL_NAMES
+        if name != "medo-hearing" and "--view summary" not in _built(tmp_path, name)
+    ]
+
+    assert missing == []
+
+
+def test_every_skill_records_codex_as_a_possible_author(tmp_path):
+    """3ホストで実行できる設計なのに、Codexが自分を記録できないと来歴が追えない。"""
+    missing = [
+        name
+        for name in SKILL_NAMES
+        if "--generated-by" in _built(tmp_path, name) and "codex" not in _built(tmp_path, name)
+    ]
+
+    assert missing == []
+
+
+def test_grow_prfaq_applies_the_reframing_rule(tmp_path):
+    """規約は顧客提出物であるprfaqの文章生成にも適用する。"""
+    assert "medo artifacts outline" in _built(tmp_path, "medo-grow-prfaq")
+
+
+def test_no_skill_carries_more_than_three_contract_items(tmp_path):
+    """4項目以上の行動規範は遵守率が落ちる(移植性 §4)。"""
+    over = {}
+    for name in SKILL_NAMES:
+        text = _built(tmp_path, name)
+        if "## 契約" not in text:
+            continue
+        body = text[text.index("## 契約") :]
+        over[name] = len([line for line in body.splitlines() if line.startswith("- ")])
+
+    assert {name: n for name, n in over.items() if n > 3} == {}
