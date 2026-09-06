@@ -78,6 +78,11 @@ to_be: []
 # 現状と理想の乖離(現象)。真因ではない。
 # kind: perception(公開情報と実態の食い違い) | internal_conflict(立場による対立)
 #     | goal(あるべき姿との差)
+# kind によって参照の要件が変わる(満たさないと保存が拒否される):
+#   perception       from_as_is に public と internal の AsIs を両方含める
+#   internal_conflict from_as_is に internal な AsIs を2件以上。
+#                     かつ source_stakeholder_ids が異なる(視点が違う)こと
+#   from_to_be を持てるのは goal だけ。bottleneck が参照できるのも goal だけ。
 gaps: []
 # gaps:
 #   - text: ''

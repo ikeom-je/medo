@@ -9,12 +9,12 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
 
 ## 進め方
 
-1. 現在地を確認し、ユーザーに報告する:
+1. 現在地を読み、`actions`(次にできること)をユーザーに報告する:
 
-       medo status --project <project-id>
+       medo status --project <project-id> --view summary
 
-   `next_step` が `hearing` なら「まず medo-hearing で課題を構造化する」よう案内して終了する。
-   続けて最新要件を取得する:
+   `next_step` が `hearing` なら「まず medo-investigate で現状を構造化する」よう
+   案内して終了する。続けて最新要件を取得する:
 
        medo requirements get --project <project-id> --format json
 
@@ -35,6 +35,8 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
    - 仮定(assume)は明示し、計算は自分でしない(CLIのコードが計算する)
    - 将来予測は policy/trend ファクトを成長率等の根拠に使う
 
+   **フェルミ推定の計算を自分で行わない**。必ず `medo fermi calc` の結果を使う。
+
 4. Howの目処のためナレッジを検索する(複数回実行してよい):
 
        medo knowledge search "<キーワード>" --format json
@@ -52,20 +54,19 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
          --file /tmp/options.md \
          --options "<打ち手名>:<切り口>,<打ち手名>:<切り口>" \
          --cites <entry-id,...> --cites-facts <fact-id,...> \
-         --generated-by <claude|gemini> --requirements-version <n>
+         --generated-by <claude|codex|gemini> --requirements-version <n>
 
 7. 終了時、対話から得た案件固有ノウハウがあれば次で追記する:
 
        medo knowledge save --project <project-id> --statement "<案件固有ノウハウ>" --source "medo-propose-options <日付>対話"
 
    フェーズ1では追記のみ行い、既存エントリとの統合・重複解消はしない。
-8. 保存後 `medo status --project <project-id>` を実行し、「候補セットを比較・Q&Aし、合意した打ち手を medo-grow-prfaq で完全版に育てる」ことを案内して終える。
+8. 保存後 `medo status --project <project-id> --view summary` を実行し、`actions` を
+   報告する。「候補セットを比較・Q&Aし、合意した打ち手を medo-grow-prfaq で完全版に
+   育てる」ことを案内して終える。
 
 ## 契約(必ず守る)
 
-- 引用する市場数値・国策・業界動向は `medo facts` に保存済みの出典付きファクトのみ。技術・サービス能力の有無はナレッジ値のみ
-- ファクト・ナレッジに `"stale": true` が付いたものを使う場合、文中に「(情報が古い可能性: <取得日>)」と必ず注記する
-- フェルミ推定の計算をLLM(自分)で行わない。必ず `medo fermi calc` の結果を使う
-- assumed/open の課題・要件に依存する判断には「要確認」の印を付ける
-- 終了時、対話から得た案件固有ノウハウがあれば `medo knowledge save --project <id> --statement "..." --source "medo-propose-options <日付>対話"` で追記する。フェーズ1では追記のみ行い、統合・重複解消はしない
-- CLIが失敗したら推測で補完せずエラー内容を報告する
+- 開始時と終了時に `medo status --view summary` を実行し、`actions` をユーザーに報告する。詳しい理由が要るときだけ `--view readiness` を追加で呼ぶ
+- CLIが失敗したら推測で補完せず、エラー内容をそのまま報告する
+- stale・未確認(`confidence: assumed` / `open`)・仮説の項目を引用するときは、その旨を明記する
