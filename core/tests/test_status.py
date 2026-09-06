@@ -1,6 +1,7 @@
 from datetime import date
 
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta
+from medo_core.events import ArtifactTarget, AsIsReportReviewed
 from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
 from medo_core.facts import Fact, FactStore
 from medo_core.nodes import AsIs, Challenge, Stakeholder
@@ -203,6 +204,88 @@ def test_status_returns_four_branches_in_full_view(tmp_path):
     status = project_status(storage, "p1", tmp_path, view="full")
 
     assert set(status) >= {"model", "workflow", "readiness", "actions", "diagnostic_phase"}
+
+
+def test_review_is_not_approved_before_anyone_reviews(tmp_path):
+    """レビュー未実施でも open_findings は空。空を承認の証拠にできない。"""
+    status = project_status(_project(tmp_path), "p1", tmp_path, view="workflow")
+
+    assert status["workflow"]["review"]["approved"] is False
+
+
+def test_review_is_approved_after_an_approved_review_of_the_current_target(tmp_path):
+    storage = _project(tmp_path)
+    report = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状",
+    ))
+    slides = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="slides", slide_kind="discussion", requirements_version=1,
+        derived_from=[report], generated_by="claude", content="# 討議",
+    ))
+    WorkflowRecorder(storage).record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id=report), occurred_on="2026-07-12",
+        requirements_version=1, round_id=0, outcome="approved",
+        reviewed_slides_id=slides,
+    ))
+
+    status = project_status(storage, "p1", tmp_path, view="workflow")
+
+    assert status["workflow"]["review"]["approved"] is True
+
+
+def test_review_is_not_approved_after_changes_requested_for_the_current_target(tmp_path):
+    storage = _project(tmp_path)
+    report = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状",
+    ))
+    slides = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="slides", slide_kind="discussion", requirements_version=1,
+        derived_from=[report], generated_by="claude", content="# 討議",
+    ))
+    recorder = WorkflowRecorder(storage)
+    recorder.record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id=report), occurred_on="2026-07-12",
+        requirements_version=1, round_id=0, outcome="approved",
+        reviewed_slides_id=slides,
+    ))
+    recorder.record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id=report), occurred_on="2026-07-13",
+        requirements_version=1, round_id=0, outcome="changes_requested",
+        reviewed_slides_id=slides, slide_findings=["根拠の表現を見直す"],
+    ))
+
+    status = project_status(storage, "p1", tmp_path, view="workflow")
+
+    assert status["workflow"]["review"]["approved"] is False
+
+
+def test_review_approval_does_not_carry_over_to_a_regenerated_report(tmp_path):
+    """再生成した版は別物。前の版の承認を引き継ぐと未検証の資料を顧客に出す。"""
+    storage = _project(tmp_path)
+    report = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状",
+    ))
+    slides = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="slides", slide_kind="discussion", requirements_version=1,
+        derived_from=[report], generated_by="claude", content="# 討議",
+    ))
+    WorkflowRecorder(storage).record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id=report), occurred_on="2026-07-12",
+        requirements_version=1, round_id=0, outcome="approved",
+        reviewed_slides_id=slides,
+    ))
+    ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状(改訂)",
+    ))
+
+    status = project_status(storage, "p1", tmp_path, view="workflow")
+
+    assert (status["workflow"]["review"]["current_target"],
+            status["workflow"]["review"]["approved"]) == ("as-is-report-v2", False)
 
 
 def test_summary_view_puts_actions_first(tmp_path):

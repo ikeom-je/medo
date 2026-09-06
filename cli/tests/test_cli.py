@@ -526,3 +526,112 @@ def test_workflow_commands_are_available_after_split():
     result = runner.invoke(app, ["check", "--help"])
 
     assert result.exit_code == 0
+
+
+def test_requirements_template_saves_verbatim_without_creating_nodes(medo_home: Path):
+    """雛形をそのまま保存できないと、Skillへの案内として成立しない。"""
+    result = runner.invoke(app, ["requirements", "template"])
+    assert result.exit_code == 0
+
+    path = medo_home / "req.yaml"
+    path.write_text(result.output, encoding="utf-8")
+    saved = runner.invoke(app, ["requirements", "save", "--project", "p1", "--file", str(path)])
+    assert saved.exit_code == 0 and "saved: v1" in saved.output
+
+    status = runner.invoke(app, ["status", "--project", "p1"])
+    assert json.loads(status.output)["diagnostic_phase"] == "discovery"
+
+
+def test_requirements_template_needs_no_project(medo_home: Path):
+    """まだ案件が無い状態で最初に呼ぶコマンドなので、案件IDを要求してはならない。"""
+    assert runner.invoke(app, ["requirements", "template"]).exit_code == 0
+
+
+def test_artifacts_outline_returns_the_discussion_chapters(medo_home: Path):
+    result = runner.invoke(
+        app, ["artifacts", "outline", "--type", "slides", "--slide-kind", "discussion"]
+    )
+
+    assert result.exit_code == 0 and "本日の検証テーマ" in result.output
+
+
+def test_artifacts_outline_rejects_an_unknown_slide_kind(medo_home: Path):
+    result = runner.invoke(
+        app, ["artifacts", "outline", "--type", "slides", "--slide-kind", "poster"]
+    )
+
+    assert result.exit_code == 1 and "error:" in result.output
+
+
+def test_artifacts_outline_reports_final_is_not_available_yet(medo_home: Path):
+    """未実装を空出力で誤魔化すと、Skillが空の章構成で資料を作る。"""
+    result = runner.invoke(
+        app, ["artifacts", "outline", "--type", "slides", "--slide-kind", "final"]
+    )
+
+    assert result.exit_code == 1 and "error:" in result.output
+
+
+def test_artifacts_outline_rejects_a_type_without_an_outline(medo_home: Path):
+    result = runner.invoke(app, ["artifacts", "outline", "--type", "prfaq"])
+
+    assert result.exit_code == 1 and "error:" in result.output
+
+
+def test_check_list_reports_which_checks_need_an_artifact(medo_home: Path):
+    """artifact束縛のcheckは --artifact なしでは拒否される。Skillは事前に知る必要がある。"""
+    result = runner.invoke(app, ["check", "list", "--format", "json"])
+    assert result.exit_code == 0
+
+    by_name = {row["name"]: row for row in json.loads(result.output)}
+
+    assert (
+        by_name["as_is_articulation"]["binding"],
+        by_name["as_is_articulation"]["target_type"],
+        by_name["reality_gap"]["binding"],
+    ) == ("artifact_bound", "as-is-report", "persistent")
+
+
+def test_check_list_includes_shared_checks_when_filtering_by_customer(medo_home: Path):
+    """confirmer=both は顧客にも確認する項目。完全一致で絞ると章6から漏れる。
+
+    スライド設計は convergence 段階の投影対象に feasibility を挙げているが、
+    registry 上の feasibility は both である。
+    """
+    result = runner.invoke(
+        app, ["check", "list", "--confirmer", "customer", "--format", "json"]
+    )
+
+    assert [row["name"] for row in json.loads(result.output)] == [
+        "reality_gap",
+        "past_attempts",
+        "hidden_stakeholders",
+        "as_is_articulation",
+        "decision_maker",
+        "to_be_articulation",
+        "feasibility",
+        "scope_agreement",
+    ]
+
+
+def test_check_list_filtered_by_consultant_excludes_customer_only_checks(medo_home: Path):
+    """customer 専用の3項目だけが落ち、both は残る。"""
+    result = runner.invoke(
+        app, ["check", "list", "--confirmer", "consultant", "--format", "json"]
+    )
+    names = {row["name"] for row in json.loads(result.output)}
+
+    assert names & {"as_is_articulation", "to_be_articulation", "scope_agreement"} == set()
+    assert {"source_quality", "expression_safety", "feasibility"} <= names
+
+
+def test_check_list_digest_is_the_default(medo_home: Path):
+    result = runner.invoke(app, ["check", "list"])
+
+    assert result.exit_code == 0 and "as_is_articulation" in result.output
+
+
+def test_check_list_rejects_an_unknown_confirmer(medo_home: Path):
+    result = runner.invoke(app, ["check", "list", "--confirmer", "vendor"])
+
+    assert result.exit_code == 1 and "error:" in result.output
