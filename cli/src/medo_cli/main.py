@@ -40,6 +40,7 @@ app.add_typer(artifacts_app, name="artifacts", help="生成物の保存・一覧
 app.add_typer(facts_app, name="facts", help="市場・国策・業界動向・個社ファクト(出典必須)")
 app.add_typer(fermi_app, name="fermi", help="フェルミ推定(仮定明示・コードが計算)")
 app.add_typer(workflow_commands.check_app, name="check")
+workflow_commands.check_app.command("list")(template_commands.check_list)
 app.add_typer(workflow_commands.review_app, name="review")
 app.add_typer(workflow_commands.respond_app, name="respond")
 app.add_typer(workflow_commands.checkpoint_app, name="checkpoint")

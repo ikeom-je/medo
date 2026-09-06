@@ -279,6 +279,21 @@ def _is_diverging(ctx: StatusContext, delta: dict) -> bool:
     return all(item["progress_count"] == 0 for item in deltas[-2:])
 
 
+def _is_approved(ctx: StatusContext) -> bool:
+    """現在のレビュー対象に対する最新のレビューが approved か。
+
+    open_findings が空でも「まだ誰も見ていない」場合があり、空を承認の
+    証拠にできない。過去に一度でも approved があれば真、としないのは、
+    その後に別のレビュアーが changes_requested を出しても覆らないため。
+    """
+    reviews = [
+        event for event in ctx.events
+        if event.kind == "asis_review"
+        and getattr(event.target, "artifact_id", None) == ctx.target.as_is_report_id
+    ]
+    return bool(reviews) and reviews[-1].outcome == "approved"
+
+
 def workflow_branch(ctx: StatusContext) -> dict:
     delta = round_delta(
         ctx.previous_doc, ctx.doc, ctx.events, ctx.round_count,
@@ -292,6 +307,7 @@ def workflow_branch(ctx: StatusContext) -> dict:
         },
         "review": {
             "current_target": ctx.target.as_is_report_id,
+            "approved": _is_approved(ctx),
             "open_findings": ctx.open_review_findings,
         },
         "responses": {
