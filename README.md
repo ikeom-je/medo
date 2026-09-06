@@ -122,7 +122,7 @@ uv run medo --help           # CLI
 python skills/build.py       # Skill配布物のビルド(Claude Code/Codex/agy共通形式)
 ```
 
-Skillの再現性は `MEDO_TRACE` で測れます。同じ初期状態から各ホストに1周させ、CLI呼び出し列のJSONLをdiffすると、Skillが飛ばした操作が見えます。**値が残るのは選択肢を表すオプション(`--result` / `--reaction` / `--outcome` 等)だけ**で、自由文・ファイルパス・案件IDは `<redacted>` になるため、トレースはそのまま共有できます。
+Skillの再現性は `MEDO_TRACE` で測れます。同じ初期状態から各ホストに1周させ、CLI呼び出し列のJSONLをdiffすると、Skillが飛ばした操作が見えます。**自由文・ファイルパス・案件IDは伏字になる**ため、トレースはそのまま共有できます(何が残り何が伏せられるかは [docs/usage.md](docs/usage.md#skillの再現性を測る) を参照)。
 
 ```bash
 MEDO_TRACE=/tmp/claude.jsonl uv run medo status --project <id>

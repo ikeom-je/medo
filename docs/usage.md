@@ -107,6 +107,8 @@ medo status --project <id> --include-scope secondary   # 診断範囲を広げ�
 
 ## 案件を始める
 
+`<id>` は自分で決める英数字slug(例 `yoyaku-system`)。事前登録は要らず、最初の保存で作られる。
+
 ```bash
 medo status --project <id>                       # next_step: hearing が返る
 medo requirements template > /tmp/req.yaml       # 雛形を取得
@@ -122,34 +124,15 @@ medo requirements save --project <id> --file /tmp/req.yaml
 
 誤字・言い回しの修正だけのセクションは `--editorial <section>` を宣言する。宣言が無ければ本文の変更は「要再生成」として扱われる(安全側)。
 
----
+### IDはどこから得るか
 
-## 進行を記録する
+`requirements save` は `saved: v1` としか返さない。後続のコマンドに渡すIDは次で確認する。
 
-進行記録は要件とは別のイベントとして持つ。要件は保存のたびに版が進むため、反応やレビューを要件内に置くと記録した瞬間に旧版宛てになる。
-
-```bash
-# チェック項目の確認結果。artifact束縛の項目は --artifact が必須
-medo check list                                  # どの項目がどの束縛か
-medo check add --project <id> --check reality_gap --result completed
-medo check add --project <id> --check as_is_articulation --result completed \
-  --artifact as-is-report-v1
-
-# レビュー結果(報告書と討議用スライドをセットで)
-medo review add --project <id> --report as-is-report-v1 --slides slides-v1 \
-  --outcome approved --reviewed-by human
-
-# 顧客の反応。purpose によって対象が変わる
-medo respond add --project <id> --stakeholder sh-1 --artifact as-is-report-v1 \
-  --purpose as_is_alignment --reaction empathized
-medo respond add --project <id> --stakeholder sh-1 \
-  --purpose to_be_go_ahead --reaction agreed     # 要件宛て。--artifact を付けない
-
-# 節目への回答。この周回で検証する仮説を1つ選ぶ
-medo checkpoint answer --project <id> --responds-to ev-1 --answer generate --focus hyp-1
-```
-
-**判断できなかったことを失敗として扱わない**。`--result undeterminable` で記録し、扱いを `--disposition open|deferred|promoted` で示す。判断できなかったこと自体が次の周回の論点になる。
+| ID | 例 | どこで得るか |
+|---|---|---|
+| ノード | `as-1` / `sh-1` / `hyp-1` | `medo requirements get --project <id> --format json`(保存時にcoreが採番) |
+| 生成物 | `as-is-report-v1` / `slides-v1` | `medo artifacts list --project <id>` |
+| イベント | `ev-1` | `medo status --project <id> --view workflow` の `loop.checkpoint.pending_ids`、または `actions` の `refs` |
 
 ---
 
@@ -168,6 +151,38 @@ medo artifacts list --project <id>
 生成物は**セクション単位**で陳腐化を判定する。2段階あり、`stale`(要再生成)と `outdated`(差分確認推奨)を区別する。依存は `--derived-from` で辿り、親の陳腐化は子へ連鎖する。
 
 `--generated-by claude|codex|gemini` を記録するため、同じ状態に対してモデルを変えて実行し、結果を比較できる。
+
+---
+
+## 進行を記録する
+
+進行記録は要件とは別のイベントとして持つ。要件は保存のたびに版が進むため、反応やレビューを要件内に置くと記録した瞬間に旧版宛てになる。
+
+```bash
+# チェック項目の確認結果。artifact束縛の項目は --artifact が必須
+medo check list                                  # どの項目がどの束縛か
+medo check list --confirmer customer             # 顧客に確認する項目(スライドの章6に投影)
+medo check add --project <id> --check reality_gap --result completed
+medo check add --project <id> --check as_is_articulation --result completed \
+  --artifact as-is-report-v1
+
+# レビュー結果(報告書と討議用スライドをセットで)
+medo review add --project <id> --report as-is-report-v1 --slides slides-v1 \
+  --outcome approved --reviewed-by human
+medo review add --project <id> --report as-is-report-v1 --slides slides-v1 \
+  --outcome changes_requested --refs oq-1 --slide-finding "章3の表現を見直す"
+
+# 顧客の反応。purpose によって対象が変わる
+medo respond add --project <id> --stakeholder sh-1 --artifact as-is-report-v1 \
+  --purpose as_is_alignment --reaction empathized
+medo respond add --project <id> --stakeholder sh-1 \
+  --purpose to_be_go_ahead --reaction agreed     # 要件宛て。--artifact を付けない
+
+# 節目への回答。この周回で検証する仮説を1つ選ぶ
+medo checkpoint answer --project <id> --responds-to ev-1 --answer generate --focus hyp-1
+```
+
+**判断できなかったことを失敗として扱わない**。`--result undeterminable` で記録し、扱いを `--disposition open|deferred|promoted` で示す。判断できなかったこと自体が次の周回の論点になる。
 
 ---
 
@@ -220,7 +235,15 @@ for line in open(sys.argv[1]):
 diff <(extract /tmp/claude.jsonl) <(extract /tmp/gemini.jsonl)
 ```
 
-値が残るのは選択肢を表すオプション(`--result` / `--reaction` / `--outcome` 等)だけで、自由文・ファイルパス・案件IDは `<redacted>` になる。トレースはそのまま共有できる。
+値が残るのは**どの選択をしたかを表すオプション**だけである。選択肢(`--result` / `--reaction` / `--outcome` 等)と、案件内で閉じた参照ID(`--artifact` / `--stakeholder` / `--responds-to` / `--focus` 等)は残る。**自由文(`--statement` / `--note` 等)・ファイルパス・案件ID(`--project`)は `<redacted>` になる**ため、顧客の生の声や顧客名を含むパスはトレースに残らない。
+
+```json
+{"command": ["respond", "add"],
+ "options": {"--project": "<redacted>", "--stakeholder": "sh-1",
+             "--artifact": "as-is-report-v1", "--purpose": "as_is_alignment",
+             "--reaction": "acknowledged", "--note": "<redacted>"},
+ "exit_code": 0}
+```
 
 ---
 
