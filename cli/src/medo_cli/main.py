@@ -12,6 +12,7 @@ import yaml
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta, RejectedOption
 from medo_core.facts import Fact, FactStore
 from medo_core.fermi import FermiModel, evaluate
+from medo_cli.commands import templates as template_commands
 from medo_cli.commands import workflow as workflow_commands
 from medo_core.config import get_knowledge_root, get_storage
 from medo_core.knowledge import (
@@ -31,6 +32,8 @@ knowledge_app = typer.Typer(no_args_is_help=True)
 artifacts_app = typer.Typer(no_args_is_help=True)
 facts_app = typer.Typer(no_args_is_help=True)
 fermi_app = typer.Typer(no_args_is_help=True)
+requirements_app.command("template")(template_commands.requirements_template)
+artifacts_app.command("outline")(template_commands.artifacts_outline)
 app.add_typer(requirements_app, name="requirements", help="要件ドキュメント(バージョン管理)")
 app.add_typer(knowledge_app, name="knowledge", help="技術ナレッジ(案件横断)/ 案件固有ナレッジ")
 app.add_typer(artifacts_app, name="artifacts", help="生成物の保存・一覧")

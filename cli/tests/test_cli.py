@@ -526,3 +526,53 @@ def test_workflow_commands_are_available_after_split():
     result = runner.invoke(app, ["check", "--help"])
 
     assert result.exit_code == 0
+
+
+def test_requirements_template_saves_verbatim_without_creating_nodes(medo_home: Path):
+    """雛形をそのまま保存できないと、Skillへの案内として成立しない。"""
+    result = runner.invoke(app, ["requirements", "template"])
+    assert result.exit_code == 0
+
+    path = medo_home / "req.yaml"
+    path.write_text(result.output, encoding="utf-8")
+    saved = runner.invoke(app, ["requirements", "save", "--project", "p1", "--file", str(path)])
+    assert saved.exit_code == 0 and "saved: v1" in saved.output
+
+    status = runner.invoke(app, ["status", "--project", "p1"])
+    assert json.loads(status.output)["diagnostic_phase"] == "discovery"
+
+
+def test_requirements_template_needs_no_project(medo_home: Path):
+    """まだ案件が無い状態で最初に呼ぶコマンドなので、案件IDを要求してはならない。"""
+    assert runner.invoke(app, ["requirements", "template"]).exit_code == 0
+
+
+def test_artifacts_outline_returns_the_discussion_chapters(medo_home: Path):
+    result = runner.invoke(
+        app, ["artifacts", "outline", "--type", "slides", "--slide-kind", "discussion"]
+    )
+
+    assert result.exit_code == 0 and "本日の検証テーマ" in result.output
+
+
+def test_artifacts_outline_rejects_an_unknown_slide_kind(medo_home: Path):
+    result = runner.invoke(
+        app, ["artifacts", "outline", "--type", "slides", "--slide-kind", "poster"]
+    )
+
+    assert result.exit_code == 1 and "error:" in result.output
+
+
+def test_artifacts_outline_reports_final_is_not_available_yet(medo_home: Path):
+    """未実装を空出力で誤魔化すと、Skillが空の章構成で資料を作る。"""
+    result = runner.invoke(
+        app, ["artifacts", "outline", "--type", "slides", "--slide-kind", "final"]
+    )
+
+    assert result.exit_code == 1 and "error:" in result.output
+
+
+def test_artifacts_outline_rejects_a_type_without_an_outline(medo_home: Path):
+    result = runner.invoke(app, ["artifacts", "outline", "--type", "prfaq"])
+
+    assert result.exit_code == 1 and "error:" in result.output
