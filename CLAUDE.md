@@ -2,41 +2,16 @@
 
 アイデアから「目処が立つ」までを最速にする、クラウド非依存の上流工程Agentケイパビリティ(Agent + Skill + CLI)。発想は自由に、事実は縛る。
 
-## Steering(常時参照)
+## まず読む
+
+**@docs/agent-guide.md** — ホスト共通のAgent向けガイド。現在地・参照先・絶対に守ることはすべてそこにある。
+
+規約を足すときも `docs/agent-guide.md` だけを直す。本ファイルに書き写さない(AGENTS.md とずれる)。
+
+## Steering(Claude Code の自動読み込み)
 
 @.claude/steering/product.md
 @.claude/steering/tech.md
 @.claude/steering/structure.md
 
-## タイミング別の参照先
-
-| タイミング | 参照 |
-|---|---|
-| タスク着手前(ワークフロー・着手前チェック) | @.claude/steering/workflow.md |
-| テストを書く・実行する・完了を主張する前 | @.claude/steering/testing.md |
-| コミット・ブランチ操作の前 | @.claude/steering/git.md |
-
-## Specs / Plans
-
-- 現行フェーズのAgent用要約: `.claude/specs/phase2/spec.md`(タスク一覧: `.claude/specs/phase2/tasks.md`)。フェーズ1は `.claude/specs/phase1/`
-- 正本(人間用): 設計 `docs/superpowers/specs/medo-phase2-design.md`(索引。フェーズ1は `medo-design.md`)/ 実装計画 `docs/superpowers/plans/medo-phase2-core.md`
-- ドキュメントは二層整理: **docs/ = 人間用(正本)、.claude/ = Agent用(要約+ポインタ)**。設計変更は正本を先に更新し要約を同期する
-
-## 絶対に守ること
-
-1. 数値・鮮度・技術ナレッジの通り道にLLMを挟まない(事実はfacts/knowledge・CLI出力のみ)
-2. CLI・ツールが失敗したら推測で補完せず失敗を報告する
-3. テストとリントが通ることを確認してからコミットする(`uv run pytest` / `uv run ruff check .`)
-4. 設計承認前に実装を始めない(スペック駆動: workflow.md参照)
-5. 実行主体は workflow.md Section 3 の担当表・エージェント可用性プロファイル(唯一の定義箇所)に従う(担当表の更新で変更可能。「全員揃う」プロファイルでは最終判断・検証・コミットは常にClaude、単体プロファイルではそのプロファイルのオーケストレータが担う)。中間生成物は相互レビュー(作成モデル≠レビューモデル、上限2ラウンド。単体プロファイルでは自己レビューに緩和)を通す
-6. 表現の分担を守る: **コードには How、テストコードには What、コミットログには Why、コードコメントには Why not** を書く(詳細: workflow.md Section 4)
-
-## よく使うコマンド
-
-```bash
-uv sync --all-packages   # 依存解決
-uv run pytest            # 全テスト
-uv run ruff check .      # リント
-uv run medo --help       # CLI
-python skills/build.py   # Skill配布物のビルド
-```
+上記3本は常時参照。タイミング別の参照先(workflow / testing / git)と、どの可用性プロファイルで動いているかの判断は `docs/agent-guide.md` を見る。
