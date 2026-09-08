@@ -1,3 +1,5 @@
+import re
+
 import yaml
 
 from medo_core.requirements import RequirementsDoc, RequirementsStore
@@ -5,7 +7,10 @@ from medo_core.storage import LocalJsonStorage
 from medo_core.templates import (
     DISCUSSION_CHAPTER_INPUTS,
     DISCUSSION_SLIDES_OUTLINE,
+    FINAL_CHAPTER_INPUTS,
+    FINAL_SLIDES_OUTLINE,
     NODE_EXAMPLES,
+    REFRAMING_RULE,
     REQUIREMENTS_TEMPLATE,
     WRITABLE_SECTIONS,
 )
@@ -124,3 +129,54 @@ def test_every_chapter_input_exists_on_the_model():
 
 def test_every_chapter_appears_in_the_outline():
     assert all(chapter in DISCUSSION_SLIDES_OUTLINE for chapter in DISCUSSION_CHAPTER_INPUTS)
+
+
+def test_final_chapters_reference_real_inputs():
+    """章の入力が実在しないセクション・生成物を指すと、Skillが埋められない。"""
+    inputs = {name for chapter in FINAL_CHAPTER_INPUTS.values() for name in chapter}
+    known = set(WRITABLE_SECTIONS) | {"rejected_options", "fermi", "prfaq"}
+
+    assert inputs <= known
+
+
+def test_every_final_chapter_appears_in_the_outline():
+    assert all(chapter in FINAL_SLIDES_OUTLINE for chapter in FINAL_CHAPTER_INPUTS)
+
+
+def test_final_outline_keeps_the_comparison_inside_the_prfaq():
+    """最終提案スライドの親は prfaq ちょうど1件で、mini-prfaq を直接参照できない。"""
+    assert "mini-prfaq" not in FINAL_SLIDES_OUTLINE
+    assert "rejected_options" in FINAL_SLIDES_OUTLINE
+
+
+def test_final_outline_names_the_criteria_behind_the_choice():
+    """評価軸を示さない採否は属人的な結論に見える。"""
+    assert "principles" in FINAL_SLIDES_OUTLINE and "kpis" in FINAL_SLIDES_OUTLINE
+
+
+def test_final_outline_takes_numbers_only_from_stored_calculations():
+    """効果の数値をスライド生成で作り出さない(設計原則: 数値の通り道にLLMを挟まない)。"""
+    assert "fermi" in FINAL_SLIDES_OUTLINE
+
+
+def test_final_outline_asks_for_the_phase_signoff():
+    """Askが何の承認依頼かを書かないと、反応を記録する対象が定まらない。"""
+    assert "phase_signoff" in FINAL_SLIDES_OUTLINE
+
+
+def test_final_outline_controls_disclosure_of_the_conflict_chapter():
+    """合同会議で対立構造をそのまま投影すると会議が紛糾する。"""
+    conflict_chapter = FINAL_SLIDES_OUTLINE[FINAL_SLIDES_OUTLINE.index("## 章3"):]
+
+    assert "開示" in conflict_chapter[: conflict_chapter.index("## 章4")]
+
+
+def test_both_outlines_carry_the_same_reframing_rule():
+    """規約を2箇所に書き分けると、片方だけが更新される。"""
+    assert REFRAMING_RULE in DISCUSSION_SLIDES_OUTLINE
+    assert REFRAMING_RULE in FINAL_SLIDES_OUTLINE
+
+
+def test_the_reframing_rule_does_not_hardcode_chapter_numbers():
+    """適用章は討議用(章2・章3)と最終提案(章3)で違う。規約本文に書くと片方が誤りになる。"""
+    assert not re.search(r"章\d", REFRAMING_RULE)
