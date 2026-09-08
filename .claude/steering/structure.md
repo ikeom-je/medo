@@ -73,7 +73,7 @@ skills/
 ├── src/                       # 共通Skill(frontmatter付き)。1フォルダ=1 Skill
 │   ├── medo-hearing/SKILL.md            # 業界・ビジネス状況・課題・経営思想/方針の構造化
 │   ├── medo-propose-options/SKILL.md    # 市場ファクト+フェルミ+技術ナリッジ根拠→打ち手候補のミニPRFAQ候補セット化
-│   └── medo-grow-prfaq/SKILL.md         # 合意案を完全版PRFAQへ育成(技術ナリッジ根拠)
+│   └── medo-grow-prfaq/SKILL.md         # 合意案を完全版PRFAQへ育成し、最終提案スライドと承認記録まで運ぶ
 ├── build.py             # dist/<name>/SKILL.md を生成(3ホスト共通形式・変換なし)
 ├── tests/
 └── dist/                # ビルド出力(.gitignored)

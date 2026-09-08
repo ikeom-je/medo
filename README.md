@@ -88,14 +88,14 @@ cp -r skills/dist/* .agents/skills/
 
 ## ステータス
 
-**フェーズ2の決定論層(優先度1〜4)とSkill(優先度5)まで完了。** フェーズ1のWhat/Why縦切りに加えて、標準周回を回すためのドメインモデル(現状・あるべき姿・GAP・真因・課題・仮説)・進行記録・4階層診断・Skill 4本を実装し、まっさらな環境からの通し確認を完了しています。
+**フェーズ2の決定論層(優先度1〜4)・Skill(優先度5)・最終提案スライドとフェーズ完了ゲート(優先度6)まで完了。** フェーズ1のWhat/Why縦切りに加えて、標準周回を回すためのドメインモデル(現状・あるべき姿・GAP・真因・課題・仮説)・進行記録・4階層診断・Skill 4本を実装し、まっさらな環境からの通し確認を完了しています。
 
 | フェーズ | 内容 | 状態 |
 |---|---|---|
 | 1 | core(要件・ファクト・フェルミ・技術ナレッジ)+ `medo` CLI + Skill(hearing / propose-options / grow-prfaq) | 完了 |
 | 2(優先度1〜4) | ドメインモデル・ID規約・変更manifest・生成物の依存グラフ・進行記録・収束判定・4階層診断 | 完了 |
 | 2(優先度5) | 標準周回のSkill 4本 + 討議用スライド生成 | 完了 |
-| 2(優先度6) | 最終提案スライド + `phase_signoff` ゲート | 未着手 |
+| 2(優先度6) | 最終提案スライド + `phase_signoff` ゲート | 完了(実案件でのSkill evalは未実施) |
 | 2(後続) | knowledge-digest・decision-roadmap・build-mock・propose-architecture・pricing・簡易Webアプリ | 詳細設計が未了 |
 | 3 | 運用自動化: 類似案件検索 /(必要になれば)特定クラウドAPI連携ETLをプラグインとして追加 | 未着手 |
 | バックログ | AWS比較・MCPアダプタ・A2A(Gemini Enterprise)・チーム展開 | — |
@@ -106,7 +106,7 @@ cp -r skills/dist/* .agents/skills/
 |---|---|
 | フェーズ1の設計(PRFAQ含む) | [docs/superpowers/specs/medo-design.md](docs/superpowers/specs/medo-design.md) |
 | フェーズ2の設計(索引) | [docs/superpowers/specs/medo-phase2-design.md](docs/superpowers/specs/medo-phase2-design.md) |
-| 実装計画 | [medo-phase1.md](docs/superpowers/plans/medo-phase1.md) / [medo-phase2-core.md](docs/superpowers/plans/medo-phase2-core.md) / [medo-phase2-skills.md](docs/superpowers/plans/medo-phase2-skills.md) |
+| 実装計画 | [medo-phase1.md](docs/superpowers/plans/medo-phase1.md) / [medo-phase2-core.md](docs/superpowers/plans/medo-phase2-core.md) / [medo-phase2-skills.md](docs/superpowers/plans/medo-phase2-skills.md) / [medo-phase2-final.md](docs/superpowers/plans/medo-phase2-final.md) |
 | セットアップと通し確認の記録 | [docs/setup.md](docs/setup.md) |
 | 使い方 | [docs/usage.md](docs/usage.md) |
 | Agent向けエントリポイント | [CLAUDE.md](CLAUDE.md)(Claude Code) / [AGENTS.md](AGENTS.md)(agy等) |
