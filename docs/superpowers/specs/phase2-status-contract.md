@@ -23,7 +23,8 @@ status
 │  └─ loop        往復の現在地 + チェックポイント
 ├─ readiness    収束判定
 │  ├─ state
-│  └─ failed_conditions
+│  ├─ failed_conditions
+│  └─ phase      フェーズ完了の判定(state / failed_conditions)
 └─ actions      推奨する次の行動
 ```
 
@@ -144,7 +145,11 @@ status
       {"code": "review_findings_open", "refs": ["gap-1"]},
       {"code": "to_be_go_ahead_missing", "refs": ["sh-1"]},
       {"code": "high_influence_objection_open", "refs": ["ev-7"]}
-    ]
+    ],
+    "phase": {
+      "state": "not_evaluable",
+      "failed_conditions": []
+    }
   },
   "actions": [
     {"code": "answer_tobe_checkpoint", "reason": "節目で未回答"},
@@ -197,8 +202,17 @@ status
 | 7c | `ground_confirmed_to_be` | `unsupported_confirmed_to_be`(裏づけの無い確定ToBeがある) |
 | 7d | `generate_discussion_slides` | 最新 `as-is-report` に対応する討議用スライドが無い |
 | 7e | `request_to_be_go_ahead` | 他の条件を満たし、決裁者の `to_be_go_ahead` だけが未取得 |
-| 8 | `proceed_to_propose_options` | `readiness.state == "ready"` |
+| 8 | `proceed_to_propose_options` | `readiness.state == "ready"` で、まだ `prfaq` が無い(`phase_readiness` は `not_evaluable`) |
+| 8b | `generate_final_slides` | `readiness.state == "ready"` かつ `prfaq` が fresh で、最終提案スライドが無いか stale |
+| 8c | `request_phase_signoff` | `readiness.state == "ready"` かつ `prfaq` と最終提案スライドがともに fresh で、`phase_signoff_missing`。**旧版への承認が現在の対象から外れて立った場合は、その旨を `reason` で返す** |
+| 8d | `complete_phase` | `phase_readiness.state == "ready"` |
 | 9 | `continue_hearing` | 上記のいずれにも該当しない |
+
+**8〜8dは `phase_readiness` が主役になる区間である**。標準周回の収束(`readiness.state == "ready"`)の後、打ち手の提案から意思決定依頼までを案内するのは `phase_readiness`(ワークフローモデル §7)であり、`readiness` ではない。`phase_readiness` が `not_evaluable`(`prfaq` がまだ無い)のあいだは 8 が出て、`prfaq` が入った時点で 8b 以降に切り替わる。**8b〜8dは診断であってゲートではない**(署名が無くても生成物の作成は妨げない)。
+
+**条件は肯定形で判定する**(Codex指摘)。`phase_readiness.failed_conditions` をそのまま行動へ写すと、標準周回が未収束でも `prfaq` がstaleでも `final_slides_missing_or_stale` は同時に立つため、**staleな親から最終提案スライドを作らせる行動**を推奨してしまう。8b・8cは上表の肯定条件で判定する。
+
+**決裁者が複数登録されている場合、`phase_signoff` は1名の `agreed` で充足する**(`refs` には未取得の決裁者を全員返す)。決裁者リストには「決裁に関与しうる人」も含まれ、全員必須にすると実務上フェーズが閉じない。
 
 **`disposition` を決めれば先へ進める**(agy指摘)。当初案は 6b/6c が `proceed_to_propose_options`(8)より上位にあり、判断不能が1件でも残ると次ステージへの行動が提示されず実務が凍結した。`deferred` / `promoted` を記録すれば 6b/6c は消え、8が出る。
 
@@ -237,6 +251,7 @@ medo status --project <id> --format json|digest
 ```
 
 - `--view summary`(既定): **`actions` を先頭に置く**。続いて `diagnostic_phase` / `workflow.loop.round_delta` / `workflow.loop.checkpoint` / `workflow.responses.open_objections` / `workflow.review.open_findings`。`readiness` は `state` のみを返し、`failed_conditions` は `--view readiness` で取る
+- `--view readiness`: 標準周回の判定に加えて、**フェーズ完了の判定を `readiness.phase` として同じ枝の中に返す**(フェーズ完了の可否は「収束の次の問い」であり、Skillが別のviewを呼び分けずに読めることを優先する)。`--view full` でも同じ位置に置く — 枝の外にもう1つトップレベル要素を足すと、「`--view <枝名>` はその枝のみ」の投影規則が崩れる
 - `--view full`: 全4階層
 - `--view <枝名>`: その枝のみ
 
@@ -251,6 +266,6 @@ medo status --project <id> --format json|digest
 フェーズ1の `medo status` はフラットなJSON(`requirements` / `facts` / `artifacts` / `next_step`)を返している。
 
 - `next_step` は**フェーズ1のロジックで独立に計算**して返し続ける(`actions[0]` にしない。値域が異なるため。§3参照)
-- フェーズ1の `artifacts` 配列は `model` 直下に残す(生成物の一覧と stale フラグ)
+- フェーズ1の `artifacts` 配列は `model` 直下に残す(生成物の一覧と stale フラグ)。**この配列は「型ごと最新版」のまま維持する** — `slides` が討議用と最終提案の2種類になっても形を変えない(フェーズ1のSkillが型で引いている)。artifact束縛checkの対象解決だけを `(type, slide_kind)` で行う
 - **`--view summary` に後方互換フィールドを含める**: `requirements`(最新版・confidence件数)・`facts`(件数・stale件数)・`artifacts`(型ごと最新版とstaleフラグ)・`next_step`。フェーズ1のSkillはこれらだけで動く
 - `medo-hearing` は `medo-investigate` に統合するが、**フェーズ2の移行期間中は同名のSkillを残す**(本文は `medo-investigate` を呼ぶよう案内するだけの薄いwrapper)。統合完了後に削除する

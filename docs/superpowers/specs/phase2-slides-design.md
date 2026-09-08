@@ -109,13 +109,23 @@
 
 ## 4. 最終提案スライド(`slide_kind="final"`)
 
+**リフレーミング規約(§2)は最終提案スライドの章3にも適用する**。GAPと真因、および「なぜ今まで解決に至っていないか」は討議用スライドの章2・章3と同じ素材を扱うため、責任の所在ではなく構造として描く。
+
+**§2の開示制御(章3)も最終提案スライドの章3へ引き継ぐ**。最終提案の場は決裁者と関係部門が同席する合同会議になりやすく、リフレーミング済みでも部門間の対立構造をそのまま投影すると会議が紛糾する。**提示相手に応じて出すかどうかをユーザーに問う**。
+
+**章4の素材は `prfaq` に取り込んでおく**(章4)。最終提案スライドの親は `prfaq` ちょうど1件であり([生成物のライフサイクル](phase2-artifact-lifecycle.md))、`mini-prfaq` の比較結果を直接参照しない。`rejected_options` は `prfaq` 保存時に記録し、比較の観点と評価は `prfaq` 本文に取り込む。
+
+**選定理由は評価軸に紐づける**(章4)。何を良しとするかの基準は `principles`(方針・理念)と `kpis` であり、これを示さずに採否だけを並べると、選定が属人的な結論に見える。
+
+**コストは新しい計算機構を持たない**(章5)。予算・体制の制約は `constraints` / `non_functional` から、効果の桁感は保存済みの `fermi` 生成物から引く。pricing計算機は詳細設計が未了で後送りであり([索引](medo-phase2-design.md))、スライド生成が数値を作り出してはならない。
+
 | # | 章 | 内容 | 主な入力 |
 |---|---|---|---|
 | 1 | SCQAエグゼクティブサマリー | Situation-Complication-Question-Answer | `as_is` / `challenges` / 採択案 |
 | 2 | As-Is vs To-Be 対比 | 現状と理想の対比、KPIの現状値→目標値 | `as_is` / `to_be` / `kpis` |
 | 3 | GAPと真因 | 状態の乖離と、その裏にある真因。**なぜ今まで解決に至っていないか** | `gaps` / `bottlenecks` / `attempts` |
-| 4 | 打ち手比較と選定理由 | Impact × Feasibility マトリクス + **なぜ他案を落としたか** | `mini-prfaq` / `rejected_options` |
-| 5 | 推奨ソリューション詳細 | 選定案の具体像(How・Workflow Before/After)。**複数枚に展開してよい** | `prfaq` の技術的背景・workflow改善見込み |
+| 4 | 打ち手比較と選定理由 | Impact × Feasibility マトリクス + **どの評価軸で選び、なぜ他案を落としたか** | `prfaq` に取り込まれた打ち手比較 / `rejected_options` / `principles` / `kpis` |
+| 5 | 推奨ソリューション詳細 | 選定案の具体像(How・Workflow Before/After)と、効果の桁感・動かせない条件。**複数枚に展開してよい** | `prfaq` の技術的背景・workflow改善見込み / `fermi` / `constraints` / `non_functional` |
 | 6 | ロードマップ | 段階と、各段階がどの仮説の検証に依存するか | `hypotheses` |
 | 7 | ネクストアクション(Ask) | **本日合意いただきたい事項**(PoC実施・体制・スコープ・次工程) | `open_questions` / `hypotheses(unvalidated)` |
 
@@ -135,7 +145,7 @@ class RejectedOption(BaseModel):
 rejected_options: list[RejectedOption] = []
 ```
 
-**`Artifact` のフィールドとして持つ**。許容する型は `mini-prfaq` / `comparison` / `prfaq` の3つで、他の型では無視する。見送りの判断は打ち手比較の段階で起きるため `mini-prfaq` と `comparison` で記録でき、`prfaq` がそれを引き継ぐ。
+**`Artifact` のフィールドとして持つ**。許容する型は `mini-prfaq` / `comparison` / `prfaq` の3つで、**他の型に付けると保存を拒否する**(黙って無視すると、スライドに付けたつもりの見送り理由が消える)。見送りの判断は打ち手比較の段階で起きるため `mini-prfaq` と `comparison` で記録でき、`prfaq` がそれを引き継ぐ。
 
 採択案自身のリスクは `ToBe.assumed_risks`([ドメインモデル](phase2-domain-model.md))が持つ。却下案のリスクだけを持って採択案のリスクを持たないのは片手落ちになる。
 

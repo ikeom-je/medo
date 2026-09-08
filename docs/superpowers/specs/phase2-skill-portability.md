@@ -76,7 +76,9 @@ Skill Aの出力をSkill Bがコンテキスト越しに受け取る、という
 | Skill | 用途 |
 |---|---|
 | `medo-propose-options` | 打ち手候補のミニPRFAQ候補セット化 |
-| `medo-grow-prfaq` | 合意案を完全版PRFAQへ育成 |
+| `medo-grow-prfaq` | 合意案を完全版PRFAQへ育成し、最終提案スライド(`slide_kind="final"`)と決裁者の `phase_signoff` の記録まで運ぶ |
+
+**最終提案に専用Skillを立てない**。PRFAQと最終提案スライドは同じ素材(採択案・却下理由・評価軸)を扱い、`description` が近いSkillを並べると選択がブレる。ただし `medo-grow-prfaq` は `medo status` の `actions` を見て**どの段から再開するかを分岐する**(PRFAQ済みの状態で再実行しても作り直さない)。
 
 計6本。フェーズ1の `medo-hearing` は `medo-investigate` に統合する(ヒアリングは調べる・仕立てるステージの一部)。**移行期間中は `medo-hearing` を薄いwrapperとして残し**(本文は `medo-investigate` を案内するだけ)、統合完了後に削除する。
 
