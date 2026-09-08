@@ -158,6 +158,35 @@ def test_grow_prfaq_applies_the_reframing_rule(tmp_path):
     assert "medo artifacts outline" in _built(tmp_path, "medo-grow-prfaq")
 
 
+def test_grow_prfaq_reaches_the_final_slides(tmp_path):
+    """PRFAQで止まると、顧客の意思決定にかける資料に到達しない。"""
+    text = _built(tmp_path, "medo-grow-prfaq")
+
+    assert "--slide-kind final" in text and "phase_signoff" in text
+
+
+def test_grow_prfaq_records_rejected_options_on_the_prfaq(tmp_path):
+    """--rejected はスライドでは拒否される(REJECTION_TYPES)。"""
+    text = _built(tmp_path, "medo-grow-prfaq")
+    prfaq_step = text[text.index("--type prfaq") : text.index("--slide-kind final")]
+
+    assert "--rejected" in prfaq_step
+
+
+def test_grow_prfaq_resumes_from_the_actions(tmp_path):
+    """再実行でPRFAQを作り直すと、現在のスライドへの承認が無効になる。"""
+    text = _built(tmp_path, "medo-grow-prfaq")
+
+    assert "generate_final_slides" in text and "request_phase_signoff" in text
+
+
+def test_grow_prfaq_records_only_reactions_it_actually_received(tmp_path):
+    """依頼しただけで agreed を記録すると、承認の意味が失われる。"""
+    text = _built(tmp_path, "medo-grow-prfaq")
+
+    assert "得られた反応" in text or "実際に得た" in text
+
+
 def test_every_skill_but_the_pointer_carries_exactly_three_contract_items(tmp_path):
     """4項目以上は遵守率が落ち、欠けると担保が消える(移植性 §4)。
 
