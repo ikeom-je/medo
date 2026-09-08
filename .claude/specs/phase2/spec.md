@@ -54,7 +54,7 @@
 
 ## スコープ外(優先度5以降・別計画)
 
-Skill 4本・討議用スライド生成(優先度5)、最終提案スライド+`phase_signoff` ゲート(優先度6)、出典検証の強化(並行)。ナレッジ来歴 / `knowledge-digest` / `decision-roadmap` / `build-mock` / `propose-architecture` / pricing / 簡易Webアプリは**詳細設計が未了**で、着手前に設計ドキュメントを起こす。
+Skill 4本・討議用スライド生成(優先度5、完了)、最終提案スライド+`phase_signoff` ゲート(優先度6、完了。計画: `docs/superpowers/plans/medo-phase2-final.md`)、出典検証の強化(並行、未着手)。ナレッジ来歴 / `knowledge-digest` / `decision-roadmap` / `build-mock` / `propose-architecture` / pricing / 簡易Webアプリは**詳細設計が未了**で、着手前に設計ドキュメントを起こす。
 
 ## 読み取れないものだけ書く(実装とstructure.mdを見れば分かることは書かない)
 

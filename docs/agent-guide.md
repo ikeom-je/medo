@@ -40,7 +40,7 @@ Medo を Claude Code / Codex / agy(Antigravity)のどれから触るときも、
 |---|---|
 | Agent用要約(現行フェーズ) | [.claude/specs/phase2/spec.md](../.claude/specs/phase2/spec.md)(タスク一覧: [tasks.md](../.claude/specs/phase2/tasks.md))。フェーズ1は `.claude/specs/phase1/` |
 | 正本の設計(人間用) | [medo-phase2-design.md](superpowers/specs/medo-phase2-design.md)(索引)。フェーズ1は `medo-design.md` |
-| 正本の実装計画(人間用) | [medo-phase2-core.md](superpowers/plans/medo-phase2-core.md) / [medo-phase2-skills.md](superpowers/plans/medo-phase2-skills.md) |
+| 正本の実装計画(人間用) | [medo-phase2-core.md](superpowers/plans/medo-phase2-core.md) / [medo-phase2-skills.md](superpowers/plans/medo-phase2-skills.md) / [medo-phase2-final.md](superpowers/plans/medo-phase2-final.md) |
 
 ドキュメントは二層。**docs/ = 人間用(正本)、.claude/ = Agent用(要約+ポインタ)**。設計変更は正本を先に更新し、要約を同期する。
 

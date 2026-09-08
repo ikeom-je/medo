@@ -1,6 +1,6 @@
 # セットアップ手順(手動スモーク結果)
 
-実環境で実際に使ったコマンド・環境変数・ハマりどころの記録。medoは自分専用・チーム展開前提のツールであり、本手順はまず自分のマシンで動かすためのもの。第1〜4節はフェーズ1 Task 10(Issue #37)、第5節はフェーズ2 Task 21(Issue #65)の結果。
+実環境で実際に使ったコマンド・環境変数・ハマりどころの記録。medoは自分専用・チーム展開前提のツールであり、本手順はまず自分のマシンで動かすためのもの。第1〜4節はフェーズ1 Task 10(Issue #37)、第5節はフェーズ2 Task 21(Issue #65)、第6節は優先度5(Skill 4本)、第7節は優先度6(最終提案スライドとフェーズ完了)の結果。
 
 ## 1. クラウド非依存構成の前提
 
@@ -234,7 +234,7 @@ medo status --project smoke --view full
 | 4 | `respond add --purpose to_be_go_ahead` は `--artifact` を付けると失敗 | ✅ `error: purpose=to_be_go_ahead の target は requirements である必要があります` |
 | 5 | `workflow.review.approved` がレビュー前 `false` → 記録後 `true` | ✅ |
 | 6 | `workflow.loop.round_delta.progress_count` が 0 でない | ✅ `1`(`new_internal_as_is: 1`) |
-| 7 | `artifacts outline --slide-kind final` が exit 1 + `error:` | ✅ 「優先度6で未実装」と明示して失敗 |
+| 7 | `artifacts outline --slide-kind final` が exit 1 + `error:` | ✅ 「優先度6で未実装」と明示して失敗(**§7 で実装済みになった**) |
 | 8 | `check list --confirmer customer` に `feasibility`(`confirmer: both`)が含まれる | ✅ 8項目 |
 | 9 | 節目に回答すると `checkpoint.state` が `answered` になる | ✅ `focus_hypothesis: hyp-1` も反映 |
 
@@ -268,3 +268,70 @@ error: 要件のスキーマ不正: perception gap は public と internal の A
 ### 6.7 ハマりどころ
 
 - 雛形の `as_is: []` は `from_as_is: []` の部分文字列である。雛形を**文字列置換で**編集するスクリプトを書くと、`gaps` のコメント例の中まで書き換えて壊れる。行全体の一致で置換するか、エディタで該当行のコメントを外す
+
+---
+
+## 7. 最終提案スライドとフェーズ完了の通し確認(フェーズ2 優先度6)
+
+まっさらな `MEDO_HOME` で、標準周回の収束からフェーズ完了(決裁者の `phase_signoff`)まで通した記録。**実データ(`~/.medo`)には触れていない**。
+
+```bash
+export MEDO_BACKEND=local MEDO_HOME=/tmp/medo-final-smoke
+rm -rf "$MEDO_HOME"
+```
+
+### 7.1 収束まで
+
+`internal` の AsIs・`confirmed` な ToBe・両者を結ぶ `Gap(kind: goal)`・決裁者を含む要件を保存し、`research` / `as-is-report` / 討議用スライドを作って段階に応じた check を記録、決裁者の `to_be_go_ahead` を `agreed` で記録した。
+
+```bash
+medo status --project smoke --format json     # actions: [answer_tobe_checkpoint, proceed_to_propose_options]
+                                              # readiness.state: ready
+```
+
+**`Gap(kind: goal)` が要る**。ToBeの裏づけは「`from_to_be` にそのToBeを含む goal gap があり、その `from_as_is` に `internal` かつ `confidence != open` の AsIs が含まれる」で判定されるため、これが無いと `unsupported_confirmed_to_be` で収束しない。
+
+### 7.2 PRFAQ から最終提案スライドへ
+
+```bash
+medo artifacts save --project smoke --type prfaq --grown-from "mini-prfaq-v1:自動割当" \
+  --rejected "外部SaaS:既存基幹との連携コストが見合わない:カスタマイズ性の制約" \
+  --requirements-version 2 --generated-by claude --file /tmp/prfaq.md
+medo status --project smoke --format json     # actions: [..., generate_final_slides]
+
+medo artifacts outline --type slides --slide-kind final
+medo artifacts save --project smoke --type slides --slide-kind final \
+  --derived-from prfaq-v1 --requirements-version 2 \
+  --generated-by claude --file /tmp/final.md
+medo status --project smoke --format json     # actions: [..., request_phase_signoff (refs: sh-1)]
+
+medo respond add --project smoke --stakeholder sh-1 --artifact slides-v2 \
+  --purpose phase_signoff --reaction agreed --note "この方針で進める"
+medo status --project smoke --view readiness --format json   # readiness.phase.state: ready
+```
+
+### 7.3 確認項目と結果
+
+| # | 確認したこと | 結果 |
+|---|---|---|
+| 1 | `artifacts outline --slide-kind final` が7章とリフレーミング規約を返す | ✅ exit 0 |
+| 2 | `actions` が段階に応じて `proceed_to_propose_options` → `generate_final_slides` → `request_phase_signoff` → `complete_phase` と遷移する | ✅ 4段階すべて確認 |
+| 3 | `request_phase_signoff` の `refs` に決裁者IDが入る | ✅ `["sh-1"]` |
+| 4 | `phase_signoff` の `agreed` 記録後に `readiness.phase.state` が `ready` になる | ✅ `failed_conditions` も空 |
+| 5 | 最終提案スライドを保存しても討議用スライド束縛の `expression_safety` が失効しない | ✅ `completed` のまま |
+| 6 | スライドを作り直すと承認が無効になり、理由付きで再依頼に戻る | ✅ `reason: スライドが更新されたため再承認が必要` |
+
+### 7.4 通し確認で確定したこと
+
+**確認項目5は、この通し確認のために書いた計画から見つかった欠陥である**([Issue #111](https://github.com/ikeom-je/medo/issues/111) / PR #116)。`slides` が討議用と最終提案の2種類になると、生成物typeだけで「現在の対象」を決める実装が最終提案の保存で討議用束縛の check を失効させる。修正前のコードで `completed` → `unverified` に戻ることを実測してから直した。
+
+**自動テストで検出できなかった理由**: 優先度5までは `slides` が1種類しか無く、`(type, slide_kind)` の区別が要る状況をテストが作れなかった。**型が1つしか無いうちは、型で畳む実装の誤りは現れない**。
+
+### 7.5 未実施
+
+**実案件での Skill eval(`medo-grow-prfaq` の再実行)はまだ行っていない**。本節はCLIの通し確認であり、Skill本文の変更に対する eval ケースの再実行([testing.md](../.claude/steering/testing.md))は別途ユーザーと実施する。確認するのは、引用ID・章構成が安定していることと、**依頼しただけの状態を `phase_signoff` の `agreed` として記録しない**ことの2点。
+
+### 7.6 ハマりどころ
+
+- 収束状態を組むには check を11項目すべて記録する必要がある(`medo check list` が返す全項目)。artifact束縛の3つ(`source_quality` / `as_is_articulation` / `expression_safety`)は `--artifact` が必須で、対象の生成物を先に作っておく
+- `answer_tobe_checkpoint` は最後まで `actions` の先頭に残る。節目に回答していない状態でもフェーズ完了の判定は独立に進む(診断であってゲートではない)

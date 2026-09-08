@@ -26,6 +26,8 @@ Medoは「ビジネスの打ち手に目処をつける」上流工程を支援�
     medo-propose-options   打ち手候補のミニPRFAQ比較
                            ↓ 合意
     medo-grow-prfaq        完全版PRFAQ(How+効果+ロードマップ)
+                           ↓ 最終提案スライド(Ask)
+                           決裁者の phase_signoff → フェーズ完了
 ```
 
 **固定の順序ではない**。どのステージから始めてもよく、CLIは順序を強制しない。何をすべきかは常に `medo status` が返す。
@@ -48,7 +50,7 @@ medo status --project <id>                  # 既定は summary(actions が先�
 | `actions` | 次にできることだけ | 手短に確認したい |
 | `model` | 構造・リンク・カバレッジ | 何が繋がっていないか見たい |
 | `workflow` | check・レビュー・反応・周回 | 進行状況を見たい |
-| `readiness` | 収束判定と失敗している条件 | なぜ次へ進めないか知りたい |
+| `readiness` | 収束判定と失敗している条件、`phase`(フェーズ完了の判定) | なぜ次へ進めないか知りたい |
 | `full` | 4階層すべて | 全部見たい |
 
 ```bash
@@ -73,7 +75,10 @@ medo status --project <id> --include-scope secondary   # 診断範囲を広げ�
 | `ground_confirmed_to_be` | 裏づけの無い確定ToBeがある |
 | `request_to_be_go_ahead` | 決裁者の合意だけが未取得 |
 | `regenerate_stale_artifacts` | 陳腐化した生成物がある |
-| `proceed_to_propose_options` | 収束条件を満たした |
+| `proceed_to_propose_options` | 収束条件を満たし、まだPRFAQが無い |
+| `generate_final_slides` | PRFAQがあり、最終提案スライドが無いか陳腐化している |
+| `request_phase_signoff` | 決裁者への承認依頼だけが残っている |
+| `complete_phase` | フェーズ完了の条件を満たした |
 | `continue_hearing` | 上記のいずれにも該当しない |
 
 ### `next_step`(フェーズ1互換)
@@ -99,7 +104,7 @@ medo status --project <id> --include-scope secondary   # 診断範囲を広げ�
 | ぶつける・反応を得る | `medo-dialogue` | `respond add` / `check add` |
 | 振り返る・次へ進む | `medo-decide` | `requirements save` / `checkpoint answer` / `requirements diff` |
 | 打ち手の提案 | `medo-propose-options` | `facts save` / `fermi calc` / `knowledge search` / `artifacts save --type mini-prfaq` |
-| PRFAQ育成 | `medo-grow-prfaq` | `artifacts get` / `knowledge search` / `artifacts save --type prfaq` |
+| PRFAQ育成と最終提案 | `medo-grow-prfaq` | `artifacts save --type prfaq --rejected` / `artifacts outline --slide-kind final` / `artifacts save --type slides --slide-kind final` / `respond add --purpose phase_signoff` |
 
 `medo-hearing` は `medo-investigate` に統合済み(移行期間中のポインタとして残している)。
 
@@ -138,6 +143,9 @@ medo requirements save --project <id> --file /tmp/req.yaml
 
 ## 生成物
 
+スライドは用途で2種類ある。**討議用**(`discussion`、親は現状報告書)は往復の途中で認識を確認するため、
+**最終提案**(`final`、親はPRFAQ)は合意後に意思決定を求めるためのもので、章構成が違う。
+
 ```bash
 medo artifacts outline --type slides --slide-kind discussion   # 章構成と表現の規約
 medo artifacts save --project <id> --type as-is-report \
@@ -146,6 +154,19 @@ medo artifacts save --project <id> --type slides --slide-kind discussion \
   --derived-from as-is-report-v1 --requirements-version <n> \
   --generated-by claude --file /tmp/slides.md
 medo artifacts list --project <id>
+```
+
+合意した打ち手を提案に育てるときは、見送った案を**PRFAQに**記録する(スライドには付けられない)。
+最終提案スライドの親はそのPRFAQちょうど1件で、比較の中身はPRFAQ本文から引く。
+
+```bash
+medo artifacts save --project <id> --type prfaq --grown-from "mini-prfaq-v1:<採択案>" \
+  --rejected "<名前>:<見送った理由>:<受け入れたリスク>" \
+  --requirements-version <n> --generated-by claude --file /tmp/prfaq.md
+medo artifacts outline --type slides --slide-kind final    # 7章構成とリフレーミング規約
+medo artifacts save --project <id> --type slides --slide-kind final \
+  --derived-from prfaq-v1 --requirements-version <n> \
+  --generated-by claude --file /tmp/final-slides.md
 ```
 
 生成物は**セクション単位**で陳腐化を判定する。2段階あり、`stale`(要再生成)と `outdated`(差分確認推奨)を区別する。依存は `--derived-from` で辿り、親の陳腐化は子へ連鎖する。
@@ -177,10 +198,14 @@ medo respond add --project <id> --stakeholder sh-1 --artifact as-is-report-v1 \
   --purpose as_is_alignment --reaction empathized
 medo respond add --project <id> --stakeholder sh-1 \
   --purpose to_be_go_ahead --reaction agreed     # 要件宛て。--artifact を付けない
+medo respond add --project <id> --stakeholder sh-1 --artifact slides-v2 \
+  --purpose phase_signoff --reaction agreed      # 最終提案スライド宛て
 
 # 節目への回答。この周回で検証する仮説を1つ選ぶ
 medo checkpoint answer --project <id> --responds-to ev-1 --answer generate --focus hyp-1
 ```
+
+**承認は「何を見て決めたか」と不可分である**。`phase_signoff` は最終提案スライド宛てで、スライドを作り直すと旧版への承認は無効になり、`actions` が `request_phase_signoff` に戻る(理由が `reason` に付く)。依頼しただけの状態を `agreed` として記録しない。
 
 **判断できなかったことを失敗として扱わない**。`--result undeterminable` で記録し、扱いを `--disposition open|deferred|promoted` で示す。判断できなかったこと自体が次の周回の論点になる。
 
