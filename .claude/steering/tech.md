@@ -1,21 +1,21 @@
 # 技術スタック
 
-このリポジトリの技術選定・アーキテクチャ方針・コマンド一覧。フェーズ1はSkill+CLIの縦切りMVP、運用はGCP上(個人利用・無料枠〜数百円/月)。
+このリポジトリの技術選定・アーキテクチャ方針・コマンド一覧。フェーズ1はSkill+CLIの縦切りMVP。Medo自体はクラウド非依存(個人利用・無料枠〜数百円/月)。
 
 ---
 
 ## 1. アーキテクチャ全体像
 
 ```
-[ホスト]   Claude Code / agy (Skill+CLI)        簡易Webアプリ(フェーズ2, Gemini)
-              │ シェル実行                            │
-[CLI/コア] medo CLI ── medo_core(要件/カタログ/生成物/ストレージ)
+[ホスト]   Claude Code / Codex / agy (Skill+CLI)   簡易Webアプリ(フェーズ2, Gemini)
+              │ シェル実行(市場・国策・業界動向・技術ナリッジの検索もホストLLMが担う)
+[CLI/コア] medo CLI ── medo_core(要件/ファクト/フェルミ/knowledge/生成物/ストレージ)
               │
 [知識層]   Firestore(本番) or ローカルJSON(開発・テスト) + GCS(フェーズ2)
+           knowledge/ は既定でMEDO_HOME配下の別gitリポジトリ(案件データと分離、GitHub非公開)
               ↑
-[ETL]      手動実行(フェーズ1) → Cloud Scheduler + Cloud Run Job(フェーズ3):
-           リリースノートBQ公開データセット + Billing Catalog API
-           → Gemini Flashで構造化 → 検証通過分のみコミット
+[洗練フロー] フェーズ1: ホストLLM検索→CLIが出典検証して保存(facts同様)+git履歴レビュー
+           フェーズ2: knowledge-digest(蓄積ナリッジの分析・重複統合。Gemini Flash等で構造化・圧縮)
 ```
 
 ---
@@ -25,7 +25,7 @@
 | 領域 | 技術 | 備考 |
 |---|---|---|
 | 言語 | Python 3.12+ | |
-| パッケージ管理 | **uv**(uv workspace) | モノレポ: core / cli / etl |
+| パッケージ管理 | **uv**(uv workspace) | モノレポ: core / cli |
 | スキーマ・検証 | pydantic >= 2.7 | 全ドメインモデル。LLM出力の検証にも使う |
 | CLI | typer >= 0.12 | console_script: `medo` |
 | テスト | pytest >= 8 | ルート pyproject.toml の testpaths で全パッケージ横断 |
@@ -34,18 +34,17 @@
 
 ---
 
-## 3. GCP依存
+## 3. 任意のクラウド依存(オプション。medo本体はクラウド非依存)
+
+medo CLI/coreの実行に必須のクラウド依存はない(既定バックエンドはローカルJSON)。以下は将来Firestoreを本番ストレージに使う場合・フェーズ2以降で各サービスを使う場合の任意依存。
 
 | サービス | 用途 | ライブラリ |
 |---|---|---|
-| Firestore | 本番ストレージ(要件・カタログ・生成物) | google-cloud-firestore >= 2.16 |
-| BigQuery | リリースノート公開データセット `bigquery-public-data.google_cloud_release_notes.release_notes` | google-cloud-bigquery >= 3.25 |
-| Cloud Billing Catalog API | SKUスナップショット(金額はカタログに焼き込まない) | google-cloud-billing >= 1.13 |
-| Gemini API | ETL構造化・(フェーズ2)knowledge-digest。**構造化・圧縮専任** | google-genai >= 1.0 |
-| Cloud Run Job + Scheduler | (フェーズ3)ETL自動化 | — |
-| GCS | (フェーズ2)スライド・モック実体 | — |
+| Firestore | 本番ストレージに選ぶ場合(要件・facts・knowledge・生成物) | google-cloud-firestore >= 2.16 |
+| Gemini API | (フェーズ2)knowledge-digestでの構造化・圧縮に使う場合 | google-genai >= 1.0 |
+| Cloud Storage | (フェーズ2)スライド・モック実体 | — |
 
-認証はADC(`gcloud auth application-default login`)。
+Firestoreを選ぶ場合の認証はADC(`gcloud auth application-default login`)。**フェーズ1のknowledge層は自動ETLを持たず、クラウドクライアントへの実行時依存は発生しない**(ホストLLM検索+CLI出典検証のみ)。
 
 ---
 
@@ -53,9 +52,10 @@
 
 | 場面 | モデル | 理由 |
 |---|---|---|
-| ヒアリング・アーキ案・スライド生成 | ホストLLM(Claude Code=Claude / agy=Gemini) | Skillが手順を規定。生成物に `generated_by: claude|gemini` を記録し比較可能 |
-| ETL構造化・knowledge-digest | Gemini Flash(`gemini-flash-latest`) | 安価・大量処理。出力は必ずpydantic検証、出典必須 |
-| 数値・launch_stage・鮮度 | **LLMを使わない** | コード(CLI/core)がそのまま返す |
+| ヒアリング・打ち手提案(ミニPRFAQ)・PRFAQ育成・スライド生成 | ホストLLM(Claude Code=Claude / agy=Gemini) | Skillが手順を規定。生成物に `generated_by: claude|gemini` を記録し比較可能 |
+| 市場・国策・業界動向・技術ナリッジの検索 | ホストLLMの検索能力 | 取得結果は `medo facts save` / `medo knowledge save` でCLIが出典検証して保存(出典なしは拒否)。数値は出典に忠実に転記し加工しない(換算・集計はfermi) |
+| (フェーズ2)knowledge-digestの構造化・圧縮 | Gemini Flash等(注入可能な`generate`関数) | 安価・大量処理。出力は必ずpydantic検証、出典必須 |
+| 保存後の数値・フェルミ計算・鮮度 | **LLMを使わない** | コード(CLI/core)が保存・計算・返却する(fermiはast制限の四則演算+累乗のみ) |
 
 ---
 
@@ -64,9 +64,9 @@
 | 変数名 | 値 | 用途 |
 |---|---|---|
 | `MEDO_BACKEND` | `local`(既定) / `firestore` | ストレージバックエンド切替 |
-| `MEDO_HOME` | 既定 `~/.medo` | localバックエンドのルートディレクトリ |
-| `GOOGLE_CLOUD_PROJECT` | GCPプロジェクトID | Firestore / BigQuery / Billing |
-| `GEMINI_API_KEY` | (ADCを使わない場合) | google-genai |
+| `MEDO_HOME` | 既定 `~/.medo` | localバックエンドのルートディレクトリ(knowledge/もこの配下、既定で別gitリポジトリ) |
+| `GOOGLE_CLOUD_PROJECT` | プロジェクトID | Firestoreを使う場合のみ |
+| `GEMINI_API_KEY` | (ADCを使わない場合) | フェーズ2 knowledge-digestで使う場合のみ |
 
 ---
 
@@ -85,16 +85,18 @@ uv run ruff check .
 # CLI実行
 uv run medo --help
 uv run medo requirements get --project <id> --format json
-uv run medo catalog search "<キーワード>"
+uv run medo facts list --project <id>            # 市場・国策・業界動向・個社ファクト(出典・stale付き)
+uv run medo fermi calc --project <id> --file <model.yaml>  # フェルミ推定(コードが計算)
+uv run medo knowledge search "<キーワード>"        # 案件横断の技術ナリッジ(出典・stale付き)
+uv run medo knowledge save --project <id> --statement "..." --source "..."  # 案件固有ナレッジ(単一案件スコープ・出典URL不要)
+uv run medo status --project <id>   # 現在地(要件・ファクト・生成物・next_step)
 
-# ETL(手動、GCP認証必須)
-MEDO_BACKEND=local uv run medo etl run --since 2026-06-01 --services vertex-ai --dry-run
-uv run medo etl skus --service vertex-ai
-
-# Skillビルドと配布
+# Skillビルドと配布(3ホスト共通のSKILL.md形式)
 python skills/build.py
-cp -r skills/dist/claude/* ~/.claude/skills/     # Claude Code
-# agy: skills/dist/agy/*.md をAGENTS.mdから参照
+mkdir -p ~/.claude/skills ~/.codex/skills .agents/skills
+cp -r skills/dist/* ~/.claude/skills/   # Claude Code(ユーザーレベル)
+cp -r skills/dist/* ~/.codex/skills/    # Codex CLI(ユーザーレベル)
+cp -r skills/dist/* .agents/skills/     # agy(プロジェクトレベル。リポジトリ直下から自動検出。.gitignore対象)
 ```
 
 ---
@@ -105,10 +107,10 @@ cp -r skills/dist/claude/* ~/.claude/skills/     # Claude Code
 |---|---|
 | core(スキーマ・バージョニング・鮮度判定) | ユニットテスト(LocalJsonStorage + tmp_path) |
 | CLI | typer.testing.CliRunner(env: MEDO_BACKEND=local, MEDO_HOME=tmp) |
-| ETL | BQ/Billing/GeminiはMagicMockまたは注入可能なgenerate関数で分離。LLM実呼び出しをテストに含めない |
 | pricing計算機(フェーズ2) | 公式Pricing Calculatorとの突合ゴールデンテスト |
+| knowledge-digest(フェーズ2) | LLM構造化はMagicMockまたは注入可能なgenerate関数で分離。LLM実呼び出しをテストに含めない |
 | Skill | 実案件1件のevalケース(同一要件→提案の安定性を目視確認) |
-| 実環境スモーク | フェーズ1 Task 10(手動。GCP認証・課金が絡むため自動化しない) |
+| 実環境スモーク | フェーズ1 Task 10(手動。Firestoreを使う場合のみクラウド認証が絡む) |
 
 CIはフェーズ1では構築しない。ローカルで `uv run pytest` を実行。
 
@@ -118,4 +120,4 @@ CIはフェーズ1では構築しない。ローカルで `uv run pytest` を実
 
 - 個人利用前提: 認証・マルチテナントなし(チーム展開はバックログ)
 - シークレット: `.env*` や `settings.local.json` は `.gitignore` で除外
-- ランニングコスト目安: Firestore/GCS/Cloud Run 無料枠内〜数百円/月 + Gemini Flash 数百円/月。ホストLLMは既存契約内
+- ランニングコスト目安: 既定(ローカルJSON)は無料。Firestore/GCS等を使う場合も無料枠内〜数百円/月。ホストLLMは既存契約内
