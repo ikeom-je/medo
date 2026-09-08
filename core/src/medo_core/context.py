@@ -117,7 +117,7 @@ def collect(
     responses = fold_responses(events, target, artifacts, manifests)
     checks = effective_checks(
         events, phase=diagnostic_phase(doc), latest_requirements_version=version,
-        manifests=manifests, current_artifact_ids=_current_artifact_ids(artifacts),
+        manifests=manifests, current_targets=current_check_targets(artifacts),
     )
     ctx = StatusContext(
         project_id=project_id, doc=doc,
@@ -135,13 +135,25 @@ def collect(
     return ctx
 
 
-def _current_artifact_ids(artifacts: dict) -> dict[str, str]:
-    """型ごとの最新版ID。artifact束縛checkの失効判定に使う。"""
+def current_check_targets(
+    artifacts: dict[str, Artifact],
+) -> dict[tuple[str, str | None], str]:
+    """artifact束縛checkの対象となる、型とslide_kindごとの最新版IDを返す。"""
+    latest: dict[tuple[str, str | None], str] = {}
+    for artifact_id, artifact in artifacts.items():
+        key = (artifact.type, artifact.slide_kind)
+        if key not in latest or artifacts[latest[key]].version < artifact.version:
+            latest[key] = artifact_id
+    return latest
+
+
+def _current_artifact_ids(artifacts: dict[str, Artifact]) -> dict[str, str]:
+    """フェーズ1互換の生成物一覧に使う、型ごとの最新版IDを返す。"""
     latest: dict[str, str] = {}
-    for a_id, a in artifacts.items():
-        key = a.type
-        if key not in latest or artifacts[latest[key]].version < a.version:
-            latest[key] = a_id
+    for artifact_id, artifact in artifacts.items():
+        key = artifact.type
+        if key not in latest or artifacts[latest[key]].version < artifact.version:
+            latest[key] = artifact_id
     return latest
 
 

@@ -42,7 +42,7 @@ def test_convergence_phase_includes_all_checks():
 
 def test_unrecorded_check_is_unverified():
     states = effective_checks([], phase="discovery", latest_requirements_version=1,
-                              manifests=[], current_artifact_ids={})
+                              manifests=[], current_targets={})
 
     assert states["reality_gap"].state == "unverified"
 
@@ -52,7 +52,7 @@ def test_persistent_check_survives_requirements_change():
 
     states = effective_checks(events, phase="discovery", latest_requirements_version=3,
                               manifests=[_manifest(2, "as_is"), _manifest(3, "to_be")],
-                              current_artifact_ids={})
+                              current_targets={})
 
     assert states["reality_gap"].state == "completed"
 
@@ -62,7 +62,7 @@ def test_version_bound_check_expires_on_relevant_section_change():
 
     states = effective_checks(events, phase="convergence", latest_requirements_version=2,
                               manifests=[_manifest(2, "constraints")],
-                              current_artifact_ids={})
+                              current_targets={})
 
     assert states["feasibility"].state == "unverified"
 
@@ -72,7 +72,7 @@ def test_version_bound_check_survives_unrelated_change():
 
     states = effective_checks(events, phase="convergence", latest_requirements_version=2,
                               manifests=[_manifest(2, "stakeholders")],
-                              current_artifact_ids={})
+                              current_targets={})
 
     assert states["feasibility"].state == "completed"
 
@@ -82,7 +82,7 @@ def test_decision_maker_check_expires_when_stakeholders_change():
 
     states = effective_checks(events, phase="convergence", latest_requirements_version=2,
                               manifests=[_manifest(2, "stakeholders")],
-                              current_artifact_ids={})
+                              current_targets={})
 
     assert states["decision_maker"].state == "unverified"
 
@@ -93,9 +93,36 @@ def test_artifact_bound_check_expires_when_target_is_regenerated():
 
     states = effective_checks(events, phase="convergence", latest_requirements_version=1,
                               manifests=[],
-                              current_artifact_ids={"as-is-report": "as-is-report-v2"})
+                              current_targets={("as-is-report", None): "as-is-report-v2"})
 
     assert states["as_is_articulation"].state == "unverified"
+
+
+def test_final_slides_do_not_expire_the_discussion_expression_safety():
+    """討議用スライド束縛のcheckが、最終提案スライドの保存で失効してはならない。"""
+    events = [_recorded("ev-1", "expression_safety", "completed",
+                        target=ArtifactTarget(artifact_id="slides-v1"))]
+
+    states = effective_checks(
+        events, phase="convergence", latest_requirements_version=1, manifests=[],
+        current_targets={("slides", "discussion"): "slides-v1",
+                         ("slides", "final"): "slides-v2"},
+    )
+
+    assert states["expression_safety"].state == "completed"
+
+
+def test_regenerated_discussion_slides_still_expire_the_check():
+    """同じ種別で作り直したときは失効する(この挙動は変えない)。"""
+    events = [_recorded("ev-1", "expression_safety", "completed",
+                        target=ArtifactTarget(artifact_id="slides-v1"))]
+
+    states = effective_checks(
+        events, phase="convergence", latest_requirements_version=1, manifests=[],
+        current_targets={("slides", "discussion"): "slides-v3"},
+    )
+
+    assert states["expression_safety"].state == "unverified"
 
 
 def test_undeterminable_carries_disposition():
@@ -103,7 +130,7 @@ def test_undeterminable_carries_disposition():
                         note="方向性が未定", disposition="promoted")]
 
     states = effective_checks(events, phase="convergence", latest_requirements_version=1,
-                              manifests=[], current_artifact_ids={})
+                              manifests=[], current_targets={})
 
     assert states["to_be_articulation"].state == "undeterminable"
     assert states["to_be_articulation"].disposition == "promoted"
@@ -112,7 +139,7 @@ def test_undeterminable_carries_disposition():
 def test_finding_without_corresponding_record_is_inconsistent():
     states = effective_checks([_recorded("ev-1", "past_attempts", "finding", note="あり")],
                               phase="discovery", latest_requirements_version=1,
-                              manifests=[], current_artifact_ids={})
+                              manifests=[], current_targets={})
 
     assert "past_attempts" in detect_inconsistency(states, RequirementsDoc(project="p1"))
 
@@ -123,7 +150,7 @@ def test_completed_with_existing_record_is_inconsistent():
                                                     surfaced_by="inferred")])
     states = effective_checks([_recorded("ev-1", "hidden_stakeholders", "completed")],
                               phase="discovery", latest_requirements_version=1,
-                              manifests=[], current_artifact_ids={})
+                              manifests=[], current_targets={})
 
     assert "hidden_stakeholders" in detect_inconsistency(states, doc)
 
@@ -137,7 +164,7 @@ def test_consistent_finding_is_not_reported():
     states = effective_checks([_recorded("ev-1", "reality_gap", "finding",
                                          finding_refs=["gap-1"])],
                               phase="discovery", latest_requirements_version=1,
-                              manifests=[], current_artifact_ids={})
+                              manifests=[], current_targets={})
 
     assert detect_inconsistency(states, doc) == []
 
