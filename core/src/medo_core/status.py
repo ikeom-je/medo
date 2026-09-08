@@ -6,7 +6,13 @@ from datetime import date
 from pathlib import Path
 
 from medo_core.checks import CHECK_REGISTRY
-from medo_core.context import StatusContext, _current_artifact_ids, collect, workflow_branch
+from medo_core.context import (
+    StatusContext,
+    _current_artifact_ids,
+    collect,
+    current_check_targets,
+    workflow_branch,
+)
 from medo_core.diagnostics import model_diagnostics, phase_readiness, readiness
 from medo_core.facts import FactStore
 from medo_core.requirements import RequirementsDoc, RequirementsStore
@@ -182,11 +188,7 @@ def build_actions(ctx: StatusContext, model: dict, ready: dict) -> list[dict]:
     readiness_actions = {
         action["code"]: action for action in _readiness_driven_actions(ready)
     }
-    stale = sorted(
-        artifact_id
-        for artifact_id in _current_artifact_ids(ctx.artifacts).values()
-        if ctx.freshness[artifact_id].state == "stale"
-    )
+    stale = _stale_current_artifact_ids(ctx)
     loop_in_progress = (
         bool(ctx.pending_milestones)
         or model["structure"]["to_be"]["confirmed"] == 0
@@ -238,15 +240,26 @@ def build_actions(ctx: StatusContext, model: dict, ready: dict) -> list[dict]:
 
 def _runnable_checks(ctx: StatusContext) -> list[str]:
     """未確認で、現在の対象が存在するcheckを返す。"""
-    current_artifact_ids = _current_artifact_ids(ctx.artifacts)
+    current_targets = current_check_targets(ctx.artifacts)
     return sorted(
         name
         for name, state in ctx.checks.items()
         if state.state == "unverified"
         and (
             CHECK_REGISTRY[name].binding != "artifact_bound"
-            or CHECK_REGISTRY[name].target_type in current_artifact_ids
+            or (
+                CHECK_REGISTRY[name].target_type,
+                CHECK_REGISTRY[name].slide_kind,
+            ) in current_targets
         )
+    )
+
+
+def _stale_current_artifact_ids(ctx: StatusContext) -> list[str]:
+    return sorted(
+        artifact_id
+        for artifact_id in current_check_targets(ctx.artifacts).values()
+        if ctx.freshness[artifact_id].state == "stale"
     )
 
 
@@ -297,5 +310,7 @@ def _readiness_driven_actions(ready: dict) -> list[dict]:
 def stale_artifact_ids(
     storage: Storage, project_id: str, knowledge_root: Path, today: date | None = None
 ) -> list[str]:
-    report = project_status(storage, project_id, knowledge_root, today=today)
-    return [row["id"] for row in report["artifacts"] if row["stale"]]
+    if RequirementsStore(storage).latest_version(project_id) == 0:
+        return []
+    ctx = collect(storage, project_id, today=today, knowledge_root=knowledge_root)
+    return _stale_current_artifact_ids(ctx)

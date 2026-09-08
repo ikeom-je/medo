@@ -70,7 +70,7 @@ def effective_checks(
     phase: str,
     latest_requirements_version: int,
     manifests: list[ChangeManifest],
-    current_artifact_ids: dict[str, str],
+    current_targets: dict[tuple[str, str | None], str],
 ) -> dict[str, CheckState]:
     """現在の対象に適用される check それぞれの有効値を返す。"""
     states = {name: CheckState() for name in checks_for_phase(phase)}
@@ -81,7 +81,7 @@ def effective_checks(
         if spec is None or event.check not in states:
             continue
         if _is_expired(event, spec, latest_requirements_version, manifests,
-                       current_artifact_ids):
+                       current_targets):
             continue
         states[event.check] = CheckState(
             state=event.result, event_id=event.id,
@@ -90,9 +90,9 @@ def effective_checks(
     return states
 
 
-def _is_expired(event, spec, latest_version, manifests, current_artifact_ids) -> bool:
+def _is_expired(event, spec, latest_version, manifests, current_targets) -> bool:
     if spec.binding == "artifact_bound":
-        current = current_artifact_ids.get(spec.target_type)
+        current = current_targets.get((spec.target_type, spec.slide_kind))
         return current is not None and (
             event.target.kind != "artifact" or event.target.artifact_id != current
         )

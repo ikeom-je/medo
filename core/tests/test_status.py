@@ -63,6 +63,42 @@ def _project(tmp_path):
     return storage
 
 
+def _project_with_both_slide_kinds(tmp_path, stale_discussion=False):
+    storage = _project(tmp_path)
+    artifacts = ArtifactStore(storage)
+    report = artifacts.save("p1", Artifact(
+        project="p1", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状",
+    ))
+    cited_facts = []
+    if stale_discussion:
+        FactStore(storage).save("p1", Fact(
+            fact_id="fact-1", kind="market", statement="旧い根拠", value=1.0,
+            source="https://example.com/", retrieved="2020-01-01",
+        ))
+        cited_facts = ["fact-1"]
+    artifacts.save("p1", Artifact(
+        project="p1", type="slides", slide_kind="discussion", requirements_version=1,
+        derived_from=[report], cited_facts=cited_facts,
+        generated_by="claude", content="# 討議",
+    ))
+    mini = artifacts.save("p1", Artifact(
+        project="p1", type="mini-prfaq", requirements_version=1,
+        generated_by="claude", content="# 候補セット",
+        options=[OptionMeta(name="A案")],
+    ))
+    prfaq = artifacts.save("p1", Artifact(
+        project="p1", type="prfaq", requirements_version=1,
+        grown_from=GrownFrom(artifact=mini, option="A案"),
+        generated_by="claude", content="# PRFAQ",
+    ))
+    artifacts.save("p1", Artifact(
+        project="p1", type="slides", slide_kind="final", requirements_version=1,
+        derived_from=[prfaq], generated_by="claude", content="# 最終提案",
+    ))
+    return storage
+
+
 def _codes(status: dict) -> list[str]:
     return [a["code"] for a in status["actions"]]
 
@@ -343,6 +379,25 @@ def test_summary_view_keeps_phase1_compatibility_fields(tmp_path):
     status = project_status(_project(tmp_path), "p1", tmp_path)
 
     assert set(status) >= {"requirements", "facts", "artifacts", "next_step"}
+
+
+def test_compat_artifact_list_stays_keyed_by_type(tmp_path):
+    """フェーズ1のSkillは artifacts 配列を型で引いている(status契約 §5)。"""
+    storage = _project_with_both_slide_kinds(tmp_path)
+
+    status = project_status(storage, "p1", tmp_path)
+
+    assert len([row for row in status["artifacts"] if row["type"] == "slides"]) == 1
+
+
+def test_stale_action_sees_both_slide_kinds(tmp_path):
+    """type別に畳むと、staleな討議用スライドが最終提案の陰に隠れる。"""
+    storage = _project_with_both_slide_kinds(tmp_path, stale_discussion=True)
+
+    actions = project_status(storage, "p1", tmp_path)["actions"]
+    regenerate = [a for a in actions if a["code"] == "regenerate_stale_artifacts"]
+
+    assert regenerate and "slides-v1" in regenerate[0]["refs"]
 
 
 def test_run_check_is_not_offered_without_its_target(tmp_path):
