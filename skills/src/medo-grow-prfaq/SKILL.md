@@ -1,11 +1,11 @@
 ---
 name: medo-grow-prfaq
-description: 合意した打ち手を完全版PRFAQ(技術的背景・workflow改善見込み・効果・ロードマップ付き)に育成して保存する。技術的背景はナレッジ根拠に縛り、育成元(grown_from)を記録する。
+description: 合意案を完全版PRFAQに育て、最終提案スライドと実際に得たフェーズ承認の反応まで記録する。技術的背景はナレッジ根拠に縛る。
 ---
 
-# medo-grow-prfaq: 合意した打ち手を完全版PRFAQに育てる
+# medo-grow-prfaq: 合意案を最終提案と承認の記録まで育てる
 
-ミニPRFAQ候補セットから合意された打ち手を、顧客に持ち帰れる完全版PRFAQに育成する。
+合意した打ち手を完全版PRFAQと最終提案スライドに育て、意思決定者の反応を記録する。
 
 ## 進め方
 
@@ -13,41 +13,64 @@ description: 合意した打ち手を完全版PRFAQ(技術的背景・workflow�
 
        medo status --project <project-id> --view summary
 
-   `next_step` が `propose-options` なら「まず medo-propose-options で候補を作る」よう案内して終了する。
-2. **どの打ち手に合意したかをユーザーに確認する**(合意はツールの外の意思決定。勝手に選ばない)。
+   再実行時は成果物を作り直さず、`actions` に `complete_phase` があれば手順10へ、
+   `request_phase_signoff` があれば手順9へ、`generate_final_slides` があれば手順7へ進む。
+   いずれも無ければ手順2へ進む。`next_step` が `propose-options` なら、そのSkillを案内して終了する。
+2. **どの打ち手に合意したかをユーザーに確認する**。勝手に選ばない。
 3. 育成元の候補セットと要件を取得する:
 
        medo artifacts get --project <project-id> --id <mini-prfaq-vN>
        medo requirements get --project <project-id> --format json
 
-4. 技術的背景を深めるためナレッジを検索し(`medo knowledge search`)、必要に応じてファクトを追加保存する。技術・サービス能力の有無はナレッジ値のみ、市場数値は保存済みファクトのみを引用する。
-
-   顧客提出物であるため、**表現の規約を取得して適用する**:
+4. `medo knowledge search` で技術的背景を深め、必要ならファクトを追加保存する。
+   顧客提出物の章構成と表現規約もCLIから取得する:
 
        medo artifacts outline --type slides --slide-kind discussion
 
-   出力末尾のリフレーミング規約は、スライドだけでなくPRFAQの文章にも適用する。
-
+   出力末尾のリフレーミング規約はPRFAQにも適用する。
 5. 完全版PRFAQを作る。ミニPRFAQの内容に加えて:
    - 技術的背景(実装手段の技術的な要点。引用したナレッジエントリのkind・statementに基づき、絵に描いた餅にしない)
    - workflow改善見込み(現状業務がどう変わるか)
    - 効果(フェルミ推定の引用。必要なら `medo fermi calc` で追加計算)
    - ロードマップ(段階と、open_questionsが各段階に与える影響)
+   - 採択案と却下案の比較観点・評価・選定理由(原則とKPIに紐づける)
    - FAQ(顧客・社内から想定される問いと答え)
 6. 保存する:
 
        medo artifacts save --project <project-id> --type prfaq \
          --file /tmp/prfaq.md \
          --grown-from "<mini-prfaq-vN>:<合意した打ち手名>" \
+         --rejected "<名前>:<理由>[:<受け入れたリスク>]" \
          --cites <entry-id,...> --cites-facts <fact-id,...> \
          --generated-by <claude|codex|gemini> --requirements-version <n>
 
-7. 終了時、対話から得た案件固有ノウハウがあれば次で追記する:
+   却下案が複数なら `--rejected` を繰り返す。
+7. 現行PRFAQをユーザーに提示し、修正を反映して確認を得る。確認前はスライドを生成しない。
+8. 最終提案のoutlineを取得し、その7章に沿ってスライドを生成する:
+
+       medo artifacts outline --type slides --slide-kind final
+
+   親は現行PRFAQちょうど1件とし、比較はPRFAQ本文から取り込んで保存する:
+
+       medo artifacts save --project <project-id> --type slides --slide-kind final \
+         --file /tmp/final-slides.md --derived-from <prfaq-vN> \
+         --generated-by <claude|codex|gemini> --requirements-version <n>
+
+   却下案はスライドのメタデータには付けない。
+9. 現行スライドを決裁者に提示し、`phase_signoff` を依頼する。依頼だけでは記録しない。
+   反応が未取得なら、その旨を報告し、手順10・11だけ実施して終える。
+   実際に得られた反応だけを記録する:
+
+       medo respond add --project <id> --stakeholder <sh-N> --artifact <slides-vN> \
+         --purpose phase_signoff --reaction <reaction> --note "<得られた反応>"
+
+   `<reaction>` は `empathized|acknowledged|agreed|objected|unclear` のいずれかを使う。
+10. 対話から得た案件固有ノウハウがあれば追記する:
 
        medo knowledge save --project <project-id> --statement "<案件固有ノウハウ>" --source "medo-grow-prfaq <日付>対話"
 
    フェーズ1では追記のみ行い、既存エントリとの統合・重複解消はしない。
-8. 保存後 `medo status --project <project-id> --view summary` を実行し、`actions` を報告して終える。
+11. `medo status --project <project-id> --view summary` を再実行し、`actions` を報告して終える。
 
 ## 契約(必ず守る)
 
