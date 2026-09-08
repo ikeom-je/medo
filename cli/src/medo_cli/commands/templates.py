@@ -5,7 +5,11 @@ import json
 import typer
 
 from medo_core.checks import CHECK_REGISTRY
-from medo_core.templates import DISCUSSION_SLIDES_OUTLINE, REQUIREMENTS_TEMPLATE
+from medo_core.templates import (
+    DISCUSSION_SLIDES_OUTLINE,
+    FINAL_SLIDES_OUTLINE,
+    REQUIREMENTS_TEMPLATE,
+)
 
 from medo_cli.commands._common import fail
 
@@ -19,15 +23,14 @@ def requirements_template() -> None:
 
 def artifacts_outline(
     type: str = typer.Option(..., "--type", help="現在 outline があるのは slides のみ"),
-    slide_kind: str = typer.Option(
-        "", "--slide-kind", help="discussion(final は優先度6で未実装)"
-    ),
+    slide_kind: str = typer.Option("", "--slide-kind", help="discussion|final"),
 ) -> None:
     """生成物の章構成と表現の規約を出力する。"""
     if type != "slides":
         fail(f"{type} の章構成はありません")
     if slide_kind == "final":
-        fail("slide_kind=final の章構成は未実装です(フェーズ2 優先度6)")
+        typer.echo(FINAL_SLIDES_OUTLINE)
+        return
     if slide_kind != "discussion":
         fail(f"未知の slide_kind です: {slide_kind or '(未指定)'}")
     typer.echo(DISCUSSION_SLIDES_OUTLINE)

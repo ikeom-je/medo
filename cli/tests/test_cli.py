@@ -563,13 +563,13 @@ def test_artifacts_outline_rejects_an_unknown_slide_kind(medo_home: Path):
     assert result.exit_code == 1 and "error:" in result.output
 
 
-def test_artifacts_outline_reports_final_is_not_available_yet(medo_home: Path):
-    """未実装を空出力で誤魔化すと、Skillが空の章構成で資料を作る。"""
+def test_artifacts_outline_returns_the_final_chapters(medo_home: Path):
     result = runner.invoke(
         app, ["artifacts", "outline", "--type", "slides", "--slide-kind", "final"]
     )
 
-    assert result.exit_code == 1 and "error:" in result.output
+    assert result.exit_code == 0
+    assert "SCQA" in result.output and "ネクストアクション" in result.output
 
 
 def test_artifacts_outline_rejects_a_type_without_an_outline(medo_home: Path):
