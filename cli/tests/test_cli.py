@@ -194,6 +194,18 @@ def test_status_flow_next_steps(medo_home: Path):
     assert json.loads(result.output)["next_step"] == "propose-options"
 
 
+def test_status_readiness_view_includes_the_phase_judgement(medo_home: Path):
+    """Skillは1回の呼び出しでフェーズ完了の可否まで読む。"""
+    _save_requirements(medo_home)
+
+    result = runner.invoke(app, [
+        "status", "--project", "yoyaku", "--view", "readiness", "--format", "json",
+    ])
+
+    assert result.exit_code == 0
+    assert "phase" in json.loads(result.output)["readiness"]
+
+
 def test_facts_save_and_list_with_stale_flag(medo_home: Path):
     result = runner.invoke(
         app,

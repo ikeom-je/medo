@@ -49,7 +49,21 @@ def project_status(
         ctx.open_review_findings,
         include_scope,
     )
-    actions = build_actions(ctx, model, ready)
+    decision_makers = {
+        stakeholder.id
+        for stakeholder in ctx.doc.stakeholders
+        if stakeholder.is_decision_maker
+    }
+    phase_ready = phase_readiness(
+        ready["state"],
+        ctx.artifacts,
+        ctx.freshness,
+        ctx.responses,
+        ctx.target,
+        decision_makers,
+    )
+    actions = build_actions(ctx, model, ready, phase_ready)
+    ready = {**ready, "phase": phase_ready}
 
     branches = {
         "model": model,
@@ -62,22 +76,9 @@ def project_status(
         return {**head, view: branches[view]}
     compat = _phase1_fields(storage, ctx, today)
     if view == "full":
-        decision_makers = {
-            stakeholder.id
-            for stakeholder in ctx.doc.stakeholders
-            if stakeholder.is_decision_maker
-        }
         return {
             **head,
             **branches,
-            "phase_readiness": phase_readiness(
-                ready["state"],
-                ctx.artifacts,
-                ctx.freshness,
-                ctx.responses,
-                ctx.target,
-                decision_makers,
-            ),
             **compat,
         }
     return _summary(project_id, ctx, workflow, ready, actions, compat)
@@ -179,7 +180,12 @@ def _phase1_fields(
     }
 
 
-def build_actions(ctx: StatusContext, model: dict, ready: dict) -> list[dict]:
+def build_actions(
+    ctx: StatusContext,
+    model: dict,
+    ready: dict,
+    phase_ready: dict,
+) -> list[dict]:
     """次にできることを優先順に並べる。必ず1件以上返す。"""
     failed = {
         condition["code"]: condition["refs"]
@@ -189,6 +195,20 @@ def build_actions(ctx: StatusContext, model: dict, ready: dict) -> list[dict]:
         action["code"]: action for action in _readiness_driven_actions(ready)
     }
     stale = _stale_current_artifact_ids(ctx)
+    phase_failed = {
+        condition["code"]: condition["refs"]
+        for condition in phase_ready["failed_conditions"]
+    }
+    prfaq_is_fresh = any(
+        artifact.type == "prfaq" and ctx.freshness[artifact_id].state != "stale"
+        for artifact_id, artifact in ctx.artifacts.items()
+    )
+    final_slides_id = ctx.target.final_slides_id
+    final_slides_are_fresh = bool(
+        final_slides_id
+        and final_slides_id in ctx.freshness
+        and ctx.freshness[final_slides_id].state != "stale"
+    )
     loop_in_progress = (
         bool(ctx.pending_milestones)
         or model["structure"]["to_be"]["confirmed"] == 0
@@ -231,8 +251,33 @@ def build_actions(ctx: StatusContext, model: dict, ready: dict) -> list[dict]:
         add(action["code"], action.get("refs"))
     if stale and loop_in_progress:
         add("regenerate_stale_artifacts", stale)
-    if ready["state"] == "ready":
+    if ready["state"] == "ready" and phase_ready["state"] == "not_evaluable":
         add("proceed_to_propose_options")
+    if ready["state"] == "ready" and prfaq_is_fresh and not final_slides_are_fresh:
+        add("generate_final_slides")
+    if (
+        ready["state"] == "ready"
+        and prfaq_is_fresh
+        and final_slides_are_fresh
+        and "phase_signoff_missing" in phase_failed
+    ):
+        renewed_signoff = any(
+            response.purpose == "phase_signoff"
+            and response.reaction == "agreed"
+            and not response.on_current_target
+            for response in ctx.responses
+        )
+        add(
+            "request_phase_signoff",
+            phase_failed["phase_signoff_missing"],
+            **(
+                {"reason": "スライドが更新されたため再承認が必要"}
+                if renewed_signoff
+                else {}
+            ),
+        )
+    if phase_ready["state"] == "ready":
+        add("complete_phase")
     if not actions:
         add("continue_hearing")
     return actions

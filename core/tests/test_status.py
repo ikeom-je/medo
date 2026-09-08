@@ -1,10 +1,17 @@
 from datetime import date
 
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta
-from medo_core.events import ArtifactTarget, AsIsReportReviewed
+from medo_core.checks import CHECK_REGISTRY
+from medo_core.events import (
+    ArtifactTarget,
+    AsIsReportReviewed,
+    CheckRecorded,
+    RequirementsTarget,
+    StakeholderResponded,
+)
 from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
 from medo_core.facts import Fact, FactStore
-from medo_core.nodes import AsIs, Challenge, Stakeholder
+from medo_core.nodes import AsIs, Challenge, Gap, Stakeholder, ToBe
 from medo_core.requirements import (
     FunctionalRequirement,
     RequirementsDoc,
@@ -96,6 +103,97 @@ def _project_with_both_slide_kinds(tmp_path, stale_discussion=False):
         project="p1", type="slides", slide_kind="final", requirements_version=1,
         derived_from=[prfaq], generated_by="claude", content="# 最終提案",
     ))
+    return storage
+
+
+def _save_final_slides(storage):
+    return ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="slides", slide_kind="final", requirements_version=2,
+        derived_from=["prfaq-v1"], generated_by="claude", content="# 最終提案",
+    ))
+
+
+def _phase_project(tmp_path, *, prfaq=False, final=False, signoff=False):
+    storage = LocalJsonStorage(tmp_path)
+    requirements = RequirementsStore(storage)
+    requirements.save("p1", RequirementsDoc(
+        project="p1",
+        as_is=[AsIs(text="手作業で転記している", visibility="internal", confidence="confirmed")],
+        to_be=[ToBe(text="転記を自動化する", confidence="confirmed")],
+        stakeholders=[Stakeholder(
+            text="部長", confidence="confirmed", is_decision_maker=True,
+        )],
+    ), today=TODAY)
+    doc = requirements.get("p1")
+    assert doc is not None
+    requirements.save("p1", doc.model_copy(update={"gaps": [Gap(
+        text="手作業から自動化への乖離", kind="goal", confidence="confirmed",
+        from_as_is=[doc.as_is[0].id], from_to_be=[doc.to_be[0].id],
+    )]}), today=TODAY)
+
+    artifacts = ArtifactStore(storage)
+    research = artifacts.save("p1", Artifact(
+        project="p1", type="research", requirements_version=2,
+        generated_by="claude", content="# 調査",
+    ))
+    report = artifacts.save("p1", Artifact(
+        project="p1", type="as-is-report", requirements_version=2,
+        generated_by="claude", content="# 現状",
+    ))
+    discussion = artifacts.save("p1", Artifact(
+        project="p1", type="slides", slide_kind="discussion", requirements_version=2,
+        derived_from=[report], generated_by="claude", content="# 討議",
+    ))
+
+    recorder = WorkflowRecorder(storage)
+    artifact_targets = {
+        "source_quality": research,
+        "as_is_articulation": report,
+        "expression_safety": discussion,
+    }
+    for check, spec in CHECK_REGISTRY.items():
+        target = (
+            ArtifactTarget(artifact_id=artifact_targets[check])
+            if spec.binding == "artifact_bound"
+            else RequirementsTarget(version=2)
+        )
+        recorder.record("p1", CheckRecorded(
+            target=target, occurred_on="2026-07-12", requirements_version=2,
+            round_id=0, check=check, result="completed",
+        ))
+    recorder.record("p1", StakeholderResponded(
+        target=RequirementsTarget(version=2), occurred_on="2026-07-12",
+        requirements_version=2, round_id=0, stakeholder_id="sh-1",
+        purpose="to_be_go_ahead", reaction="agreed",
+    ))
+
+    if prfaq:
+        mini = artifacts.save("p1", Artifact(
+            project="p1", type="mini-prfaq", requirements_version=2,
+            generated_by="claude", content="# 候補セット",
+            options=[OptionMeta(name="A案")],
+        ))
+        cited_facts = []
+        if prfaq == "stale":
+            FactStore(storage).save("p1", Fact(
+                fact_id="fact-1", kind="market", statement="旧い根拠", value=1.0,
+                source="https://example.com/", retrieved="2020-01-01",
+            ))
+            cited_facts = ["fact-1"]
+        artifacts.save("p1", Artifact(
+            project="p1", type="prfaq", requirements_version=2,
+            grown_from=GrownFrom(artifact=mini, option="A案"), cited_facts=cited_facts,
+            generated_by="claude", content="# PRFAQ",
+        ))
+
+    final_id = _save_final_slides(storage) if final else None
+    if signoff:
+        assert final_id is not None
+        recorder.record("p1", StakeholderResponded(
+            target=ArtifactTarget(artifact_id=final_id), occurred_on="2026-07-12",
+            requirements_version=2, round_id=0, stakeholder_id="sh-1",
+            purpose="phase_signoff", reaction="agreed",
+        ))
     return storage
 
 
@@ -339,6 +437,13 @@ def test_summary_view_omits_failed_conditions(tmp_path):
     assert "failed_conditions" not in status["readiness"]
 
 
+def test_summary_view_omits_the_phase_judgement(tmp_path):
+    """summaryは従来どおり標準周回のstateだけを返す。"""
+    status = project_status(_phase_project(tmp_path, prfaq=True), "p1", tmp_path)
+
+    assert set(status["readiness"]) == {"state"}
+
+
 def test_branch_view_returns_only_that_branch(tmp_path):
     status = project_status(_project(tmp_path), "p1", tmp_path, view="model")
 
@@ -408,3 +513,72 @@ def test_run_check_is_not_offered_without_its_target(tmp_path):
     ]
 
     assert all("expression_safety" not in a.get("refs", []) for a in codes_with_refs)
+
+
+def test_readiness_view_carries_the_phase_judgement(tmp_path):
+    """フェーズ完了の可否は収束の次の問いであり、別viewを呼ばせない。"""
+    status = project_status(_phase_project(tmp_path, prfaq=True), "p1", tmp_path,
+                            view="readiness")
+
+    assert set(status) == {"project", "diagnostic_phase", "readiness"}
+    assert status["readiness"]["phase"]["state"] in {"ready", "not_ready", "not_evaluable"}
+
+
+def test_actions_ask_for_final_slides_once_the_prfaq_is_fresh(tmp_path):
+    """PRFAQができた後も候補提案へ戻す行動を出すと、往復が閉じない。"""
+    codes = _codes(project_status(_phase_project(tmp_path, prfaq=True), "p1", tmp_path))
+
+    assert "generate_final_slides" in codes and "proceed_to_propose_options" not in codes
+
+
+def test_no_final_slides_are_asked_for_from_a_stale_prfaq(tmp_path):
+    """staleな親から作った資料は即座にstaleを継承する。"""
+    codes = _codes(project_status(_phase_project(tmp_path, prfaq="stale"), "p1", tmp_path))
+
+    assert "generate_final_slides" not in codes
+
+
+def test_actions_request_the_phase_signoff_from_the_decision_maker(tmp_path):
+    """承認依頼の宛先が出ないと、誰に持っていくかSkillが判断できない。"""
+    actions = project_status(_phase_project(tmp_path, prfaq=True, final=True),
+                             "p1", tmp_path)["actions"]
+    request = [a for a in actions if a["code"] == "request_phase_signoff"]
+
+    assert request and request[0]["refs"] == ["sh-1"]
+
+
+def test_regenerated_slides_explain_why_the_signoff_is_needed_again(tmp_path):
+    """理由の無い巻き戻りはバグに見える。"""
+    storage = _phase_project(tmp_path, prfaq=True, final=True, signoff=True)
+    _save_final_slides(storage)  # 承認後にスライドを作り直す
+    actions = project_status(storage, "p1", tmp_path)["actions"]
+    request = [a for a in actions if a["code"] == "request_phase_signoff"]
+
+    assert request and "再承認" in request[0]["reason"]
+
+
+def test_actions_report_the_phase_is_complete(tmp_path):
+    """完了を返さないと、次フェーズへ進んでよいかが分からない。"""
+    codes = _codes(project_status(
+        _phase_project(tmp_path, prfaq=True, final=True, signoff=True), "p1", tmp_path))
+
+    assert "complete_phase" in codes
+
+
+def test_full_view_keeps_the_phase_judgement_inside_readiness(tmp_path):
+    """枝の外にトップレベル要素を足すと、投影規則が崩れる。"""
+    status = project_status(_phase_project(tmp_path, prfaq=True), "p1", tmp_path,
+                            view="full")
+
+    assert "phase_readiness" not in status and "phase" in status["readiness"]
+
+
+def test_next_step_is_unchanged_by_the_final_stage(tmp_path):
+    """フェーズ1のSkillは next_step を完全一致で分岐している。"""
+    status = project_status(
+        _phase_project(tmp_path, prfaq=True, final=True, signoff=True), "p1", tmp_path)
+
+    assert status["next_step"] in {
+        "hearing", "propose-options", "grow-prfaq",
+        "regenerate-stale-artifacts", "up-to-date",
+    }
