@@ -95,7 +95,7 @@ cp -r skills/dist/* .agents/skills/
 | 1 | core(要件・ファクト・フェルミ・技術ナレッジ)+ `medo` CLI + Skill(hearing / propose-options / grow-prfaq) | 完了 |
 | 2(優先度1〜4) | ドメインモデル・ID規約・変更manifest・生成物の依存グラフ・進行記録・収束判定・4階層診断 | 完了 |
 | 2(優先度5) | 標準周回のSkill 4本 + 討議用スライド生成 | 完了 |
-| 2(優先度6) | 最終提案スライド + `phase_signoff` ゲート | 完了(実案件でのSkill evalは未実施) |
+| 2(優先度6) | 最終提案スライド + `phase_signoff` ゲート | 完了 |
 | 2(後続) | knowledge-digest・decision-roadmap・build-mock・propose-architecture・pricing・簡易Webアプリ | 詳細設計が未了 |
 | 3 | 運用自動化: 類似案件検索 /(必要になれば)特定クラウドAPI連携ETLをプラグインとして追加 | 未着手 |
 | バックログ | AWS比較・MCPアダプタ・A2A(Gemini Enterprise)・チーム展開 | — |

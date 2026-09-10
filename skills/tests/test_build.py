@@ -200,3 +200,17 @@ def test_every_skill_but_the_pointer_carries_exactly_three_contract_items(tmp_pa
         counts[name] = len([line for line in body.splitlines() if line.startswith("- ")])
 
     assert counts == dict.fromkeys(counts, 3)
+
+
+def _step(text: str, number: int) -> str:
+    """手順<number>の本文。手順ごとの契約を、他の手順の記述で誤魔化さずに見る。"""
+    start = text.index(f"\n{number}. ")
+    end = text.find(f"\n{number + 1}. ", start)
+    return text[start:] if end == -1 else text[start:end]
+
+
+def test_grow_prfaq_rereads_the_status_before_generating_the_slides(tmp_path):
+    """generate_final_slides はPRFAQを保存して初めて出る。開始時の診断で判定すると永久に作らない。"""
+    step = _step(_built(tmp_path, "medo-grow-prfaq"), 8)
+
+    assert "--view summary" in step and "generate_final_slides" in step
