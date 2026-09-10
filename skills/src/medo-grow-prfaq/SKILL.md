@@ -23,16 +23,13 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
        medo requirements get --project <project-id> --format json
 
 4. `medo knowledge search` で技術的背景を深め、必要ならファクトを追加保存する。
-   顧客提出物の章構成と表現規約もCLIから取得する:
+   出力末尾のリフレーミング規約はPRFAQ本文にも適用する:
 
        medo artifacts outline --type slides --slide-kind discussion
-
-   出力末尾のリフレーミング規約はPRFAQにも適用する。
 5. 完全版PRFAQを作る。ミニPRFAQの内容に加えて:
-   - 技術的背景(実装手段の技術的な要点。引用したナレッジエントリのkind・statementに基づき、絵に描いた餅にしない)
-   - workflow改善見込み(現状業務がどう変わるか)
+   - 技術的背景(引用したナレッジのkind・statementに基づき、絵に描いた餅にしない)
+   - workflow改善見込み(現状業務がどう変わるか)/ ロードマップ(段階とopen_questionsの影響)
    - 効果(フェルミ推定の引用。必要なら `medo fermi calc` で追加計算)
-   - ロードマップ(段階と、open_questionsが各段階に与える影響)
    - 採択案と却下案の比較観点・評価・選定理由(原則とKPIに紐づける)
    - FAQ(顧客・社内から想定される問いと答え)
 6. 保存する:
@@ -45,21 +42,25 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
          --generated-by <claude|codex|gemini> --requirements-version <n>
 
    却下案が複数なら `--rejected` を繰り返す。
-7. 現行PRFAQをユーザーに提示し、修正を反映して確認を得る。確認前はスライドを生成しない。
-8. 最終提案のoutlineを取得し、その7章に沿ってスライドを生成する:
+7. PRFAQをユーザーに提示し、修正を反映して確認を得る。確認前はスライドを生成しない。
+8. **現在地を読み直す**。`generate_final_slides` は手順6でPRFAQが新しくなって初めて出る:
+
+       medo status --project <project-id> --view summary
+
+   無ければ作らない。`--view readiness` の `failed_conditions` を報告して手順10へ進む。
+   あれば outline を取得し、その7章に沿って作る:
 
        medo artifacts outline --type slides --slide-kind final
 
-   親は現行PRFAQちょうど1件とし、比較はPRFAQ本文から取り込んで保存する:
+   親は現行PRFAQちょうど1件とし、比較はPRFAQ本文から取り込む:
 
        medo artifacts save --project <project-id> --type slides --slide-kind final \
          --file /tmp/final-slides.md --derived-from <prfaq-vN> \
          --generated-by <claude|codex|gemini> --requirements-version <n>
 
    却下案はスライドのメタデータには付けない。
-9. 現行スライドを決裁者に提示し、`phase_signoff` を依頼する。依頼だけでは記録しない。
-   反応が未取得なら、その旨を報告し、手順10・11だけ実施して終える。
-   実際に得られた反応だけを記録する:
+9. スライドを決裁者に提示し、`phase_signoff` を依頼する。**依頼だけでは記録しない**。
+   反応が未取得ならその旨を報告し、手順10・11だけ実施して終える。得た反応だけを記録する:
 
        medo respond add --project <id> --stakeholder <sh-N> --artifact <slides-vN> \
          --purpose phase_signoff --reaction <reaction> --note "<得られた反応>"

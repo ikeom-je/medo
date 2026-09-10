@@ -47,6 +47,6 @@
 | 優先度 | 項目 | 状態 |
 |---|---|---|
 | 5 | Skill 4本 + 討議用スライド生成 | 完了(計画 #103 / 実装 #104 #105 / ドキュメント同期 #106〜#108) |
-| 6 | 最終提案スライド + `phase_signoff` ゲート | 完了(計画 #109 / 実装 #115〜#118)。計画: [medo-phase2-final.md](../../../docs/superpowers/plans/medo-phase2-final.md)。**実案件でのSkill evalは未実施**(ユーザーと共同で実施する) |
+| 6 | 最終提案スライド + `phase_signoff` ゲート | 完了(計画 #109 / 実装 #115〜#118)。計画: [medo-phase2-final.md](../../../docs/superpowers/plans/medo-phase2-final.md)。実案件(`medo-ops`)でのSkill eval実施済み(結果は `docs/setup.md` §7.5、検出した不具合は #120) |
 | 並行 | 出典検証の強化(URLフェッチ + 数値突合) | 詳細設計が未了 |
 | 後続 | ナレッジ来歴 / `knowledge-digest` / `decision-roadmap` / `build-mock` / `propose-architecture` / pricing / 簡易Webアプリ | 詳細設計が未了 |

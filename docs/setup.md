@@ -327,11 +327,45 @@ medo status --project smoke --view readiness --format json   # readiness.phase.s
 
 **自動テストで検出できなかった理由**: 優先度5までは `slides` が1種類しか無く、`(type, slide_kind)` の区別が要る状況をテストが作れなかった。**型が1つしか無いうちは、型で畳む実装の誤りは現れない**。
 
-### 7.5 未実施
+### 7.5 実案件での Skill eval(medo-ops)
 
-**実案件での Skill eval(`medo-grow-prfaq` の再実行)はまだ行っていない**。本節はCLIの通し確認であり、Skill本文の変更に対する eval ケースの再実行([testing.md](../.claude/steering/testing.md))は別途ユーザーと実施する。確認するのは、引用ID・章構成が安定していることと、**依頼しただけの状態を `phase_signoff` の `agreed` として記録しない**ことの2点。
+`medo-grow-prfaq` を実案件 `medo-ops`(要件v4)で実行した記録。同じ候補セット `mini-prfaq-v2` の同じ案「階層型適応Multi-Review」を、**前回のgemini実行と同じ入力からClaudeホストで育て直し**、引用IDと章構成の安定性を見た。実データ(`~/.medo`)を書き換えるため、事前に `cp -r ~/.medo <backup>` を取った。
 
-### 7.6 ハマりどころ
+| 観点 | `prfaq-v2`(gemini・要件v2) | `prfaq-v3`(claude・要件v4) |
+|---|---|---|
+| 育成元・打ち手 | mini-prfaq-v2 : 階層型適応Multi-Review | 同一 |
+| 引用ナレッジ | tech-1 / tech-2 | 同一 |
+| 引用ファクト | fact-1 / fact-2 / fact-3 | fact-1 / fact-3(**fact-2 が差分**) |
+| 章構成 | 6章 | 同じ6章 + 「採択案と却下案」= 7章 |
+| `rejected_options` | なし | 2件(理由・受け入れたリスク付き) |
+
+**引用の差分は事実の不一致ではない**。「32以上のツールがSKILL.mdを読む」という同一の事実を、geminiは `fact-2`(ファクト)と `tech-1`(ナレッジ)の両方で、Claudeは `tech-1` だけで引いた。**同じ事実がファクトとナレッジの両方に存在すると、どちらで引くかがホストによって割れる**。章構成の差は今回のSkill改訂で足した章であり、想定どおり。
+
+| # | 確認したこと | 結果 |
+|---|---|---|
+| 1 | 同一入力から同じ打ち手・同じナレッジ引用に着地する | ✅ 引用は4/5一致(差分は上記1件) |
+| 2 | 章構成が一貫している | ✅ 既存6章は一致 |
+| 3 | `--rejected` が実データで保存され、理由と受け入れたリスクが残る | ✅ 2件 |
+| 4 | 依頼しただけの状態を `phase_signoff` の `agreed` として記録しない | ✅ 反応が未取得のため記録せず、その旨を報告して終了 |
+| 5 | 未収束の案件で `generate_final_slides` が提示されない | ✅ `actions` に出ない(標準周回が未収束) |
+
+### 7.6 evalで見つかった不具合(修正済み)
+
+**手順8に `actions` の確認が無く、未収束でも最終提案スライドを作る → [Issue #120](https://github.com/ikeom-je/medo/issues/120)**
+
+`actions` は `generate_final_slides` を返していない(標準周回が未収束)にもかかわらず、SKILL.mdの手順は 6(PRFAQ保存)→ 7(ユーザー確認)→ 8(スライド生成)と**無条件に繋がっていた**。`actions` を見るのは再開時の分岐(手順1)だけで、線形に読み進んだホストは診断を参照せずに生成物を増やす。診断はゲートではないので保存は成功し、誤りが表面化しない。
+
+手順8の冒頭に「`actions` に `generate_final_slides` が無ければ作らず、`failed_conditions` を報告して手順10へ進む」を足した。
+
+**自動テストで検出できなかった理由**: 既存テストは「本文が `generate_final_slides` に言及していること」を見ており、**手順1の再開分岐がそれを満たしていた**。手順単位で切って見るまで、どの手順が条件を持つべきかを検査できていなかった。実際に未収束の案件で回して初めて出た。
+
+**最初の修正案は、それ自体が誤っていた**(相互レビューで agy が検出)。手順8に「`actions` に `generate_final_slides` が無ければ作らない」とだけ書いたが、**この行動は手順6でPRFAQを保存して初めて出る**(`build_actions` の8bが `prfaq_is_fresh` を条件にするため)。開始時(手順1)の診断で判定すると、正常な周回でもスライドを永久に作らない。手順8に `medo status` の読み直しを明記して修正した。
+
+**手順9(承認の依頼)に同じ条件を置かなかった理由**: 手順9へ到達する経路は2つしかなく、どちらも診断を通っている — 手順8がスライドを保存した直後(その時点で `request_phase_signoff` が立つ)か、手順1の再開分岐(`actions` に `request_phase_signoff` があるとき)である。条件を重ねると本文が80行を超える。
+
+### 7.7 ハマりどころ
 
 - 収束状態を組むには check を11項目すべて記録する必要がある(`medo check list` が返す全項目)。artifact束縛の3つ(`source_quality` / `as_is_articulation` / `expression_safety`)は `--artifact` が必須で、対象の生成物を先に作っておく
 - `answer_tobe_checkpoint` は最後まで `actions` の先頭に残る。節目に回答していない状態でもフェーズ完了の判定は独立に進む(診断であってゲートではない)
+- Skill eval は実データを書き換える。`cp -r ~/.medo <backup>` を先に取る。本 eval では `prfaq-v3` と案件固有ナレッジ1件(`medo-ops-6`)が実案件に増えた
+- `medo knowledge search` は語句の一致で引く。`"Multi-Review self-consistency"` のような複合語では該当なしになり、`"USC"` / `"Skill"` のような単語で引き当たる
