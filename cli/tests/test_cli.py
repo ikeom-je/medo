@@ -206,6 +206,22 @@ def test_status_readiness_view_includes_the_phase_judgement(medo_home: Path):
     assert "phase" in json.loads(result.output)["readiness"]
 
 
+def test_research_plan_outputs_profile_aspects_stop_conditions_and_findings(medo_home: Path):
+    _save_minimal_requirements(medo_home, "research-project")
+
+    result = runner.invoke(
+        app,
+        ["research", "plan", "--project", "research-project", "--format", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    plan = json.loads(result.output)
+    assert plan["profile"]["name"] == "structural"
+    assert plan["aspects"][0]["name"] == "actor_org"
+    assert plan["stop_conditions"]
+    assert plan["findings_to_resolve"] == {"links": {}, "coverage": {}}
+
+
 def test_facts_save_and_list_with_stale_flag(medo_home: Path):
     result = runner.invoke(
         app,
@@ -645,5 +661,12 @@ def test_check_list_digest_is_the_default(medo_home: Path):
 
 def test_check_list_rejects_an_unknown_confirmer(medo_home: Path):
     result = runner.invoke(app, ["check", "list", "--confirmer", "vendor"])
+
+    assert result.exit_code == 1 and "error:" in result.output
+
+
+def test_research_plan_reports_a_missing_project_as_an_error(medo_home: Path):
+    """案件が未作成なら model 枝は返らない。生のトレースバックはCLIの契約違反。"""
+    result = runner.invoke(app, ["research", "plan", "--project", "unknown"])
 
     assert result.exit_code == 1 and "error:" in result.output
