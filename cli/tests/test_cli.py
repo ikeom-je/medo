@@ -222,6 +222,32 @@ def test_research_plan_outputs_profile_aspects_stop_conditions_and_findings(medo
     assert plan["findings_to_resolve"] == {"links": {}, "coverage": {}}
 
 
+def test_research_triage_returns_unjudged_candidates_when_typesafe_is_unavailable(
+    medo_home: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from medo_cli.commands import research as research_commands
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setattr(
+        research_commands,
+        "judge_candidates",
+        lambda *_: pytest.fail("TYPESAFE_API_KEY がなければJevを呼ばない"),
+    )
+    candidates = medo_home / "candidates.json"
+    candidates.write_text(
+        json.dumps([{"url": "https://example.com", "title": "候補"}]), encoding="utf-8"
+    )
+
+    result = runner.invoke(
+        app,
+        ["research", "triage", "--project", "research-project", "--file", str(candidates)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "judge: unavailable" in result.output
+    assert "https://example.com" in result.output
+
+
 def test_facts_save_and_list_with_stale_flag(medo_home: Path):
     result = runner.invoke(
         app,
@@ -670,3 +696,57 @@ def test_research_plan_reports_a_missing_project_as_an_error(medo_home: Path):
     result = runner.invoke(app, ["research", "plan", "--project", "unknown"])
 
     assert result.exit_code == 1 and "error:" in result.output
+
+
+def test_jev_score_is_normalized_to_the_verdict_contract():
+    """scoreはレベル番号の範囲で返る(3段なら0〜2)。そのまま渡すとVerdictの検証で落ちる。"""
+    from medo_cli.jev import _normalized_score
+
+    answer = {"score": 1.6, "legend": {"0": "低", "1": "中", "2": "高"}}
+
+    assert _normalized_score(answer) == 0.8
+
+
+def test_triage_keeps_the_same_shape_when_the_judge_is_unavailable(
+    medo_home: Path, monkeypatch
+):
+    """形が変われば呼び出し側が壊れる。判定できないことは形ではなくフラグで伝える。"""
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    path = medo_home / "cands.json"
+    path.write_text(json.dumps([{"url": "https://example.com/a", "title": "a"}]), "utf-8")
+
+    result = runner.invoke(
+        app,
+        ["research", "triage", "--project", "p", "--file", str(path), "--format", "json"],
+    )
+    payload = json.loads(result.output)
+
+    assert payload["judge"] == "unavailable"
+    assert set(payload) >= {"open", "rejected", "diminishing_returns", "budget_left"}
+
+
+def test_jev_state_carries_the_project_so_relevance_can_be_judged(monkeypatch):
+    """案件を知らないモデルに「この案件の現状把握に効くか」は問えない。"""
+    import medo_cli.jev as jev
+
+    sent = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return json.dumps({"answers": {}}).encode()
+
+    def _fake_urlopen(request, *args, **kwargs):
+        sent["body"] = json.loads(request.data)
+        return _Response()
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", _fake_urlopen)
+    jev.judge_candidates([], {"policy": "国の施策"}, {"goal": "生産計画の自動化"})
+
+    assert sent["body"]["state"]["project"] == {"goal": "生産計画の自動化"}

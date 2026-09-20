@@ -43,6 +43,7 @@ app.add_typer(facts_app, name="facts", help="市場・国策・業界動向・�
 app.add_typer(fermi_app, name="fermi", help="フェルミ推定(仮定明示・コードが計算)")
 app.add_typer(research_app, name="research")
 research_app.command("plan")(research_commands.research_plan)
+research_app.command("triage")(research_commands.research_triage)
 app.add_typer(workflow_commands.check_app, name="check")
 workflow_commands.check_app.command("list")(template_commands.check_list)
 app.add_typer(workflow_commands.review_app, name="review")
