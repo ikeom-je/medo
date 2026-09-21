@@ -750,3 +750,49 @@ def test_jev_state_carries_the_project_so_relevance_can_be_judged(monkeypatch):
     jev.judge_candidates([], {"policy": "国の施策"}, {"goal": "生産計画の自動化"})
 
     assert sent["body"]["state"]["project"] == {"goal": "生産計画の自動化"}
+
+
+def test_research_plan_digest_renders_every_field(medo_home: Path):
+    """既定はdigest。json経路しか試さないと、フィールド改名で既定出力が壊れる。"""
+    _save_minimal_requirements(medo_home, "digest-project")
+
+    result = runner.invoke(app, ["research", "plan", "--project", "digest-project"])
+
+    assert result.exit_code == 0
+    assert "一次資料の重み" in result.output and "取得規範" in result.output
+
+
+def test_research_triage_digest_renders_the_judged_path(medo_home: Path, monkeypatch):
+    """判定できた側の出力が未テストだと、辞書キーの改名で既定出力が落ちる。"""
+    import medo_cli.commands.research as research_commands
+    from medo_core.research import Verdict
+
+    _save_minimal_requirements(medo_home, "judged-project")
+    candidates = medo_home / "cands.json"
+    candidates.write_text(
+        json.dumps([{"url": "https://example.go.jp/a", "title": "告示", "hop": 1}]),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(
+        research_commands,
+        "judge_candidates",
+        lambda *a, **k: [
+            Verdict(
+                url="https://example.go.jp/a",
+                relevance=0.3,
+                aspect="policy",
+                is_primary=0.9,
+                worth_descending=0.7,
+            )
+        ],
+    )
+
+    result = runner.invoke(
+        app,
+        ["research", "triage", "--project", "judged-project", "--file", str(candidates)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "judge: available" in result.output
+    assert "https://example.go.jp/a" in result.output
