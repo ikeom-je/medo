@@ -48,8 +48,12 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
    - Howの目処(ナレッジ根拠の要点。kind・statementと引用エントリID)
    - 主要リスク・open_questions
 
-6. 全案を1つのmarkdown(候補セット)にまとめて保存する:
+6. **現在地を読み直す**。`actions` に `proceed_to_propose_options`、または
+   `refs` に `mini-prfaq` を含む `regenerate_stale_artifacts` があれば保存する。
+   どちらも無いなら**作る理由をユーザーに確認してから**作る — 鮮度を無視した
+   作り直しは下流の引用関係とレビュー承認を壊す:
 
+       medo status --project <project-id> --view summary
        medo artifacts save --project <project-id> --type mini-prfaq \
          --file /tmp/options.md \
          --options "<打ち手名>:<切り口>,<打ち手名>:<切り口>" \

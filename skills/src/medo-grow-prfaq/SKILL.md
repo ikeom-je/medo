@@ -32,7 +32,7 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
    - 効果(フェルミ推定の引用。必要なら `medo fermi calc` で追加計算)
    - 採択案と却下案の比較観点・評価・選定理由(原則とKPIに紐づける)
    - FAQ(顧客・社内から想定される問いと答え)
-6. 保存する:
+6. 保存する。**親の `mini-prfaq` が stale なら先に作り直す**(`actions` の `regenerate_stale_artifacts`):
 
        medo artifacts save --project <project-id> --type prfaq \
          --file /tmp/prfaq.md \
@@ -41,8 +41,8 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
          --cites <entry-id,...> --cites-facts <fact-id,...> \
          --generated-by <claude|codex|gemini> --requirements-version <n>
 
-   却下案が複数なら `--rejected` を繰り返す。
-7. PRFAQをユーザーに提示し、修正を反映して確認を得る。確認前はスライドを生成しない。
+7. 却下案が複数なら `--rejected` を繰り返す。PRFAQをユーザーに提示し、修正を
+   反映して確認を得る。確認前はスライドを生成しない。
 8. **現在地を読み直す**。`generate_final_slides` は手順6でPRFAQが新しくなって初めて出る:
 
        medo status --project <project-id> --view summary
