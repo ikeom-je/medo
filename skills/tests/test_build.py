@@ -214,3 +214,20 @@ def test_grow_prfaq_rereads_the_status_before_generating_the_slides(tmp_path):
     step = _step(_built(tmp_path, "medo-grow-prfaq"), 8)
 
     assert "--view summary" in step and "generate_final_slides" in step
+
+
+def test_investigate_reads_the_model_branch_it_is_assigned(tmp_path):
+    """status契約 §1 は Stage 1 に model 枝を割り当てている。読まなければ7項目が届かない。"""
+    assert "--view model" in _built(tmp_path, "medo-investigate")
+
+
+def test_investigate_crawls_instead_of_stopping_at_search_results(tmp_path):
+    """表面的な検索結果だけでは認識GAPの突合対象にならない。"""
+    text = _built(tmp_path, "medo-investigate")
+
+    assert "research triage" in text and "diminishing_returns" in text
+
+
+def test_investigate_reports_a_degraded_judge(tmp_path):
+    """選別が効いていないまま巡回を続けると、表面情報に時間を使う。"""
+    assert "judge: unavailable" in _built(tmp_path, "medo-investigate")

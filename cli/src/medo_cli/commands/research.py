@@ -112,13 +112,16 @@ def _echo_digest(plan: dict) -> None:
     typer.echo(f"深度プロファイル: {profile['name']}")
     typer.echo(f"最大階層: {profile['max_hops']}")
     typer.echo(f"最大ページ数: {profile['max_pages']}")
-    typer.echo(f"一次資料を優先: {'はい' if profile['prefer_primary'] else 'いいえ'}")
+    typer.echo(f"一次資料の重み: {profile['primary_weight']}")
     typer.echo("埋める観点:")
     for aspect in plan["aspects"]:
         typer.echo(f"- {aspect['name']}: {aspect['description']}")
     typer.echo("停止条件:")
     for condition in plan["stop_conditions"]:
         typer.echo(f"- {condition}")
+    typer.echo("取得規範:")
+    for rule in plan["fetch_policy"]:
+        typer.echo(f"- {rule}")
     typer.echo("解消を狙う診断項目:")
     findings = plan["findings_to_resolve"]
     if not any(findings.values()):

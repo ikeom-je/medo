@@ -76,6 +76,15 @@ PROFILES = {
     ),
 }
 
+FETCH_POLICY = (
+    "robots.txt とサイト利用規約に従う",
+    "認証・有料壁を回避しない",
+    "同一サイトへの連続取得は間隔を空ける",
+    "本文の保存は引用の範囲に留め、出典URLと資料名を必ず併記する",
+    "個人情報を含むページは保存せず、必要なら出典URLのみ残す",
+    "資料の発行日と retrieved(取得日)を混同しない。古い一次資料を最新と誤認しない",
+)
+
 STOP_CONDITIONS = (
     "上限ページ数に到達",
     "ユーザーが止めた",
@@ -111,6 +120,7 @@ def research_plan(
             for aspect in profile.aspects
         ],
         "stop_conditions": STOP_CONDITIONS,
+        "fetch_policy": FETCH_POLICY,
         "findings_to_resolve": findings_to_resolve,
     }
 
