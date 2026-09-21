@@ -1,23 +1,39 @@
 # Git ルール
 
-このリポジトリでの Git 運用ルール。個人開発・ローカルリポジトリ(現時点でリモートなし)を前提とし、チーム展開(バックログ)時に PR フローへ拡張する。
+このリポジトリでの Git 運用ルール。GitHub Issue駆動で進める(正本設計: `docs/superpowers/specs/issue-driven-workflow-design.md`)。
 
 ---
 
 ## 1. ブランチ戦略
 
-現フェーズはトランクベース(main 中心)のシンプル運用。デプロイ環境の分離(dev/staging等)は行わない。
+`main`(公開安定版)/ `dev`(開発統合)の2ブランチ運用。実装計画のTask 1件はGitHub Issue 1件に対応する。
 
 | ブランチ | 用途 |
 |---|---|
-| `main` | 唯一の長命ブランチ。テストが通る状態を保つ |
-| `feature/<説明>` | 複数コミットにまたがる機能実装(実装計画のTask実行時など) |
-| `fix/<説明>` | バグ修正 |
+| `main` | 公開安定版。フェーズ完了(統合スモーク後)にdevからPRでマージ。マージは常にユーザー承認 |
+| `dev` | 開発統合ブランチ。Task単位のPRがここにマージされる |
+| `feature/<issue番号>-<説明>` | Issue 1件=Task 1件に対応する実装ブランチ |
+| `fix/<issue番号>-<説明>` | バグ修正 |
 
-- ドキュメントのみの変更・単一コミットの小変更は main 直接コミット可
-- 実装タスク(コード変更)は **必ず git worktree 上の feature/fix ブランチで作業する**(`git worktree add .worktrees/<name> -b <branch>`。`.worktrees/` は .gitignore 対象)。同一リポジトリを複数マシン・複数セッションで並行開発するため、作業ディレクトリの競合を防ぐ目的
-- 完了したら worktree 上で `uv run pytest` 等の検証を通してから main へマージし、`git worktree remove .worktrees/<name>` で片付ける
-- GitHub リモート追加後は main への直接 push を止め、PR 経由に移行する
+**Issue→PR→マージの流れ:**
+
+1. 実装計画のTaskごとに `gh issue create`(ラベル `phase1`、本文に実装計画へのリンク)
+2. `git worktree add .worktrees/<name> -b feature/<issue番号>-<説明> dev` で作業ディレクトリを分離
+3. TDDで実装(担当は workflow.md Section 3 の担当表に従って委譲。Claudeが `uv run pytest` / `uv run ruff check .` で検証)する
+4. **相互レビューを実施**(workflow.mdの相互レビュープロトコル。Claude作のdiffはCodex+agy、agy/Codex作のdiffはClaude。上限2ラウンド)し、結果を `review:` 行に記録してworktree上でコミット
+5. `git push -u github feature/<issue番号>-<説明>`
+6. `gh pr create --base dev`(本文に "Closes #<issue番号>" + テスト結果 + レビュー記録を転記)
+7. **重要度判定**(次のいずれかに該当する場合のみ人間レビューを依頼、それ以外はClaudeが自動マージ):
+   - スキーマ/契約変更(CLIコマンド体系・Storageパス等、Skill契約に影響)
+   - クラウド認証・課金が絡む変更(外部APIの実クライアント呼び出しの初回追加)
+   - 相互レビューが上限2ラウンドでも重大指摘未解決
+   - 該当する場合: `gh pr edit --add-reviewer <ユーザー>` 等で人間レビューを依頼し、承認後にマージ
+   - 該当しない場合: Claudeが `gh pr merge --squash` で自動マージ(Issueは自動close)
+8. `git worktree remove .worktrees/<name>` で片付ける
+9. フェーズ完了(統合スモークTask完了)時: `gh pr create --base main --head dev` をClaudeが作成し、**マージは常にユーザーが実行**
+
+- 実装計画のTaskに紐づく変更は必ずIssue→PRを経由する。**この例外はTaskに紐づかない、ごく小さな臨時のドキュメント修正(typo・リンク切れ修正等)にのみ適用**され、その場合はworktreeを使わずdevへ直接コミットしてよい(mainへの直接コミットはしない)
+- 詳細なテンプレート(Issue本文・PR本文の具体形式)は正本設計のSection 4を参照
 
 ---
 
@@ -60,7 +76,8 @@ docs(steering): tech.md にLLM使い分け表を追加
 
 ### 規約
 
-- 日本語・50文字以内・命令形推奨、1コミット1変更
+- 本文の説明部分には **Why**(なぜこの変更が必要か)を書く。WhatとHowはdiffとコードが語るため繰り返さない(表現の分担: workflow.md Section 4)。`review:` 行・`Co-Authored-By` 等のtrailerは検証記録・規約であり、所定形式(workflow.mdの相互レビュープロトコル・ハーネス規約)に従う
+- Subjectは日本語・50文字以内・命令形推奨、1コミット1変更
 - 実装計画実行時は計画のTask単位でコミット(計画にコミットメッセージが明記されている)
 - デバッグコード・コメントアウトの残骸を含めない
 
