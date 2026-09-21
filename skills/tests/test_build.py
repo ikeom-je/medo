@@ -231,3 +231,15 @@ def test_investigate_crawls_instead_of_stopping_at_search_results(tmp_path):
 def test_investigate_reports_a_degraded_judge(tmp_path):
     """選別が効いていないまま巡回を続けると、表面情報に時間を使う。"""
     assert "judge: unavailable" in _built(tmp_path, "medo-investigate")
+
+
+def test_investigate_checks_the_actions_before_generating_the_report(tmp_path):
+    """不要な作り直しは内部レビューの承認を無効化し、周回を巻き戻す。"""
+    assert "generate_as_is_report" in _step(_built(tmp_path, "medo-investigate"), 7)
+
+
+def test_investigate_rereads_the_status_before_generating_the_slides(tmp_path):
+    """generate_discussion_slides は報告書を保存して初めて出る。"""
+    step = _step(_built(tmp_path, "medo-investigate"), 8)
+
+    assert "--view summary" in step and "generate_discussion_slides" in step

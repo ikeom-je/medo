@@ -50,28 +50,28 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
        medo requirements save --project <id> --file /tmp/req.yaml
        medo status --project <id> --view summary
 
-7. 共有する段で現状調査・分析報告書を保存する(調査ノートは `--type research`
-   で先に保存し `--derived-from` で繋ぐ):
+7. **現在地の** `actions` に `generate_as_is_report` があれば報告書を保存する。無ければ
+   作らない(調査ノートは `--type research` で先に保存し `--derived-from` で繋ぐ):
 
        medo artifacts save --project <id> --type as-is-report --cites-facts <id,...> \
          --requirements-version <n> --generated-by <who> --file /tmp/as-is-report.md
 
-8. 討議用スライドを作る。**章構成と規約はCLIが返す**(`workflow.loop.focus_hypothesis`
-   が章0、`workflow.checks.states` が章6に要る):
+8. **読み直す**。`generate_discussion_slides` は手順7の保存で初めて出る。無ければ
+   作らない。あれば章構成と規約をCLIから取る(`focus_hypothesis`が章0、`checks.states`が章6):
 
+       medo status --project <id> --view summary
        medo status --project <id> --view workflow
        medo artifacts outline --type slides --slide-kind discussion
        medo artifacts save --project <id> --type slides --slide-kind discussion \
          --derived-from as-is-report-v<n> --requirements-version <n> \
          --generated-by <claude|codex|gemini> --file /tmp/slides.md
 
-9. 終了時に現在地を読み `actions` を報告し、得たノウハウがあれば追記する:
+9. 終了時に現在地を読み `actions` を報告し、得たノウハウがあれば追記する。
+   スライドまで作れたら「次は medo-review で内部検証」と案内して終える:
 
        medo status --project <id> --view summary
        medo knowledge save --project <id> --statement "<ノウハウ>" \
          --source "medo-investigate <日付>対話"
-
-   スライドまで作れたら「次は medo-review で内部検証」と案内して終える。
 
 ## 契約(必ず守る)
 
