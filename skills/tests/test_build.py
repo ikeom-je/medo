@@ -243,3 +243,32 @@ def test_investigate_rereads_the_status_before_generating_the_slides(tmp_path):
     step = _step(_built(tmp_path, "medo-investigate"), 8)
 
     assert "--view summary" in step and "generate_discussion_slides" in step
+
+
+def test_propose_options_checks_both_permitting_actions(tmp_path):
+    """初回と作り直しで許可する行動が違う。片方だけ見ると正当な再生成が詰む。"""
+    step = _step(_built(tmp_path, "medo-propose-options"), 6)
+
+    assert "--view summary" in step
+    assert "proceed_to_propose_options" in step and "regenerate_stale_artifacts" in step
+
+
+# 生成物を保存する手順と、それを許可する行動。手順1の再開分岐では守れない
+# (親がstaleだと actions は regenerate_stale_artifacts だけになり分岐を素通りする)。
+GUARDED_SAVES = {
+    "medo-investigate": {7: "generate_as_is_report", 8: "generate_discussion_slides"},
+    "medo-propose-options": {6: "proceed_to_propose_options"},
+    "medo-grow-prfaq": {6: "regenerate_stale_artifacts", 8: "generate_final_slides"},
+}
+
+
+def test_every_guarded_save_names_the_action_that_allows_it(tmp_path):
+    """同じ欠陥が #120 #125 #129 と3度出た。診断を見ずに作ると周回が巻き戻る。"""
+    missing = {
+        (name, number)
+        for name, steps in GUARDED_SAVES.items()
+        for number, action in steps.items()
+        if action not in _step(_built(tmp_path, name), number)
+    }
+
+    assert missing == set()
