@@ -253,20 +253,32 @@ def test_propose_options_checks_both_permitting_actions(tmp_path):
     assert "proceed_to_propose_options" in step and "regenerate_stale_artifacts" in step
 
 
-# 生成物を保存する手順と、それを許可する行動。手順1の再開分岐では守れない
-# (親がstaleだと actions は regenerate_stale_artifacts だけになり分岐を素通りする)。
-GUARDED_SAVES = {
+# 各手順と、それを統べる行動。生成系(artifacts save)では**作ってよいかの条件**、
+# 記録系(check add 等)では**何を扱うかの案内**であり、記録を妨げてはならない。
+# 顧客が自発的に答えた項目まで actions に縛ると、一次情報を取りこぼす。
+#
+# medo-dialogue の respond add と medo-review の review add は対象外。前者は
+# 顧客から得た反応をシステムの要求なしに記録できるべきで、後者は許可する専用の
+# 行動が存在しない。
+STEP_ACTIONS = {
     "medo-investigate": {7: "generate_as_is_report", 8: "generate_discussion_slides"},
     "medo-propose-options": {6: "proceed_to_propose_options"},
-    "medo-grow-prfaq": {6: "regenerate_stale_artifacts", 8: "generate_final_slides"},
+    "medo-grow-prfaq": {
+        6: "regenerate_stale_artifacts",
+        8: "generate_final_slides",
+        9: "request_phase_signoff",
+    },
+    "medo-review": {4: "run_check"},
+    "medo-dialogue": {5: "run_check"},
+    "medo-decide": {4: "answer_tobe_checkpoint"},
 }
 
 
-def test_every_guarded_save_names_the_action_that_allows_it(tmp_path):
-    """同じ欠陥が #120 #125 #129 と3度出た。診断を見ずに作ると周回が巻き戻る。"""
+def test_every_step_names_the_action_that_governs_it(tmp_path):
+    """同じ欠陥が #120 #125 #129 と3度出た。診断を見ずに動くと周回が巻き戻る。"""
     missing = {
         (name, number)
-        for name, steps in GUARDED_SAVES.items()
+        for name, steps in STEP_ACTIONS.items()
         for number, action in steps.items()
         if action not in _step(_built(tmp_path, name), number)
     }

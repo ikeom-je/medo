@@ -55,8 +55,8 @@ description: レビュー済みの討議用スライドを顧客に提示する�
    `unclear` は「反応が読み取れなかった」であり失敗ではない。沈黙や曖昧な同意を
    `agreed` に丸めない。要件の訂正・追加はここでは記録に留め、反映は medo-decide が行う。
 
-5. 顧客が答えたチェック項目を記録する。**artifact束縛の項目は `--artifact` が必須**
-   (`medo check list` の `binding` を見る):
+5. 顧客が答えたチェック項目を記録する。`actions` の `run_check` が未確認の項目を
+   返すが、**顧客が自発的に答えた項目も記録する**。artifact束縛は `--artifact` 必須:
 
        medo check add --project <id> --check as_is_articulation \
          --result <completed|finding|undeterminable> --artifact <as-is-report-vN> \
