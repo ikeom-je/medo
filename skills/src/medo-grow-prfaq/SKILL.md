@@ -59,8 +59,8 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
          --generated-by <claude|codex|gemini> --requirements-version <n>
 
    却下案はスライドのメタデータには付けない。
-9. スライドを決裁者に提示し、`phase_signoff` を依頼する。**依頼だけでは記録しない**。
-   反応が未取得ならその旨を報告し、手順10・11だけ実施して終える。得た反応だけを記録する:
+9. `actions` に `request_phase_signoff` があればスライドを提示して依頼する。**依頼だけ
+   では記録しない**。未取得なら報告して手順10・11へ。得た反応だけを記録する:
 
        medo respond add --project <id> --stakeholder <sh-N> --artifact <slides-vN> \
          --purpose phase_signoff --reaction <reaction> --note "<得られた反応>"
