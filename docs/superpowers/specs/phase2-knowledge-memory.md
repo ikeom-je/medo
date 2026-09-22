@@ -50,7 +50,7 @@ product.md は「案件を跨いで育つ技術ナリッジ」を差別化軸に
 | L1 Atom(原子的な事実) | **採用済み** | `KnowledgeEntry` / `ProjectKnowledgeEntry` が1エントリ=1文でこれに当たる |
 | L2 Scenario(場面でまとめた要約) | **新規に採る** | `index.md` として実装する(§4) |
 | L3 Persona(相手の人格モデル) | **採らない** | 個人利用で認証・マルチテナントを持たない(不変条件5)。相手の人格を推定して保持する必要が無く、推定は原則5(推測で補完しない)に反する |
-| 検索は L2/L3 で bootstrap し、足りなければ L1/L0 に降りる | **採る** | `index.md` を読んで、当たりがあれば実体に降りる(§5) |
+| 検索は L2/L3 で bootstrap し、足りなければ L1/L0 に降りる | **採る。ただし bootstrap を絞り込みには使わない** | 要約で絞ると要約から漏れた語で取りこぼす(§5)。`index.md` は「読むべきか」を決める材料であって、検索のフィルタではない |
 | 結果を件数・文字数・タイムアウトで打ち切る | **件数と文字数を採る。タイムアウトは採らない** | 読み先はローカルファイルで、時間ではなく量が効く |
 
 ---
@@ -64,7 +64,7 @@ OKF v0.2 の必須フィールドは `type` だけで、残りは任意。**全�
 ```yaml
 ---
 type: knowledge            # OKF必須。medoでは knowledge 固定
-kind: tech                 # 既存。tech/market/policy/trend/company
+kind: tech                 # 既存5種 + practice(§4.3)
 statement: Cloud Run のリクエストタイムアウト上限は60分
 sources:                   # 既存の source を OKF の複数形に寄せる(単数も受ける)
   - https://cloud.google.com/run/docs/configuring/request-timeout
@@ -91,30 +91,51 @@ type: index
 kind: tech
 entry_count: 42
 generated: "2026-09-23"
-stale_count: 7             # stale_after を過ぎたエントリ数
 ---
 
 ## このkindに何があるか
 
-- Cloud Run / Cloud Functions の制限と料金(12件、うち stale 3件)
+- Cloud Run / Cloud Functions の制限と料金(12件)
 - BigQuery の取り込み経路(8件)
 - ...
 ```
 
-**`index.md` はCLIが生成する**。エントリを保存・削除したときに作り直す。要約の見出しはLLMが書いてよいが、件数・stale件数・生成日は**コードが数える**(原則1)。
+**`index.md` はCLIが生成する**。エントリを保存・削除したときに作り直す。見出しの文章はLLMが書いてよいが、件数と生成日は**コードが数える**(原則1)。
 
-`index.md` を読めば「このkindに使える情報があるか」が本体を開かずに分かる。無ければそこで止める。
+**stale件数はファイルに書かない**。鮮度は時間の経過だけで変わるため、保存時に焼き込むと次の保存まで実態とずれ続ける。読み出すときにコードが `stale_after` と今日を比べて数える。
+
+`index.md` を読めば「このkindに使える情報があるか」が本体を開かずに分かる。
+
+### 4.3 `practice` kind を足す
+
+既存の5種のうち `tech` / `market` / `policy` / `trend` は **URLを必須**にしており(`_URL_KINDS`)、残る `company` は個社ファクトを指す。**レビューや対話で得た「進め方のノウハウ」を入れる先が無い**。
+
+`practice` を足す。
+
+| | |
+|---|---|
+| 意味 | 案件を跨いで使える進め方の知見(レビューで繰り返し出る指摘の型、効いた問い方) |
+| `sources` | **必須。ただしURLでなくてよい**(例: `medo-review 2026-09-23対話`)。案件固有ナレッジ(`ProjectKnowledgeEntry`)と同じ扱い |
+| 鮮度 | 180日(既定) |
+
+出典必須を緩めない(原則5)。緩めるのは**出典の形式**であって、出典の有無ではない。
 
 ---
 
 ## 5. 取り出し方
 
-`medo knowledge search` を**2段にする**。
+**`index.md` を検索の絞り込みに使わない**。索引は要約であり、要約に載らなかった語で引くと、実体があるのに「無い」と返る。取りこぼしは黙って起きるので、呼び出し側からは検出できない(原則5に反する)。
 
-1. **概要を読む**: 該当kindの `index.md` だけを読む。当たりが無ければ空で返す
-2. **実体に降りる**: 当たったkindのエントリだけを読み、予算に収まるまで返す
+役割を2つのコマンドに分ける。
 
-予算は2つ。
+| コマンド | 何を返すか | いつ使うか |
+|---|---|---|
+| `medo knowledge index [--kind <k>]` | 各kindの `index.md`(件数・stale件数・見出し) | **本体を開く前**に「使えるものがありそうか」を判断する |
+| `medo knowledge search <query>` | エントリの実体。**索引を経由せず全エントリを走査する** | 実際に引く |
+
+これが TencentDB の「L2 で bootstrap し、足りなければ L1 に降りる」に当たる。**降りる経路を索引に依存させない**点だけが違う。
+
+`search` には予算を2つ入れる。
 
 | 予算 | 既定 | 理由 |
 |---|---|---|
@@ -136,7 +157,13 @@ stale_count: 7             # stale_after を過ぎたエントリ数
 | `medo-propose-options` | 打ち手の比較で効いた技術情報 | 案件固有(既存)+ 案件横断(新規) |
 | `medo-grow-prfaq` | PRFAQ育成で使った技術的背景 | 案件固有(既存)+ 案件横断(新規) |
 
-**案件横断に上げる条件を手順に書く**。「この案件にしか当てはまらないなら `--project`、他の案件でも同じことが起きるなら `--kind`」。判断はホストLLMがするが、**出典必須の検証はCLIが落とす**(`--kind tech/market/policy/trend` はURL必須)。
+**案件横断に上げる条件を、判定できる形で手順に書く**。「他の案件でも起きそうなら」では抽象的すぎて、案件固有の事情が混入する。
+
+> **固有名詞を消しても文が成り立つなら案件横断(`--kind`)、成り立たないなら案件固有(`--project`)。**
+
+「A社の受注センターは紙を嫌う」は固有名詞を消すと何も残らないので案件固有。「現場の作業者が関わる変更は、決裁者の合意より先に現場の反応を取ったほうが早い」は残るので案件横断。
+
+判断はホストLLMがするが、**出典必須の検証はCLIが落とす**(`tech` / `market` / `policy` / `trend` はURL必須、`practice` と `company` は自由記述だが空は拒否)。
 
 レビューの指摘そのもの(`AsIsReportReviewed.slide_findings`)は events に残り続ける。**ナリッジに上げるのは個別の指摘ではなく、そこから一般化した型**である。この区別を手順に明記しないと、案件固有の指摘が案件横断ナリッジを汚す。
 
@@ -146,8 +173,8 @@ stale_count: 7             # stale_after を過ぎたエントリ数
 
 | # | 内容 | 影響範囲 |
 |---|---|---|
-| A | エントリのOKF化(`type` / `sources` / `stale_after` / `status` / `actor`)と後方互換の読み取り | core(`knowledge.py`)・CLI |
-| B | `index.md` の生成と、概要を先に読む2段検索・文字数予算・`truncated` | core・CLI。**`medo knowledge search` の出力が変わる = Skill契約に影響** |
+| A | エントリのOKF化(`type` / `sources` / `stale_after` / `status` / `actor`)と後方互換の読み取り、`practice` kind の追加 | core(`knowledge.py`)・CLI |
+| B | `index.md` の生成と `medo knowledge index` の追加、`search` の文字数予算と `truncated` | core・CLI。**`medo knowledge search` の出力が変わる = Skill契約に影響** |
 | C | 各Skillの手順にナリッジ保存を足す(案件横断の判断基準つき) | skills。**80行上限との調整が要る** |
 
 Aから順に。BはAの `stale_after` を使い、CはBの検索形を前提にする。
