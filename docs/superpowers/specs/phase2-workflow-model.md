@@ -146,15 +146,26 @@ class ToBeCheckpointRecorded(WorkflowEventBase):
 
 **収束判定は「現在の対象」に対してのみ行う**。これが無いと、旧版への異議で永久に止まり、逆に古い版への合意で誤って通る。
 
+**現在の対象は要件版の完全一致では決めない**(実測による訂正)。完全一致にすると、**内容が1文字も変わらない `requirements save` だけで対象を見失い、内部レビューの承認が消える**。
+
+```
+レビュー直後:           current_target: as-is-report-v1 / approved: True
+同内容をそのまま再保存: current_target: None            / approved: False
+```
+
+`medo-decide` は顧客の反応を要件へ反映するのが仕事であり、**毎周回 `requirements save` する**。完全一致では周回を回すたびに承認が失われ、`medo-dialogue` が「まだ内部検証していない」と判断する。
+
+これは §6 が戒める**巻き添え失効**そのものである。生成物の陳腐化判定は既にセクション単位で行われており(同じ操作で `stale` は False のまま)、**現在の対象も同じ粒度に揃える**。
+
 ```python
 class ConvergenceTarget(BaseModel):
     requirements_version: int       # 最新の要件版
-    as_is_report_id: str | None     # 最新要件版から生成された as-is-report(無ければ None)
+    as_is_report_id: str | None     # stale でない最新の as-is-report(無ければ None)
 ```
 
 `medo status` が最新状態から**決定論的に導出する**(保存しない)。
 
-**`as_is_report_id` は「最新要件版から生成された最新の `as-is-report`」に限定する**。要件版とレポートを独立に選ぶと、古い要件から作られたレポートが現在対象になり、両者が食い違う。該当するレポートが存在しない場合は `None` とし、`readiness` は `as_is_report_missing` を返す。
+**`as_is_report_id` は「stale でない最新の `as-is-report`」に限定する**。鮮度を見ずに最新版だけを取ると、依存セクションが変わって内容が古くなったレポートが現在対象に残り、要件と食い違う。該当するレポートが存在しない場合は `None` とし、`readiness` は `as_is_report_missing` を返す。
 
 ### purpose ごとに対象の種別を固定する
 

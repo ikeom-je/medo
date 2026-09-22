@@ -3,8 +3,8 @@ from datetime import date
 from medo_core.artifacts import Artifact, ArtifactStore
 from medo_core.context import collect, workflow_branch
 from medo_core.events import ArtifactTarget, AsIsReportReviewed, StakeholderResponded
-from medo_core.nodes import AsIs, Stakeholder
-from medo_core.requirements import RequirementsDoc
+from medo_core.nodes import AsIs, Challenge, Stakeholder
+from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.storage import LocalJsonStorage
 from medo_core.workflow import WorkflowRecorder
 
@@ -131,3 +131,52 @@ def test_workflow_branch_carries_checks_and_responses(tmp_path):
 
     assert set(branch) == {"checks", "review", "responses", "loop"}
     assert "states" in branch["checks"]
+
+
+def _approved_report(storage) -> str:
+    report_id = _report(storage)
+    slides_id = ArtifactStore(storage).save("p1", Artifact(
+        project="p1", type="slides", slide_kind="discussion", requirements_version=1,
+        derived_from=[report_id], generated_by="claude", content="# 討議",
+    ))
+    WorkflowRecorder(storage).record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id=report_id), occurred_on="2026-08-30",
+        requirements_version=1, round_id=0, outcome="approved",
+        reviewed_slides_id=slides_id,
+    ))
+    return report_id
+
+
+def _save_v2(storage, **sections) -> None:
+    """保存済みドキュメントを起点に1セクションだけ差し替える。
+
+    ノードを作り直すとIDが変わり、内容が同じセクションまで変更扱いになる。
+    """
+    doc = RequirementsStore(storage).get("p1")
+    WorkflowRecorder(storage).save_requirements(
+        "p1", doc.model_copy(update=sections), today=TODAY,
+    )
+
+
+def test_non_dependent_section_change_keeps_current_target_and_approval(tmp_path):
+    """as-is-report が依存しないセクションの更新では、承認済みレビューは有効なまま。"""
+    storage = _project(tmp_path)
+    report_id = _approved_report(storage)
+
+    _save_v2(storage, challenges=[Challenge(text="人手不足", scope="core")])
+
+    branch = workflow_branch(collect(storage, "p1", include_scope=("core",), today=TODAY))
+    assert branch["review"]["current_target"] == report_id
+    assert branch["review"]["approved"] is True
+
+
+def test_dependent_section_change_drops_current_target(tmp_path):
+    """依存セクションが変われば内容が古くなるので、現在対象から外す。"""
+    storage = _project(tmp_path)
+    _approved_report(storage)
+
+    _save_v2(storage, as_is=[AsIs(text="実態が変わった", visibility="internal")])
+
+    branch = workflow_branch(collect(storage, "p1", include_scope=("core",), today=TODAY))
+    assert branch["review"]["current_target"] is None
+    assert branch["review"]["approved"] is False

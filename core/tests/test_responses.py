@@ -35,7 +35,7 @@ def test_convergence_target_picks_report_generated_from_latest_version():
     artifacts = {"as-is-report-v1": _artifact("as-is-report-v1", 1),
                  "as-is-report-v2": _artifact("as-is-report-v2", 2)}
 
-    target = resolve_convergence_target(2, artifacts)
+    target = resolve_convergence_target(2, artifacts, None)
 
     assert target == ConvergenceTarget(requirements_version=2,
                                        as_is_report_id="as-is-report-v2")
@@ -45,7 +45,7 @@ def test_convergence_target_is_none_when_no_report_from_latest_version():
     """古い要件から作られたレポートを現在対象にすると両者が食い違う。"""
     artifacts = {"as-is-report-v1": _artifact("as-is-report-v1", 1)}
 
-    assert resolve_convergence_target(2, artifacts).as_is_report_id is None
+    assert resolve_convergence_target(2, artifacts, None).as_is_report_id is None
 
 
 def test_response_to_ancestor_is_superseded_by_response_to_current_target():
@@ -59,7 +59,7 @@ def test_response_to_ancestor_is_superseded_by_response_to_current_target():
                   ArtifactTarget(artifact_id="as-is-report-v2")),
     ]
 
-    effective = fold_responses(events, resolve_convergence_target(2, artifacts),
+    effective = fold_responses(events, resolve_convergence_target(2, artifacts, None),
                                artifacts, manifests=[])
 
     assert [(e.stakeholder_id, e.reaction, e.event_id) for e in effective] == [
@@ -78,7 +78,7 @@ def test_current_target_response_wins_over_later_recorded_ancestor_response():
                   ArtifactTarget(artifact_id="as-is-report-v1")),
     ]
 
-    effective = fold_responses(events, resolve_convergence_target(2, artifacts),
+    effective = fold_responses(events, resolve_convergence_target(2, artifacts, None),
                                artifacts, manifests=[])
 
     assert effective[0].event_id == "ev-1"
@@ -165,7 +165,7 @@ def test_signoff_on_regenerated_slides_is_not_inherited():
     events = [_response("ev-1", "sh-1", "phase_signoff", "agreed",
                         ArtifactTarget(artifact_id="slides-v1"))]
 
-    effective = fold_responses(events, resolve_convergence_target(1, artifacts),
+    effective = fold_responses(events, resolve_convergence_target(1, artifacts, None),
                                artifacts, manifests=[])
 
     assert effective[0].on_current_target is False
@@ -180,7 +180,7 @@ def test_signoff_on_current_slides_counts():
     events = [_response("ev-1", "sh-1", "phase_signoff", "agreed",
                         ArtifactTarget(artifact_id="slides-v1"))]
 
-    effective = fold_responses(events, resolve_convergence_target(1, artifacts),
+    effective = fold_responses(events, resolve_convergence_target(1, artifacts, None),
                                artifacts, manifests=[])
 
     assert effective[0].on_current_target is True

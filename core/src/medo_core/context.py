@@ -103,8 +103,6 @@ def collect(
     artifacts = ArtifactStore(storage)._load_all(project_id)
     manifests = ManifestStore(storage).list(project_id)
     events = EventStore(storage).list(project_id)
-    target = resolve_convergence_target(version, artifacts)
-
     core_challenge_ids = {
         c.id for c in doc.challenges if c.scope in include_scope
     }
@@ -113,6 +111,7 @@ def collect(
         is_citation_stale=make_citation_checker(storage, project_id, knowledge_root),
         today=today,
     )
+    target = resolve_convergence_target(version, artifacts, freshness)
 
     responses = fold_responses(events, target, artifacts, manifests)
     checks = effective_checks(
@@ -280,7 +279,8 @@ def _is_diverging(ctx: StatusContext, delta: dict) -> bool:
     for round_id, previous, saved in ctx._round_documents:
         events = [event for event in ctx.events if event.round_id <= round_id]
         manifests = [manifest for manifest in ctx.manifests if manifest.version <= saved.version]
-        target = resolve_convergence_target(saved.version, ctx.artifacts)
+        # 過去ラウンドの鮮度は復元できない。当時の要件版で対象を決める。
+        target = resolve_convergence_target(saved.version, ctx.artifacts, None)
         responses = fold_responses(events, target, ctx.artifacts, manifests)
         resolved = _resolved_objections(events, responses)
         deltas.append(round_delta(
