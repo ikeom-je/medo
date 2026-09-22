@@ -12,6 +12,7 @@
 | [生成物のライフサイクル](phase2-artifact-lifecycle.md) | 依存グラフ、陳腐化、カバレッジ |
 | [スライド設計](phase2-slides-design.md) | AsIs説明スライド / 最終提案スライド |
 | [Skill構成と移植性](phase2-skill-portability.md) | Skillの分割、どのAgentでも動かすための条件 |
+| [ナリッジとメモリの階層](phase2-knowledge-memory.md) | 永続ナリッジと一時中間メモリ、OKF形式、概要から辿る検索 |
 
 ---
 
