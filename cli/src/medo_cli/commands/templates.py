@@ -57,6 +57,7 @@ def check_list(
             "slide_kind": spec.slide_kind,
             "confirmer": spec.confirmer,
             "phase": spec.phase,
+            "options": list(spec.options),
         }
         for name, spec in CHECK_REGISTRY.items()
         if not confirmer or spec.confirmer in (confirmer, "both")
@@ -69,4 +70,5 @@ def check_list(
         typer.echo(
             f"{row['name']}  binding={row['binding']}{target}"
             f"  confirmer={row['confirmer']}  phase={row['phase']}"
+            + (f"  options={'|'.join(row['options'])}" if row["options"] else "")
         )

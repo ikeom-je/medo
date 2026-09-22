@@ -657,6 +657,7 @@ def test_check_list_includes_shared_checks_when_filtering_by_customer(medo_home:
     )
 
     assert [row["name"] for row in json.loads(result.output)] == [
+        "engagement_scope",
         "reality_gap",
         "past_attempts",
         "hidden_stakeholders",
@@ -796,3 +797,14 @@ def test_research_triage_digest_renders_the_judged_path(medo_home: Path, monkeyp
     assert result.exit_code == 0, result.output
     assert "judge: available" in result.output
     assert "https://example.go.jp/a" in result.output
+
+
+def test_check_list_exposes_engagement_stage_options(medo_home: Path):
+    """守備範囲の段階はSkill本文ではなくCLIが持つ(どのホストでも同じ語彙になる)。"""
+    result = runner.invoke(app, ["check", "list", "--format", "json"])
+    rows = {row["name"]: row for row in json.loads(result.output)}
+
+    assert rows["engagement_scope"]["options"] == [
+        "現状整理まで", "合意形成まで", "打ち手の提案まで", "意思決定まで",
+    ]
+    assert rows["reality_gap"]["options"] == []

@@ -315,6 +315,7 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 
 | 文書 | check | 問うこと | 確認者 |
 |---|---|---|---|
+| 開始時 | `engagement_scope` | **今回どこまでをmedoで進めるか**(下表の4段階から選ぶ) | both |
 | `research` | `source_quality` | 出典・鮮度・数値の転記精度 | consultant |
 | `as-is-report` | `reality_gap` | 公開情報から見える姿を現場実態と突き合わせたか | consultant → customer |
 | | `past_attempts` | その課題にこれまで取り組んだか、なぜ進まなかったか | consultant → customer |
@@ -327,6 +328,15 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 | | `feasibility` | 制約と両立するか。過渡期は描けているか | consultant → customer |
 | 全体 | `scope_agreement` | 今回の対象範囲(`scope: core`)はこれでよいか | customer |
 
+**`engagement_scope` と `scope_agreement` は別物である**。前者は「medoの守備範囲」(どの段階まで伴走するか)、後者は「案件内スコープ」(どのノードを診断対象にするか)。守備範囲は新しい語彙を作らず、既存の生成物の依存連鎖に対応させる。
+
+| 段階 | 到達点の生成物 |
+|---|---|
+| 現状整理まで | `as-is-report` |
+| 合意形成まで | 討議用スライド + `to_be_go_ahead` の agreed |
+| 打ち手の提案まで | `mini-prfaq` / `prfaq` |
+| 意思決定まで | 最終提案スライド + `phase_signoff` |
+
 **`reality_gap` の問い方には注意が要る**。標榜していることと現場の実態の乖離を不用意に突くと、組織は自己防衛のために隠蔽・反発に走り対話が閉じる(Argyrisの組織防衛論)。告発・尋問と受け取られない**協調的探索の問い**に変換する。
 
 ### 段階的に出す
@@ -335,7 +345,7 @@ AsIsに暗黙知が入らないままToBeを確定させると理想の正論に
 
 | 段階 | 出す check |
 |---|---|
-| `discovery`(`to_be` が0件) | `source_quality` / `reality_gap` / `past_attempts` / `hidden_stakeholders` / `as_is_articulation` |
+| `discovery`(`to_be` が0件) | `engagement_scope` / `source_quality` / `reality_gap` / `past_attempts` / `hidden_stakeholders` / `as_is_articulation` |
 | `convergence` | 上記 + `internal_consistency` / `expression_safety` / `to_be_articulation` / `feasibility` / `decision_maker` / `scope_agreement` |
 
 ### 「判断できない」を第一級の状態にする
@@ -422,6 +432,7 @@ CLIが持つ registry で、項目ごとに次を定義する。
 | check | 種別 | 対象 | 再確認を要求する変更 |
 |---|---|---|---|
 | `source_quality` | artifact束縛 | `research` | 対象の再生成 |
+| `engagement_scope` | 持続 | requirements | — |
 | `reality_gap` | 持続 | requirements | — |
 | `past_attempts` | 持続 | requirements | — |
 | `hidden_stakeholders` | 持続 | requirements | — |

@@ -15,6 +15,9 @@ Binding = Literal["persistent", "version_bound", "artifact_bound"]
 
 CORE_NODE_SECTIONS = ("as_is", "to_be", "gaps", "bottlenecks", "challenges", "constraints")
 
+# 守備範囲の段階。新しい語彙を作らず、既存の生成物の依存連鎖に対応させる。
+ENGAGEMENT_STAGES = ("現状整理まで", "合意形成まで", "打ち手の提案まで", "意思決定まで")
+
 
 class CheckSpec(BaseModel):
     binding: Binding
@@ -23,9 +26,16 @@ class CheckSpec(BaseModel):
     invalidating_sections: tuple[str, ...] = ()
     phase: Literal["discovery", "convergence"] = "convergence"
     confirmer: Literal["consultant", "customer", "both"] = "consultant"
+    options: tuple[str, ...] = ()           # 選択肢が決まっている check の語彙
 
 
 CHECK_REGISTRY: dict[str, CheckSpec] = {
+    # 案件内スコープ(scope_agreement)と違い、これは「どこまでmedoで進めるか」の合意。
+    # 中核ノードの変更では失効させない。範囲を狭める/広げるのは対話で決める事柄で、
+    # ノードが増えるたびに再確認を迫ると、確認が儀式化する。
+    "engagement_scope": CheckSpec(binding="persistent", phase="discovery",
+                                  confirmer="both",
+                                  options=ENGAGEMENT_STAGES),
     "source_quality": CheckSpec(binding="artifact_bound", target_type="research",
                                 phase="discovery"),
     "reality_gap": CheckSpec(binding="persistent", phase="discovery", confirmer="both"),

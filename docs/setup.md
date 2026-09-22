@@ -365,7 +365,7 @@ medo status --project smoke --view readiness --format json   # readiness.phase.s
 
 ### 7.7 ハマりどころ
 
-- 収束状態を組むには check を11項目すべて記録する必要がある(`medo check list` が返す全項目)。artifact束縛の3つ(`source_quality` / `as_is_articulation` / `expression_safety`)は `--artifact` が必須で、対象の生成物を先に作っておく
+- 収束状態を組むには check を12項目すべて記録する必要がある(`medo check list` が返す全項目)。artifact束縛の3つ(`source_quality` / `as_is_articulation` / `expression_safety`)は `--artifact` が必須で、対象の生成物を先に作っておく
 - `answer_tobe_checkpoint` は最後まで `actions` の先頭に残る。節目に回答していない状態でもフェーズ完了の判定は独立に進む(診断であってゲートではない)
 - Skill eval は実データを書き換える。`cp -r ~/.medo <backup>` を先に取る。本 eval では `prfaq-v3` と案件固有ナレッジ1件(`medo-ops-6`)が実案件に増えた
 - `medo knowledge search` は語句の一致で引く。`"Multi-Review self-consistency"` のような複合語では該当なしになり、`"USC"` / `"Skill"` のような単語で引き当たる

@@ -13,7 +13,7 @@ from pydantic import AfterValidator, BaseModel, Field, model_validator
 from medo_core.storage import Storage
 
 CheckName = Literal[
-    "source_quality", "reality_gap", "past_attempts", "hidden_stakeholders",
+    "engagement_scope", "source_quality", "reality_gap", "past_attempts", "hidden_stakeholders",
     "decision_maker", "internal_consistency", "as_is_articulation",
     "expression_safety", "to_be_articulation", "feasibility", "scope_agreement",
 ]
