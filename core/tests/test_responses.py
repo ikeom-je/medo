@@ -1,4 +1,4 @@
-from medo_core.artifacts import Artifact
+from medo_core.artifacts import Artifact, Freshness
 from medo_core.events import ArtifactTarget, RequirementsTarget, StakeholderResponded
 from medo_core.manifest import ChangeManifest, SectionChange
 from medo_core.responses import (
@@ -42,10 +42,28 @@ def test_convergence_target_picks_report_generated_from_latest_version():
 
 
 def test_convergence_target_is_none_when_no_report_from_latest_version():
-    """古い要件から作られたレポートを現在対象にすると両者が食い違う。"""
+    """鮮度が不明な再構成では、当時の要件版と一致するレポートだけを対象にする。"""
     artifacts = {"as-is-report-v1": _artifact("as-is-report-v1", 1)}
 
     assert resolve_convergence_target(2, artifacts, None).as_is_report_id is None
+
+
+def test_convergence_target_keeps_fresh_report_from_older_version():
+    """要件版が上がっても、依存セクションが変わっていなければ作り直す理由がない。"""
+    artifacts = {"as-is-report-v1": _artifact("as-is-report-v1", 1)}
+    freshness = {"as-is-report-v1": Freshness(state="current")}
+
+    target = resolve_convergence_target(2, artifacts, freshness)
+
+    assert target.as_is_report_id == "as-is-report-v1"
+
+
+def test_convergence_target_drops_stale_report_from_latest_version():
+    """要件版が一致していても、引用や依存が古ければ現在対象にはできない。"""
+    artifacts = {"as-is-report-v2": _artifact("as-is-report-v2", 2)}
+    freshness = {"as-is-report-v2": Freshness(state="stale", reasons=["引用が古い"])}
+
+    assert resolve_convergence_target(2, artifacts, freshness).as_is_report_id is None
 
 
 def test_response_to_ancestor_is_superseded_by_response_to_current_target():

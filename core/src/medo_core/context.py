@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, PrivateAttr
 
-from medo_core.artifacts import Artifact, ArtifactStore, Freshness
+from medo_core.artifacts import DEPENDENT_SECTIONS, Artifact, ArtifactStore, Freshness
 from medo_core.checks import (
     CheckState,
     detect_inconsistency,
@@ -22,7 +22,7 @@ from medo_core.diagnostics import diagnostic_phase, round_delta
 from medo_core.events import EventStore
 from medo_core.facts import FactStore
 from medo_core.knowledge import KnowledgeStore
-from medo_core.manifest import ChangeManifest, ManifestStore
+from medo_core.manifest import ChangeManifest, ManifestStore, fold_substantive_sections
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.responses import (
     ConvergenceTarget,
@@ -266,6 +266,28 @@ def _round_documents(
     return completed
 
 
+def _historical_freshness(
+    artifacts: dict[str, Artifact],
+    manifests: list[ChangeManifest],
+) -> dict[str, Freshness]:
+    """過去ラウンド時点の鮮度を、依存セクションの変更だけで再構成する。
+
+    引用の鮮度は当時の日付が残っておらず復元できない。対象選びに効くのは
+    依存セクションの変更なので、そこだけで判定して当時の対象を取り戻す。
+    """
+    freshness: dict[str, Freshness] = {}
+    for artifact_id, artifact in artifacts.items():
+        changed = fold_substantive_sections(
+            manifests, from_version=artifact.requirements_version
+        )
+        hit = sorted(set(DEPENDENT_SECTIONS.get((artifact.type, artifact.slide_kind), ())) & changed)
+        freshness[artifact_id] = Freshness(
+            state="stale" if hit else "current",
+            reasons=[f"依存セクションが変更されました: {', '.join(hit)}"] if hit else [],
+        )
+    return freshness
+
+
 def _is_diverging(ctx: StatusContext, delta: dict) -> bool:
     if ctx.round_count < 2:
         return False
@@ -279,8 +301,13 @@ def _is_diverging(ctx: StatusContext, delta: dict) -> bool:
     for round_id, previous, saved in ctx._round_documents:
         events = [event for event in ctx.events if event.round_id <= round_id]
         manifests = [manifest for manifest in ctx.manifests if manifest.version <= saved.version]
-        # 過去ラウンドの鮮度は復元できない。当時の要件版で対象を決める。
-        target = resolve_convergence_target(saved.version, ctx.artifacts, None)
+        past = {
+            artifact_id: artifact for artifact_id, artifact in ctx.artifacts.items()
+            if artifact.requirements_version <= saved.version
+        }
+        target = resolve_convergence_target(
+            saved.version, past, _historical_freshness(past, manifests),
+        )
         responses = fold_responses(events, target, ctx.artifacts, manifests)
         resolved = _resolved_objections(events, responses)
         deltas.append(round_delta(

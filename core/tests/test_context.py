@@ -180,3 +180,34 @@ def test_dependent_section_change_drops_current_target(tmp_path):
     branch = workflow_branch(collect(storage, "p1", include_scope=("core",), today=TODAY))
     assert branch["review"]["current_target"] is None
     assert branch["review"]["approved"] is False
+
+
+def test_historical_freshness_keeps_report_across_non_dependent_change():
+    """過去ラウンドの再構成でも、非依存セクションの更新で対象を見失ってはならない。"""
+    from medo_core.context import _historical_freshness
+    from medo_core.manifest import ChangeManifest, SectionChange
+
+    artifacts = {"as-is-report-v1": Artifact(
+        project="p1", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状",
+    )}
+    manifests = [ChangeManifest(
+        version=2, changes=[SectionChange(section="challenges")], recorded_on="2026-08-30",
+    )]
+
+    assert _historical_freshness(artifacts, manifests)["as-is-report-v1"].state == "current"
+
+
+def test_historical_freshness_marks_dependent_change_stale():
+    from medo_core.context import _historical_freshness
+    from medo_core.manifest import ChangeManifest, SectionChange
+
+    artifacts = {"as-is-report-v1": Artifact(
+        project="p1", type="as-is-report", requirements_version=1,
+        generated_by="claude", content="# 現状",
+    )}
+    manifests = [ChangeManifest(
+        version=2, changes=[SectionChange(section="as_is")], recorded_on="2026-08-30",
+    )]
+
+    assert _historical_freshness(artifacts, manifests)["as-is-report-v1"].state == "stale"
