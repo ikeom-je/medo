@@ -40,14 +40,19 @@ class EffectiveResponse(BaseModel):
 
 
 def resolve_convergence_target(
-    latest_requirements_version: int, artifacts: dict[str, Artifact]
+    latest_requirements_version: int,
+    artifacts: dict[str, Artifact],
+    freshness: dict | None,
 ) -> ConvergenceTarget:
-    """最新要件版から生成された最新の as-is-report を現在対象とする。"""
+    """stale でない最新の as-is-report を現在対象とする。
+
+    要件版の完全一致で決めると、内容が変わらない保存だけで対象を見失い、
+    内部レビューの承認が巻き添えで失効する(ワークフローモデル §3)。
+    """
     candidates = [
         a_id
         for a_id, a in artifacts.items()
-        if a.type == "as-is-report"
-        and a.requirements_version == latest_requirements_version
+        if a.type == "as-is-report" and _is_usable_target(a_id, a, latest_requirements_version, freshness)
     ]
     newest = max(candidates, key=lambda a_id: artifacts[a_id].version, default=None)
     final_slides = [
@@ -68,6 +73,20 @@ def _target_version(event, artifacts: dict[str, Artifact]) -> int | None:
         return event.target.version
     artifact = artifacts.get(event.target.artifact_id)
     return artifact.requirements_version if artifact else None
+
+
+def _is_usable_target(
+    artifact_id: str, artifact: Artifact, latest_version: int, freshness: dict | None
+) -> bool:
+    """鮮度が分かるならそれで判断する。
+
+    freshness=None は過去ラウンドの再構成専用。その時点の鮮度は復元できないため、
+    当時の要件版で対象を決める。現在地の解決で None を渡してはならない。
+    """
+    if freshness is None:
+        return artifact.requirements_version == latest_version
+    state = freshness.get(artifact_id)
+    return state is not None and state.state != "stale"
 
 
 def _is_current(event, target: ConvergenceTarget) -> bool:

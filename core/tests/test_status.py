@@ -582,3 +582,40 @@ def test_next_step_is_unchanged_by_the_final_stage(tmp_path):
         "hearing", "propose-options", "grow-prfaq",
         "regenerate-stale-artifacts", "up-to-date",
     }
+
+
+def test_review_approval_survives_a_save_that_changes_nothing(tmp_path):
+    """medo-decide は毎周回 requirements save する。版だけで対象を決めると承認が消える。"""
+    storage = _project_with_both_slide_kinds(tmp_path)
+    reqs = RequirementsStore(storage)
+    WorkflowRecorder(storage).record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id="as-is-report-v1"), occurred_on="2026-07-12",
+        requirements_version=reqs.latest_version("p1"), round_id=0, outcome="approved",
+        reviewed_slides_id="slides-v1", reviewed_by="human",
+    ))
+    before = project_status(storage, "p1", tmp_path, view="workflow")["workflow"]["review"]
+
+    reqs.save("p1", reqs.get("p1"), today=TODAY)  # 内容を変えずに保存する
+    after = project_status(storage, "p1", tmp_path, view="workflow")["workflow"]["review"]
+
+    assert before["approved"] is True
+    assert after["approved"] is True, "実質変更の無い保存で承認が失われてはならない"
+
+
+def test_review_approval_expires_when_the_report_goes_stale(tmp_path):
+    """依存セクションが変われば報告書は陳腐化する。承認もそこで切れる。"""
+    storage = _project_with_both_slide_kinds(tmp_path)
+    reqs = RequirementsStore(storage)
+    WorkflowRecorder(storage).record("p1", AsIsReportReviewed(
+        target=ArtifactTarget(artifact_id="as-is-report-v1"), occurred_on="2026-07-12",
+        requirements_version=reqs.latest_version("p1"), round_id=0, outcome="approved",
+        reviewed_slides_id="slides-v1", reviewed_by="human",
+    ))
+    doc = reqs.get("p1")
+
+    reqs.save("p1", doc.model_copy(update={
+        "as_is": [*doc.as_is, AsIs(text="新たに分かった実態", visibility="internal")]
+    }), today=TODAY)
+    review = project_status(storage, "p1", tmp_path, view="workflow")["workflow"]["review"]
+
+    assert review["approved"] is False
