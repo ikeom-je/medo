@@ -284,3 +284,38 @@ def test_every_step_names_the_action_that_governs_it(tmp_path):
     }
 
     assert missing == set()
+
+
+KNOWLEDGE_WRITERS = [
+    "medo-review", "medo-dialogue", "medo-decide",
+    "medo-propose-options", "medo-grow-prfaq", "medo-investigate",
+]
+
+CROSS_PROJECT_WRITERS = [
+    "medo-review", "medo-dialogue", "medo-decide",
+    "medo-propose-options", "medo-grow-prfaq",
+]
+
+
+def test_every_stage_writes_back_what_it_learned(tmp_path):
+    """周回で分かったことを残す手順が無いと、ナリッジに書き手がいない。"""
+    missing = [
+        name for name in KNOWLEDGE_WRITERS
+        if "medo knowledge save" not in _built(tmp_path, name)
+    ]
+
+    assert missing == []
+
+
+def test_cross_project_knowledge_has_a_decidable_criterion(tmp_path):
+    """「他の案件でも起きそうなら」では案件固有の事情が混入する。"""
+    for name in CROSS_PROJECT_WRITERS:
+        text = _built(tmp_path, name)
+        assert "--kind practice" in text, name
+        assert "固有名詞" in text, name
+
+
+def test_knowledge_is_read_through_the_index_first(tmp_path):
+    """索引を読まずに実体を引くと、蓄積が増えるほどコンテキストを食う。"""
+    for name in ("medo-propose-options", "medo-grow-prfaq"):
+        assert "medo knowledge index" in _built(tmp_path, name), name
