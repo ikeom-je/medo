@@ -22,8 +22,8 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
        medo artifacts get --project <project-id> --id <mini-prfaq-vN>
        medo requirements get --project <project-id> --format json
 
-4. `medo knowledge search` で技術的背景を深め、必要ならファクトを追加保存する。
-   出力末尾のリフレーミング規約はPRFAQ本文にも適用する:
+4. `medo knowledge index` で何があるかを見てから `medo knowledge search` で技術的背景を
+   深め、必要ならファクトを追加保存する。出力末尾のリフレーミング規約はPRFAQ本文にも適用する:
 
        medo artifacts outline --type slides --slide-kind discussion
 5. 完全版PRFAQを作る。ミニPRFAQの内容に加えて:
@@ -66,11 +66,13 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
          --purpose phase_signoff --reaction <reaction> --note "<得られた反応>"
 
    `<reaction>` は `empathized|acknowledged|agreed|objected|unclear` のいずれかを使う。
-10. 対話から得た案件固有ノウハウがあれば追記する:
+10. 対話から得たノウハウを追記する。**固有名詞を消して文が成り立つなら案件横断、
+    成り立たないなら案件固有**に置く:
 
        medo knowledge save --project <project-id> --statement "<案件固有ノウハウ>" --source "medo-grow-prfaq <日付>対話"
+       medo knowledge save --kind practice --statement "<他案件でも使える型>" --source "medo-grow-prfaq <日付>対話"
 
-   フェーズ1では追記のみ行い、既存エントリとの統合・重複解消はしない。
+   追記のみ行い、既存エントリとの統合・重複解消はしない。
 11. `medo status --project <project-id> --view summary` を再実行し、`actions` を報告して終える。
 
 ## 契約(必ず守る)

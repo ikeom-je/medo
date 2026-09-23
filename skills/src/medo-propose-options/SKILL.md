@@ -37,8 +37,10 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
 
    **フェルミ推定の計算を自分で行わない**。必ず `medo fermi calc` の結果を使う。
 
-4. Howの目処のためナレッジを検索する(複数回実行してよい):
+4. Howの目処のためナレッジを引く。**先に索引で「使えるものがありそうか」を見てから**
+   実体を引く(複数回実行してよい。`truncated` が true なら絞って引き直す):
 
+       medo knowledge index
        medo knowledge search "<キーワード>" --format json
 
 5. 打ち手候補を2〜3案作る。切り口: **既存の解決 / 破壊的業務改革 / 新規市場開拓** × **スコープ / 立ち位置 / 根本治療vs対症療法**。各案のミニPRFAQに必ず含めること:
@@ -60,11 +62,13 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
          --cites <entry-id,...> --cites-facts <fact-id,...> \
          --generated-by <claude|codex|gemini> --requirements-version <n>
 
-7. 終了時、対話から得た案件固有ノウハウがあれば次で追記する:
+7. 終了時、対話から得たノウハウを追記する。**固有名詞を消して文が成り立つなら案件横断、
+   成り立たないなら案件固有**に置く:
 
        medo knowledge save --project <project-id> --statement "<案件固有ノウハウ>" --source "medo-propose-options <日付>対話"
+       medo knowledge save --kind practice --statement "<他案件でも使える型>" --source "medo-propose-options <日付>対話"
 
-   フェーズ1では追記のみ行い、既存エントリとの統合・重複解消はしない。
+   追記のみ行い、既存エントリとの統合・重複解消はしない。
 8. 保存後 `medo status --project <project-id> --view summary` を実行し、`actions` を
    報告する。「候補セットを比較・Q&Aし、合意した打ち手を medo-grow-prfaq で完全版に
    育てる」ことを案内して終える。

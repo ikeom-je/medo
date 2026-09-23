@@ -62,12 +62,13 @@ description: レビュー済みの討議用スライドを顧客に提示する�
          --result <completed|finding|undeterminable> --artifact <as-is-report-vN> \
          --note "<顧客の反応>"
 
-   「あるべき姿がまだ描けない」「判断できない」という反応は
-   `--result undeterminable --disposition open` で記録する。**それ自体が発見**である。
+   「あるべき姿がまだ描けない」「判断できない」という反応は `--result undeterminable --disposition open` で記録する。**それ自体が発見**である。
 
-6. 終了時に現在地を読み、`actions` を報告する:
+6. 終了時に現在地を読み、`actions` を報告する。**効いた問い方・効かなかった問い方を残す**
+   (固有名詞を消して文が成り立つなら `--kind practice`、成り立たないなら `--project <id>`):
 
        medo status --project <id> --view summary
+       medo knowledge save --kind practice --statement "<効いた問い方の型>" --source "medo-dialogue <日付>対話"
 
    「次は medo-decide で反応を要件に反映し、往復継続か次段階かを判断する」と
    案内して終える。

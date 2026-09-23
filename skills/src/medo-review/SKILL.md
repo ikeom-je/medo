@@ -15,9 +15,7 @@ description: 現状調査・分析報告書と討議用スライドを顧客に�
        medo status --project <project-id> --view workflow
        medo status --project <project-id> --view model
 
-   `workflow.review.current_target` がレビュー対象の `as-is-report` ID
-   (**summary にも model にも無い。workflow 枝を読む**)。
-   対応する討議用スライドのIDは次で確認する:
+   `workflow.review.current_target` がレビュー対象の `as-is-report` ID(**summary にも model にも無い。workflow 枝を読む**)。対応する討議用スライドのIDは次で確認する:
 
        medo artifacts list --project <id>
 
@@ -62,12 +60,13 @@ description: 現状調査・分析報告書と討議用スライドを顧客に�
          --outcome <approved|changes_requested> --reviewed-by <claude|codex|gemini|human> \
          --refs <要件側の所見ノードID,...> --slide-finding "<スライド固有の所見>"
 
-   `--slides` は当該レポートから生成された討議用スライドである必要がある
-   (CLIが検証する)。
+   `--slides` は当該レポートから生成された討議用スライドである必要がある(CLIが検証する)。
 
-6. 終了時に現在地を読み、`actions` を報告する:
+6. 終了時に現在地を読み、`actions` を報告する。**繰り返し出た指摘は個別の所見ではなく型にして残す**
+   (固有名詞を消して文が成り立つなら `--kind practice`、成り立たないなら `--project <id>`):
 
        medo status --project <id> --view summary
+       medo knowledge save --kind practice --statement "<一般化した指摘の型>" --source "medo-review <日付>対話"
 
    `approved` なら「次は medo-dialogue で顧客にぶつける」、
    `changes_requested` なら「medo-investigate で直して再生成する」と案内して終える。
