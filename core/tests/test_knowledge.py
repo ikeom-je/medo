@@ -74,16 +74,16 @@ def test_is_stale_market_threshold_180_days():
 def test_search_matches_statement_and_note(store: KnowledgeStore):
     store.save(_entry(statement="Gemini Flash pricing"))
     store.save(_entry(statement="unrelated", note="context caching detail"))
-    results = store.search("caching")
-    assert len(results) == 1
+    result = store.search("caching")
+    assert result.total == 1
 
 
 def test_search_filters_by_kind(store: KnowledgeStore):
     store.save(_entry(kind="tech"))
     store.save(_entry(kind="company", source="社内資料", statement="社内メモ"))
-    results = store.search(kind="company")
-    assert len(results) == 1
-    assert results[0].kind == "company"
+    result = store.search(kind="company")
+    assert result.total == 1
+    assert result.entries[0].kind == "company"
 
 
 def test_get_missing_returns_none(store: KnowledgeStore):
@@ -316,3 +316,85 @@ def test_sqlite_opens_a_database_created_before_status_and_actor(tmp_path: Path)
     entry = SqliteKnowledgeBackend(db).list("p1")[0]
 
     assert (entry.statement, entry.status) == ("古い行", "unverified")
+
+
+def test_index_counts_entries_and_is_written_as_okf(store: KnowledgeStore, tmp_path: Path):
+    store.save(_entry())
+    store.save(_entry(statement="second"))
+    meta = yaml.safe_load(
+        (tmp_path / "tech" / "index.md").read_text(encoding="utf-8").split("---")[1]
+    )
+
+    assert meta["type"] == "index"
+    assert meta["entry_count"] == 2
+
+
+def test_index_counts_stale_at_read_time(store: KnowledgeStore):
+    """鮮度は時間の経過だけで変わる。保存時に焼き込むと次の保存までずれ続ける。"""
+    store.save(_entry(retrieved="2026-01-01"))
+
+    assert store.index("tech", today=date(2026, 1, 10)).stale_count == 0
+    assert store.index("tech", today=date(2026, 3, 1)).stale_count == 1
+
+
+def test_search_finds_entries_the_index_body_does_not_mention(store: KnowledgeStore, tmp_path: Path):
+    """索引は要約。索引で絞ると、要約に載らなかった語で実体を取りこぼす。"""
+    store.save(_entry(note="リージョン別の制限がある"))
+    (tmp_path / "tech" / "index.md").write_text(
+        "---\ntype: index\nkind: tech\nentry_count: 1\ngenerated: '2026-07-01'\n---\n\n(空)\n",
+        encoding="utf-8",
+    )
+
+    assert store.search("リージョン").total == 1
+
+
+def test_search_truncates_by_char_budget_and_says_so(store: KnowledgeStore):
+    for i in range(3):
+        store.save(_entry(statement="あ" * 100 + str(i)))
+
+    result = store.search(char_budget=150)
+
+    assert (len(result.entries), result.total, result.truncated) == (1, 3, True)
+
+
+def test_search_keeps_one_entry_even_when_it_exceeds_the_budget(store: KnowledgeStore):
+    """1件も返さないと、呼び出し側は該当なしと区別できない。"""
+    store.save(_entry(statement="あ" * 500))
+
+    result = store.search(char_budget=10)
+
+    assert (len(result.entries), result.truncated) == (1, False)
+
+
+def test_project_index_reports_entry_count(md_backend: MarkdownKnowledgeBackend):
+    md_backend.append(_project_entry())
+    md_backend.append(_project_entry(statement="second"))
+
+    index = md_backend.index("yoyaku")
+
+    assert (index.entry_count, index.stale_count) == (2, None)
+
+
+def test_sqlite_index_counts_without_an_index_file(sqlite_backend: SqliteKnowledgeBackend):
+    sqlite_backend.append(_project_entry())
+
+    assert sqlite_backend.index("yoyaku").entry_count == 1
+
+
+def test_broken_index_does_not_break_reading(store: KnowledgeStore, tmp_path: Path):
+    """索引は概要であって正本ではない。壊れても蓄積そのものは読めなければならない。"""
+    store.save(_entry())
+    (tmp_path / "tech" / "index.md").write_text("これはYAMLではない", encoding="utf-8")
+
+    assert store.index("tech").entry_count == 0
+    assert store.search().total == 1
+
+
+def test_entries_are_ordered_by_number_not_lexically(store: KnowledgeStore):
+    """辞書順だと tech-10 が tech-2 より前に来る。"""
+    for i in range(11):
+        store.save(_entry(statement=f"entry {i}"))
+
+    assert [e.entry_id for e in store.search(limit=11).entries][:3] == [
+        "tech-1", "tech-2", "tech-3",
+    ]

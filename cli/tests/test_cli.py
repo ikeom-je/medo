@@ -97,9 +97,10 @@ def test_knowledge_search_marks_stale(medo_home: Path):
     KnowledgeStore(medo_home / "knowledge").save(KnowledgeEntry(**ENTRY))
     result = runner.invoke(app, ["knowledge", "search", "caching", "--format", "json"])
     assert result.exit_code == 0
-    items = json.loads(result.output)
-    assert items[0]["entry"]["statement"].startswith("電話応対")
-    assert items[0]["stale"] is True
+    payload = json.loads(result.output)
+    assert payload["entries"][0]["entry"]["statement"].startswith("電話応対")
+    assert payload["entries"][0]["stale"] is True
+    assert payload["truncated"] is False
 
 
 def test_knowledge_get_digest_and_json_format(medo_home: Path):
@@ -820,3 +821,15 @@ def test_knowledge_save_accepts_practice_without_url(medo_home: Path):
 
     assert result.exit_code == 0, result.output
     assert "saved:" in result.output
+
+
+def test_knowledge_index_reports_counts_without_opening_entries(medo_home: Path):
+    from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
+
+    KnowledgeStore(medo_home / "knowledge").save(KnowledgeEntry(**ENTRY))
+    result = runner.invoke(app, ["knowledge", "index", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    rows = json.loads(result.output)
+    assert rows[0]["entry_count"] == 1
+    assert rows[0]["stale_count"] == 1

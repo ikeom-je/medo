@@ -218,7 +218,8 @@ medo facts save --project <id> --kind market --statement "<出典に忠実な一
   --source <URL> --value 1234 --unit 億円 --retrieved 2026-09-01
 medo facts list --project <id>
 medo fermi calc --project <id> --file /tmp/model.yaml
-medo knowledge search "<キーワード>"
+medo knowledge index                  # 何がどれだけあるか(件数・stale件数)
+medo knowledge search "<キーワード>"    # 実体。索引は経由しない
 ```
 
 **数値は出典に忠実に転記し、加工しない**。換算・集計はフェルミ推定で行い、計算はコードが担う(ast制限の四則演算+累乗)。出典の無いファクト・ナレッジは保存が拒否される。鮮度切れは `stale` として全レスポンスに付く。

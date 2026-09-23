@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import sqlite3
 import yaml
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 KnowledgeKind = Literal["tech", "market", "policy", "trend", "company", "practice"]
 _URL_KINDS = {"tech", "market", "policy", "trend"}
@@ -48,6 +48,67 @@ def _from_okf(meta: dict) -> dict:
             meta["source"] = ""
     meta.pop("sources", None)
     return meta
+
+
+class SearchResult(BaseModel):
+    """打ち切ったことを呼び出し側に見せる。黙って切ると「これで全部」と誤認される。"""
+
+    entries: list = Field(default_factory=list)
+    total: int = 0
+    truncated: bool = False
+
+
+DEFAULT_CHAR_BUDGET = 4000
+
+
+def apply_budget(entries: list, limit: int, char_budget: int) -> SearchResult:
+    """件数と文字数の両方で打ち切る。
+
+    件数だけで切ると、1件が長文のときに呼び出し側のコンテキストが破裂する。
+    """
+    kept: list = []
+    used = 0
+    for entry in entries:
+        if len(kept) >= limit:
+            break
+        used += len(entry.statement) + len(entry.note)
+        if kept and used > char_budget:
+            break
+        kept.append(entry)
+    return SearchResult(entries=kept, total=len(entries), truncated=len(kept) < len(entries))
+
+
+def _entry_number(path: Path) -> int:
+    """辞書順だと tech-10 が tech-2 より前に来る。"""
+    return int(path.stem.rsplit("-", 1)[1])
+
+
+def _index_meta(path: Path) -> dict:
+    """索引のfrontmatterを読む。壊れていても落とさない。
+
+    索引は概要であって正本ではない。手で編集されたり書き込みが途中で
+    終わったりしたときに、蓄積そのものが読めなくなるほうが困る。
+    """
+    try:
+        _, front, _ = path.read_text(encoding="utf-8").split("---", 2)
+        meta = yaml.safe_load(front)
+        return meta if isinstance(meta, dict) else {}
+    except (ValueError, OSError, yaml.YAMLError):
+        return {}
+
+
+def body_of(entries: list) -> str:
+    return "\n".join(f"- {e.entry_id}: {e.statement[:60]}" for e in entries)
+
+
+class KnowledgeIndex(BaseModel):
+    """何がどれだけあるかの概要。本体を開く前に読む(progressive disclosure)。"""
+
+    scope: str                              # kind名、または案件ID
+    entry_count: int
+    stale_count: int | None                 # None は鮮度を数えていない層(案件固有)
+    generated: str
+    body: str = ""
 
 
 class KnowledgeEntry(BaseModel):
@@ -123,7 +184,48 @@ class KnowledgeStore:
             entry = entry.model_copy(update={"entry_id": f"{entry.kind}-{max(nums, default=0) + 1}"})
         path = self._dir(entry.kind) / f"{entry.entry_id}.md"
         _write_frontmatter(path, entry.to_okf())
+        self.rebuild_index(entry.kind)
         return entry.entry_id
+
+    def _entries(self, kind: str) -> list[KnowledgeEntry]:
+        d = self._dir(kind)
+        if not d.is_dir():
+            return []
+        return [
+            KnowledgeEntry.model_validate(
+                {**_from_okf(_read_frontmatter(path)), "entry_id": path.stem, "kind": kind}
+            )
+            for path in sorted(d.glob(f"{kind}-*.md"), key=_entry_number)
+        ]
+
+    def rebuild_index(self, kind: str, today: date | None = None) -> None:
+        """索引を作り直す。stale件数は書かない(読み出し時に数える)。"""
+        entries = self._entries(kind)
+        body = body_of(entries)
+        path = self._dir(kind) / "index.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        front = yaml.safe_dump(
+            {"type": "index", "kind": kind, "entry_count": len(entries),
+             "generated": (today or date.today()).isoformat()},
+            allow_unicode=True, sort_keys=False,
+        )
+        path.write_text(f"---\n{front}---\n\n## このkindに何があるか\n\n{body}\n", encoding="utf-8")
+
+    def index(self, kind: str, today: date | None = None) -> KnowledgeIndex | None:
+        path = self._dir(kind) / "index.md"
+        if not path.exists():
+            return None
+        meta = _index_meta(path)
+        return KnowledgeIndex(
+            scope=kind, entry_count=meta.get("entry_count", 0),
+            stale_count=sum(1 for e in self._entries(kind) if e.is_stale(today=today)),
+            generated=meta.get("generated", ""), body=body_of(self._entries(kind)),
+        )
+
+    def kinds(self) -> list[str]:
+        if not self._root.is_dir():
+            return []
+        return sorted(d.name for d in self._root.iterdir() if d.is_dir() and d.name != "projects")
 
     def get(self, kind: str, entry_id: str) -> KnowledgeEntry | None:
         path = self._dir(kind) / f"{entry_id}.md"
@@ -132,24 +234,23 @@ class KnowledgeStore:
         meta = _read_frontmatter(path)
         return KnowledgeEntry.model_validate({**_from_okf(meta), "entry_id": entry_id, "kind": kind})
 
-    def search(self, query: str = "", kind: str | None = None, limit: int = 10) -> list[KnowledgeEntry]:
+    def search(
+        self, query: str = "", kind: str | None = None, limit: int = 10,
+        char_budget: int = DEFAULT_CHAR_BUDGET,
+    ) -> SearchResult:
+        """エントリの実体を走査する。索引は経由しない。
+
+        索引は要約なので、要約に載らなかった語で引くと実体があるのに「無い」と
+        返る。取りこぼしは黙って起きるため、呼び出し側から検出できない。
+        """
         q = query.lower()
-        kinds = [kind] if kind else [d.name for d in self._root.iterdir() if d.is_dir()] if self._root.is_dir() else []
-        results: list[KnowledgeEntry] = []
-        for k in sorted(kinds):
-            for path in sorted(self._dir(k).glob(f"{k}-*.md")):
-                meta = _read_frontmatter(path)
-                entry = KnowledgeEntry.model_validate({**_from_okf(meta), "entry_id": path.stem, "kind": k})
-                haystack = " ".join([entry.statement, entry.note]).lower()
-                if q and q not in haystack:
+        hits: list[KnowledgeEntry] = []
+        for k in [kind] if kind else self.kinds():
+            for entry in self._entries(k):
+                if q and q not in " ".join([entry.statement, entry.note]).lower():
                     continue
-                results.append(entry)
-                if len(results) >= limit:
-                    return results
-        return results
-
-
-
+                hits.append(entry)
+        return apply_budget(hits, limit, char_budget)
 
 
 class ProjectKnowledgeEntry(BaseModel):
@@ -186,6 +287,8 @@ class ProjectKnowledgeEntry(BaseModel):
 
 class KnowledgeBackend(Protocol):
     def append(self, entry: ProjectKnowledgeEntry) -> str: ...
+
+    def index(self, project: str) -> "KnowledgeIndex": ...
     def list(self, project: str) -> list[ProjectKnowledgeEntry]: ...
     def search(self, project: str, query: str) -> list[ProjectKnowledgeEntry]: ...
 
@@ -211,7 +314,29 @@ class MarkdownKnowledgeBackend:
             entry = entry.model_copy(update={"entry_id": f"{entry.project}-{max(nums, default=0) + 1}"})
         path = self._dir(entry.project) / f"{entry.entry_id}.md"
         _write_frontmatter(path, entry.to_okf())
+        self.rebuild_index(entry.project)
         return entry.entry_id
+
+    def rebuild_index(self, project: str, today: date | None = None) -> None:
+        entries = self.list(project)
+        body = body_of(entries)
+        front = yaml.safe_dump(
+            {"type": "index", "project": project, "entry_count": len(entries),
+             "generated": (today or date.today()).isoformat()},
+            allow_unicode=True, sort_keys=False,
+        )
+        path = self._dir(project) / "index.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\n{front}---\n\n## この案件に何があるか\n\n{body}\n", encoding="utf-8")
+
+    def index(self, project: str) -> KnowledgeIndex:
+        entries = self.list(project)
+        path = self._dir(project) / "index.md"
+        generated = _index_meta(path).get("generated", "") if path.exists() else ""
+        return KnowledgeIndex(
+            scope=project, entry_count=len(entries), stale_count=None,
+            generated=generated, body=body_of(entries),
+        )
 
     def list(self, project: str) -> list[ProjectKnowledgeEntry]:
         d = self._dir(project)
@@ -302,6 +427,14 @@ class SqliteKnowledgeBackend:
             e for e in self.list(project)
             if q in " ".join([e.statement, e.note]).lower()
         ]
+
+    def index(self, project: str) -> KnowledgeIndex:
+        """索引ファイルを持たない。バイナリDBに置いてもgitで差分が読めない。"""
+        entries = self.list(project)
+        return KnowledgeIndex(
+            scope=project, entry_count=len(entries), stale_count=None,
+            generated=date.today().isoformat(), body=body_of(entries),
+        )
 
 
 def resolve_knowledge_backend(

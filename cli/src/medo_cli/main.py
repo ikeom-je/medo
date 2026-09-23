@@ -17,9 +17,11 @@ from medo_cli.commands import templates as template_commands
 from medo_cli.commands import workflow as workflow_commands
 from medo_core.config import get_knowledge_root, get_storage
 from medo_core.knowledge import (
+    DEFAULT_CHAR_BUDGET,
     KnowledgeEntry,
     KnowledgeStore,
     ProjectKnowledgeEntry,
+    apply_budget,
     resolve_knowledge_backend,
 )
 from medo_core.requirements import RequirementsDoc, RequirementsStore
@@ -186,6 +188,17 @@ def _echo_status_digest(report: dict) -> None:
         typer.echo(f"next_step: {next_step}")
 
 
+def _project_backend(project: str):
+    """案件ごとに選ばれたバックエンドを解決する。"""
+    doc = RequirementsStore(get_storage()).get(project)
+    return resolve_knowledge_backend(
+        doc.knowledge_backend if doc else "markdown",
+        project,
+        get_knowledge_root(),
+        Path(os.environ.get("MEDO_HOME", str(Path.home() / ".medo"))),
+    )
+
+
 def _knowledge_entry_payload(entry) -> dict:
     return (
         {"entry": entry.model_dump(mode="json"), "stale": entry.is_stale()}
@@ -204,40 +217,72 @@ def knowledge_search(
     format: Literal["json", "digest"] = typer.Option("digest"),
 ):
     if project:
-        storage = get_storage()
-        doc = RequirementsStore(storage).get(project)
-        backend_name = doc.knowledge_backend if doc else "markdown"
-        backend = resolve_knowledge_backend(
-            backend_name,
-            project,
-            get_knowledge_root(),
-            Path(os.environ.get("MEDO_HOME", str(Path.home() / ".medo"))),
-        )
-        entries = backend.search(project, query)
+        backend = _project_backend(project)
+        result = apply_budget(backend.search(project, query), 10, DEFAULT_CHAR_BUDGET)
         if format == "json":
-            typer.echo(
-                json.dumps([e.model_dump(mode="json") for e in entries], ensure_ascii=False, indent=2)
-            )
+            typer.echo(json.dumps({
+                "entries": [e.model_dump(mode="json") for e in result.entries],
+                "total": result.total, "truncated": result.truncated,
+            }, ensure_ascii=False, indent=2))
             return
-        if not entries:
+        if not result.entries:
             typer.echo("(該当なし)")
             return
-        for e in entries:
+        for e in result.entries:
             typer.echo(f"{e.entry_id} {e.statement[:60]} (出典: {e.source}, {e.retrieved})")
+        if result.truncated:
+            typer.echo(f"({result.total}件中 {len(result.entries)}件を表示。予算で打ち切り)")
         return
 
-    entries = KnowledgeStore(get_knowledge_root()).search(query, kind=kind)
+    result = KnowledgeStore(get_knowledge_root()).search(query, kind=kind)
     if format == "json":
-        typer.echo(
-            json.dumps([_knowledge_entry_payload(e) for e in entries], ensure_ascii=False, indent=2)
-        )
+        typer.echo(json.dumps({
+            "entries": [_knowledge_entry_payload(e) for e in result.entries],
+            "total": result.total, "truncated": result.truncated,
+        }, ensure_ascii=False, indent=2))
         return
-    if not entries:
+    if not result.entries:
         typer.echo("(該当なし)")
         return
-    for e in entries:
+    for e in result.entries:
         stale = " [STALE]" if e.is_stale() else ""
         typer.echo(f"{e.entry_id} [{e.kind}]{stale} {e.statement[:60]}")
+    if result.truncated:
+        typer.echo(f"({result.total}件中 {len(result.entries)}件を表示。予算で打ち切り)")
+
+
+@knowledge_app.command("index")
+def knowledge_index(
+    kind: str | None = typer.Option(None, help="省略時は全kind"),
+    project: str | None = typer.Option(None, help="指定時は案件固有ナレッジの索引"),
+    format: Literal["json", "digest"] = typer.Option("digest"),
+):
+    """何がどれだけあるかの概要を返す。本体を開く前に読む。"""
+    if project:
+        rows = [_project_backend(project).index(project).model_dump(mode="json")]
+    else:
+        rows = _cross_project_index_rows(kind)
+    if format == "json":
+        typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
+        return
+    if not rows:
+        typer.echo("(索引なし)")
+        return
+    for row in rows:
+        stale = "-" if row["stale_count"] is None else row["stale_count"]
+        typer.echo(
+            f"{row['scope']}  entries={row['entry_count']}  stale={stale}"
+            f"  generated={row['generated']}"
+        )
+
+
+def _cross_project_index_rows(kind: str | None) -> list[dict]:
+    store = KnowledgeStore(get_knowledge_root())
+    return [
+        index.model_dump(mode="json")
+        for k in ([kind] if kind else store.kinds())
+        if (index := store.index(k)) is not None
+    ]
 
 
 @knowledge_app.command("get")
@@ -282,15 +327,7 @@ def knowledge_save(
             )
         except Exception as e:
             _fail(f"案件固有ナレッジのスキーマ不正: {e}")
-        storage = get_storage()
-        doc = RequirementsStore(storage).get(project)
-        backend_name = doc.knowledge_backend if doc else "markdown"
-        backend = resolve_knowledge_backend(
-            backend_name,
-            project,
-            get_knowledge_root(),
-            Path(os.environ.get("MEDO_HOME", str(Path.home() / ".medo"))),
-        )
+        backend = _project_backend(project)
         entry_id = backend.append(entry)
         typer.echo(f"saved: {entry_id}")
         return
