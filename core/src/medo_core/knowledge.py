@@ -78,6 +78,25 @@ def apply_budget(entries: list, limit: int, char_budget: int) -> SearchResult:
     return SearchResult(entries=kept, total=len(entries), truncated=len(kept) < len(entries))
 
 
+def _entry_number(path: Path) -> int:
+    """辞書順だと tech-10 が tech-2 より前に来る。"""
+    return int(path.stem.rsplit("-", 1)[1])
+
+
+def _index_meta(path: Path) -> dict:
+    """索引のfrontmatterを読む。壊れていても落とさない。
+
+    索引は概要であって正本ではない。手で編集されたり書き込みが途中で
+    終わったりしたときに、蓄積そのものが読めなくなるほうが困る。
+    """
+    try:
+        _, front, _ = path.read_text(encoding="utf-8").split("---", 2)
+        meta = yaml.safe_load(front)
+        return meta if isinstance(meta, dict) else {}
+    except (ValueError, OSError, yaml.YAMLError):
+        return {}
+
+
 def body_of(entries: list) -> str:
     return "\n".join(f"- {e.entry_id}: {e.statement[:60]}" for e in entries)
 
@@ -176,7 +195,7 @@ class KnowledgeStore:
             KnowledgeEntry.model_validate(
                 {**_from_okf(_read_frontmatter(path)), "entry_id": path.stem, "kind": kind}
             )
-            for path in sorted(d.glob(f"{kind}-*.md"))
+            for path in sorted(d.glob(f"{kind}-*.md"), key=_entry_number)
         ]
 
     def rebuild_index(self, kind: str, today: date | None = None) -> None:
@@ -196,13 +215,11 @@ class KnowledgeStore:
         path = self._dir(kind) / "index.md"
         if not path.exists():
             return None
-        text = path.read_text(encoding="utf-8")
-        _, front, body = text.split("---", 2)
-        meta = yaml.safe_load(front)
+        meta = _index_meta(path)
         return KnowledgeIndex(
             scope=kind, entry_count=meta.get("entry_count", 0),
             stale_count=sum(1 for e in self._entries(kind) if e.is_stale(today=today)),
-            generated=meta.get("generated", ""), body=body.strip(),
+            generated=meta.get("generated", ""), body=body_of(self._entries(kind)),
         )
 
     def kinds(self) -> list[str]:
@@ -315,11 +332,7 @@ class MarkdownKnowledgeBackend:
     def index(self, project: str) -> KnowledgeIndex:
         entries = self.list(project)
         path = self._dir(project) / "index.md"
-        generated = ""
-        if path.exists():
-            generated = yaml.safe_load(path.read_text(encoding="utf-8").split("---")[1]).get(
-                "generated", ""
-            )
+        generated = _index_meta(path).get("generated", "") if path.exists() else ""
         return KnowledgeIndex(
             scope=project, entry_count=len(entries), stale_count=None,
             generated=generated, body=body_of(entries),

@@ -379,3 +379,22 @@ def test_sqlite_index_counts_without_an_index_file(sqlite_backend: SqliteKnowled
     sqlite_backend.append(_project_entry())
 
     assert sqlite_backend.index("yoyaku").entry_count == 1
+
+
+def test_broken_index_does_not_break_reading(store: KnowledgeStore, tmp_path: Path):
+    """索引は概要であって正本ではない。壊れても蓄積そのものは読めなければならない。"""
+    store.save(_entry())
+    (tmp_path / "tech" / "index.md").write_text("これはYAMLではない", encoding="utf-8")
+
+    assert store.index("tech").entry_count == 0
+    assert store.search().total == 1
+
+
+def test_entries_are_ordered_by_number_not_lexically(store: KnowledgeStore):
+    """辞書順だと tech-10 が tech-2 より前に来る。"""
+    for i in range(11):
+        store.save(_entry(statement=f"entry {i}"))
+
+    assert [e.entry_id for e in store.search(limit=11).entries][:3] == [
+        "tech-1", "tech-2", "tech-3",
+    ]
