@@ -808,3 +808,15 @@ def test_check_list_exposes_engagement_stage_options(medo_home: Path):
         "現状整理まで", "合意形成まで", "打ち手の提案まで", "意思決定まで",
     ]
     assert rows["reality_gap"]["options"] == []
+
+
+def test_knowledge_save_accepts_practice_without_url(medo_home: Path):
+    """進め方のノウハウには引けるURLが無い。kindごとURLを必須にすると保存できない。"""
+    result = runner.invoke(app, [
+        "knowledge", "save", "--kind", "practice",
+        "--statement", "決裁者の合意より先に現場の反応を取ったほうが早い",
+        "--source", "medo-review 2026-09-23対話",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert "saved:" in result.output

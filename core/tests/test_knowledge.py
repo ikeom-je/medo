@@ -2,6 +2,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import yaml
 
 from medo_core.knowledge import (
     KnowledgeEntry,
@@ -188,3 +189,130 @@ def test_resolve_knowledge_backend_markdown(tmp_path: Path):
 def test_resolve_knowledge_backend_sqlite(tmp_path: Path):
     backend = resolve_knowledge_backend("sqlite", "yoyaku", tmp_path / "knowledge", tmp_path / "home")
     assert isinstance(backend, SqliteKnowledgeBackend)
+
+
+def test_saved_frontmatter_is_okf(store: KnowledgeStore, tmp_path: Path):
+    """OKFの必須フィールドは type。他のツールが読める形で置く。"""
+    entry_id = store.save(_entry())
+    meta = yaml.safe_load(
+        (tmp_path / "tech" / f"{entry_id}.md").read_text(encoding="utf-8").split("---")[1]
+    )
+
+    assert meta["type"] == "knowledge"
+    assert meta["sources"] == ["https://cloud.google.com/vertex-ai/docs/context-cache"]
+    assert meta["generated"] == "2026-07-01"
+    assert meta["status"] == "unverified"
+
+
+def test_stale_after_is_derived_from_the_freshness_contract(store: KnowledgeStore, tmp_path: Path):
+    """期限をLLMに計算させない。techは30日、それ以外は180日。"""
+    store.save(_entry())
+    store.save(_entry(kind="market", source="https://example.com/m", retrieved="2026-07-01"))
+
+    def _stale_after(kind, entry_id):
+        text = (tmp_path / kind / f"{entry_id}.md").read_text(encoding="utf-8")
+        return yaml.safe_load(text.split("---")[1])["stale_after"]
+
+    assert _stale_after("tech", "tech-1") == "2026-07-31"
+    assert _stale_after("market", "market-1") == "2026-12-28"
+
+
+def test_reads_entries_saved_before_okf(store: KnowledgeStore, tmp_path: Path):
+    """旧形式のファイルを読めなくしない。"""
+    path = tmp_path / "tech" / "tech-9.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "---\nkind: tech\nstatement: 旧形式\nsource: https://example.com/old\n"
+        "retrieved: '2026-07-01'\nnote: ''\n---\n",
+        encoding="utf-8",
+    )
+
+    entry = store.get("tech", "tech-9")
+
+    assert entry.source == "https://example.com/old"
+    assert entry.retrieved == "2026-07-01"
+    assert entry.status == "unverified"
+
+
+def test_stale_after_in_the_file_is_not_trusted(store: KnowledgeStore, tmp_path: Path):
+    """鮮度契約を変えたとき、保存済みの期限が古い契約のまま残る。"""
+    path = tmp_path / "tech" / "tech-9.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "---\ntype: knowledge\nkind: tech\nstatement: 期限が嘘\n"
+        "sources:\n- https://example.com/x\ngenerated: '2026-07-01'\n"
+        "stale_after: '2099-01-01'\n---\n",
+        encoding="utf-8",
+    )
+
+    assert store.get("tech", "tech-9").is_stale(today=date(2026, 8, 15)) is True
+
+
+def test_practice_kind_takes_a_non_url_source():
+    """レビューや対話で得たノウハウには引けるURLが無い。出典の形式だけを緩める。"""
+    entry = _entry(kind="practice", source="medo-review 2026-09-23対話")
+
+    assert entry.kind == "practice"
+
+
+def test_practice_kind_still_requires_a_source():
+    with pytest.raises(ValueError):
+        _entry(kind="practice", source="   ")
+
+
+def test_sources_written_as_a_bare_string_is_read_whole(store: KnowledgeStore, tmp_path: Path):
+    """手書きで単数のまま書かれても、先頭1文字を出典と誤読しない。"""
+    path = tmp_path / "tech" / "tech-9.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "---\ntype: knowledge\nkind: tech\nstatement: 単数で書かれた\n"
+        "sources: https://example.com/x\ngenerated: '2026-07-01'\n---\n",
+        encoding="utf-8",
+    )
+
+    assert store.get("tech", "tech-9").source == "https://example.com/x"
+
+
+def test_project_entry_roundtrips_through_okf(md_backend: MarkdownKnowledgeBackend, tmp_path: Path):
+    """案件固有ナレッジも同じ形式で置く。バックエンドごとに形が変わると読み手が困る。"""
+    md_backend.append(ProjectKnowledgeEntry(
+        project="p1", statement="紙の伝票が残っている",
+        source="ヒアリング(2026-09-23 営業部長)", retrieved="2026-09-23", actor="claude-opus-5",
+    ))
+    meta = yaml.safe_load(
+        (tmp_path / "projects" / "p1" / "p1-1.md").read_text(encoding="utf-8").split("---")[1]
+    )
+
+    assert meta["type"] == "knowledge"
+    assert meta["sources"] == ["ヒアリング(2026-09-23 営業部長)"]
+    assert md_backend.list("p1")[0].actor == "claude-opus-5"
+
+
+def test_sqlite_keeps_status_and_actor(sqlite_backend: SqliteKnowledgeBackend):
+    """markdown と sqlite で残るフィールドが食い違うと、バックエンド変更で情報が消える。"""
+    sqlite_backend.append(ProjectKnowledgeEntry(
+        project="p1", statement="紙の伝票が残っている", source="ヒアリング(2026-09-23)",
+        retrieved="2026-09-23", status="human-reviewed", actor="human:ikeo",
+    ))
+
+    entry = sqlite_backend.list("p1")[0]
+
+    assert (entry.status, entry.actor) == ("human-reviewed", "human:ikeo")
+
+
+def test_sqlite_opens_a_database_created_before_status_and_actor(tmp_path: Path):
+    """作り直すと蓄積を捨てることになる。既存DBは列を足して開き続ける。"""
+    import sqlite3
+
+    db = tmp_path / "old.sqlite"
+    with sqlite3.connect(db) as con:
+        con.execute(
+            "CREATE TABLE entries (entry_id TEXT PRIMARY KEY, project TEXT NOT NULL, "
+            "statement TEXT NOT NULL, source TEXT NOT NULL, retrieved TEXT NOT NULL, "
+            "note TEXT NOT NULL DEFAULT '')"
+        )
+        con.execute("INSERT INTO entries VALUES ('p1-1','p1','古い行','メモ','2026-07-01','')")
+
+    entry = SqliteKnowledgeBackend(db).list("p1")[0]
+
+    assert (entry.statement, entry.status) == ("古い行", "unverified")

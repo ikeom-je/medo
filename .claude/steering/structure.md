@@ -42,7 +42,7 @@ core/
 │   ├── requirements.py  # RequirementsDoc(背景・方針/理念・課題・要件)+ Store(自動バージョン採番・diff)
 │   ├── facts.py         # Fact + FactStore(kind: market/policy/trend/company。案件スコープ・出典必須・180日stale判定)
 │   ├── fermi.py         # フェルミ推定の決定論計算(ファクト参照+明示的仮定×式。ast制限の四則演算+累乗。モデル込み保存で再計算可能)
-│   ├── knowledge.py     # KnowledgeEntry + KnowledgeStore(factsと同型・案件横断・出典必須) + ProjectKnowledgeEntry + KnowledgeBackend(markdown/sqlite。案件固有・単一案件スコープ)
+│   ├── knowledge.py     # KnowledgeEntry + KnowledgeStore(案件横断・出典必須・OKF形式で保存。kind: tech/market/policy/trend/company/practice) + ProjectKnowledgeEntry + KnowledgeBackend(markdown/sqlite。案件固有・単一案件スコープ)
 │   ├── artifacts.py     # Artifact + ArtifactStore(要件バージョン・引用ファクト/ナリッジ紐づけ・陳腐化検出)
 │   └── status.py        # project_status(): 現在地と次ステップ(next_step)の決定論導出
 └── tests/
