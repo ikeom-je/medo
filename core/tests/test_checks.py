@@ -190,3 +190,20 @@ def test_completed_rounds_without_changes_are_not_ritualized():
     ]
 
     assert detect_ritualized(events, manifests=[]) == []
+
+
+def test_engagement_scope_is_asked_in_discovery():
+    """どこまでmedoで進めるかは、案件の開始時に確認しなければ手遅れになる。"""
+    assert "engagement_scope" in checks_for_phase("discovery")
+
+
+def test_engagement_scope_survives_core_node_changes():
+    """守備範囲の合意は、ノードが増えるたびに問い直す性質のものではない。"""
+    events = [_recorded("check-1", "engagement_scope", "completed")]
+
+    states = effective_checks(
+        events, phase="discovery", latest_requirements_version=2,
+        manifests=[_manifest(2, "as_is", "to_be", "challenges")], current_targets={},
+    )
+
+    assert states["engagement_scope"].state == "completed"

@@ -9,9 +9,11 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
 
 ## 進め方
 
-1. 現在地を読み、`actions`(次にできること)をユーザーに報告する:
+1. 現在地を読み、`actions`(次にできること)をユーザーに報告する。**開始時に
+   どこまでをmedoで進めるか合意する**(段階はCLIが返す。以後も節目で確かめる):
 
        medo status --project <project-id> --view summary   # 未作成なら次はID合意
+       medo check list --confirmer customer                # engagement_scope の options
 
 2. 調査を計画する。**掘る目的・停止条件・取得規範はCLIが返す**:
 
@@ -29,8 +31,7 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
    候補にして繰り返す。`diminishing_returns` で打ち切り、`judge: unavailable` なら
    **選別が効いていないと報告する**。国の施策は `--depth deep` で一次資料まで辿る。
 
-4. 効いたファクトを保存する。数値は出典に忠実に転記し加工しない。ヒアリング
-   由来は `--kind company --source "ヒアリング(<日付> <相手>)"`:
+4. 効いたファクトを保存する。数値は出典に忠実に転記し加工しない(ヒアリング由来は `--kind company --source "ヒアリング(<日付> <相手>)"`):
 
        medo facts save --project <id> --kind <market|policy|trend|company> \
          --statement "<出典の記述に忠実な一文>" --source <出典URL> \
@@ -41,8 +42,7 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
 
        medo requirements template > /tmp/req.yaml
 
-   例はコメントアウト済み。**埋める項目だけ外す**。埋まらない項目は
-   `open_questions` に置くか何も書かない。勝手に埋めない。
+   例はコメントアウト済み。**埋める項目だけ外す**。埋まらない項目は `open_questions` に置くか何も書かない(勝手に埋めない)。
 
 6. 保存する(誤字だけの修正は `--editorial <section>`)。
    **調査の初期はここで終えてよい**。次に何を確かめるかをユーザーと決める:

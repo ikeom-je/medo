@@ -91,6 +91,7 @@ status
   "workflow": {
     "checks": {
       "states": {
+        "engagement_scope": "completed",
         "source_quality": "completed",
         "reality_gap": "unverified",
         "past_attempts": "finding",

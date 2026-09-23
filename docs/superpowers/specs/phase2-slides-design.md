@@ -100,7 +100,7 @@
 
 | 段階 | 投影される項目 |
 |---|---|
-| `discovery` | `as_is_articulation`(現状認識は合っているか、語られていない実態はないか) |
+| `discovery` | `engagement_scope`(今回どこまでをmedoで進めるか) / `as_is_articulation`(現状認識は合っているか、語られていない実態はないか) |
 | `convergence` | 上記 + `to_be_articulation` / `feasibility` / `scope_agreement` |
 
 **答えが出ないことを失敗として扱わない**。「あるべき姿がまだ描けない」という反応は `undeterminable` として記録し、**それ自体が発見**として次の周回の論点になる。章6の問い方も「答えていただく」ではなく「一緒に考えたい」という枠組みで書く。
