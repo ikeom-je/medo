@@ -40,7 +40,12 @@ def _from_okf(meta: dict) -> dict:
         meta["retrieved"] = meta.pop("generated")
     if "sources" in meta and "source" not in meta:
         sources = meta["sources"]
-        meta["source"] = sources[0] if sources else ""
+        if isinstance(sources, str):        # 手書きで単数のまま書かれることがある
+            meta["source"] = sources
+        elif isinstance(sources, list) and sources:
+            meta["source"] = str(sources[0])
+        else:
+            meta["source"] = ""
     meta.pop("sources", None)
     return meta
 
@@ -246,10 +251,19 @@ class SqliteKnowledgeBackend:
                     statement TEXT NOT NULL,
                     source TEXT NOT NULL,
                     retrieved TEXT NOT NULL,
-                    note TEXT NOT NULL DEFAULT ''
+                    note TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'unverified',
+                    actor TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
+            # 既存DBには新しい列が無い。作り直すと蓄積を捨てることになる。
+            existing = {row[1] for row in con.execute("PRAGMA table_info(entries)")}
+            for column, default in (("status", "'unverified'"), ("actor", "''")):
+                if column not in existing:
+                    con.execute(
+                        f"ALTER TABLE entries ADD COLUMN {column} TEXT NOT NULL DEFAULT {default}"
+                    )
 
     def append(self, entry: ProjectKnowledgeEntry) -> str:
         with sqlite3.connect(self._db_path) as con:
@@ -259,20 +273,26 @@ class SqliteKnowledgeBackend:
                 ).fetchone()
                 entry = entry.model_copy(update={"entry_id": f"{entry.project}-{count + 1}"})
             con.execute(
-                "INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?)",
-                (entry.entry_id, entry.project, entry.statement, entry.source, entry.retrieved, entry.note),
+                "INSERT INTO entries "
+                "(entry_id, project, statement, source, retrieved, note, status, actor) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (entry.entry_id, entry.project, entry.statement, entry.source,
+                 entry.retrieved, entry.note, entry.status, entry.actor),
             )
         return entry.entry_id
 
     def list(self, project: str) -> list[ProjectKnowledgeEntry]:
         with sqlite3.connect(self._db_path) as con:
             rows = con.execute(
-                "SELECT entry_id, project, statement, source, retrieved, note "
+                "SELECT entry_id, project, statement, source, retrieved, note, status, actor "
                 "FROM entries WHERE project = ? ORDER BY entry_id",
                 (project,),
             ).fetchall()
         return [
-            ProjectKnowledgeEntry(entry_id=r[0], project=r[1], statement=r[2], source=r[3], retrieved=r[4], note=r[5])
+            ProjectKnowledgeEntry(
+                entry_id=r[0], project=r[1], statement=r[2], source=r[3],
+                retrieved=r[4], note=r[5], status=r[6], actor=r[7],
+            )
             for r in rows
         ]
 

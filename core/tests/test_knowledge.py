@@ -258,3 +258,61 @@ def test_practice_kind_takes_a_non_url_source():
 def test_practice_kind_still_requires_a_source():
     with pytest.raises(ValueError):
         _entry(kind="practice", source="   ")
+
+
+def test_sources_written_as_a_bare_string_is_read_whole(store: KnowledgeStore, tmp_path: Path):
+    """手書きで単数のまま書かれても、先頭1文字を出典と誤読しない。"""
+    path = tmp_path / "tech" / "tech-9.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "---\ntype: knowledge\nkind: tech\nstatement: 単数で書かれた\n"
+        "sources: https://example.com/x\ngenerated: '2026-07-01'\n---\n",
+        encoding="utf-8",
+    )
+
+    assert store.get("tech", "tech-9").source == "https://example.com/x"
+
+
+def test_project_entry_roundtrips_through_okf(md_backend: MarkdownKnowledgeBackend, tmp_path: Path):
+    """案件固有ナレッジも同じ形式で置く。バックエンドごとに形が変わると読み手が困る。"""
+    md_backend.append(ProjectKnowledgeEntry(
+        project="p1", statement="紙の伝票が残っている",
+        source="ヒアリング(2026-09-23 営業部長)", retrieved="2026-09-23", actor="claude-opus-5",
+    ))
+    meta = yaml.safe_load(
+        (tmp_path / "projects" / "p1" / "p1-1.md").read_text(encoding="utf-8").split("---")[1]
+    )
+
+    assert meta["type"] == "knowledge"
+    assert meta["sources"] == ["ヒアリング(2026-09-23 営業部長)"]
+    assert md_backend.list("p1")[0].actor == "claude-opus-5"
+
+
+def test_sqlite_keeps_status_and_actor(sqlite_backend: SqliteKnowledgeBackend):
+    """markdown と sqlite で残るフィールドが食い違うと、バックエンド変更で情報が消える。"""
+    sqlite_backend.append(ProjectKnowledgeEntry(
+        project="p1", statement="紙の伝票が残っている", source="ヒアリング(2026-09-23)",
+        retrieved="2026-09-23", status="human-reviewed", actor="human:ikeo",
+    ))
+
+    entry = sqlite_backend.list("p1")[0]
+
+    assert (entry.status, entry.actor) == ("human-reviewed", "human:ikeo")
+
+
+def test_sqlite_opens_a_database_created_before_status_and_actor(tmp_path: Path):
+    """作り直すと蓄積を捨てることになる。既存DBは列を足して開き続ける。"""
+    import sqlite3
+
+    db = tmp_path / "old.sqlite"
+    with sqlite3.connect(db) as con:
+        con.execute(
+            "CREATE TABLE entries (entry_id TEXT PRIMARY KEY, project TEXT NOT NULL, "
+            "statement TEXT NOT NULL, source TEXT NOT NULL, retrieved TEXT NOT NULL, "
+            "note TEXT NOT NULL DEFAULT '')"
+        )
+        con.execute("INSERT INTO entries VALUES ('p1-1','p1','古い行','メモ','2026-07-01','')")
+
+    entry = SqliteKnowledgeBackend(db).list("p1")[0]
+
+    assert (entry.statement, entry.status) == ("古い行", "unverified")
