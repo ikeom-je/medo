@@ -292,7 +292,8 @@ KNOWLEDGE_WRITERS = [
 ]
 
 CROSS_PROJECT_WRITERS = [
-    "medo-review", "medo-dialogue", "medo-propose-options", "medo-grow-prfaq",
+    "medo-review", "medo-dialogue", "medo-decide",
+    "medo-propose-options", "medo-grow-prfaq",
 ]
 
 

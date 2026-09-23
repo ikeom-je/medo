@@ -61,8 +61,8 @@ description: 顧客の反応とレビュー所見を要件ドキュメントに�
    - 詳しい理由が要るときだけ `medo status --project <id> --view readiness` を呼び、
      `failed_conditions` を報告する
 
-   **判断が割れた論点と決め手になった材料を残す**(他の案件でも同じ割れ方をするなら
-   `--kind practice`、この案件固有の事情なら `--project <id>`):
+   **判断が割れた論点と決め手になった材料を残す**(固有名詞を消して文が成り立つなら
+   `--kind practice`、成り立たないなら `--project <id>`):
 
        medo knowledge save --project <id> --statement "<論点と決め手>" --source "medo-decide <日付>対話"
 

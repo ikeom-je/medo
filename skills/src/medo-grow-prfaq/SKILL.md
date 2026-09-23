@@ -25,6 +25,8 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
 4. `medo knowledge index` で何があるかを見てから `medo knowledge search` で技術的背景を
    深め、必要ならファクトを追加保存する。出力末尾のリフレーミング規約はPRFAQ本文にも適用する:
 
+       medo knowledge index
+       medo knowledge search "<キーワード>" --format json
        medo artifacts outline --type slides --slide-kind discussion
 5. 完全版PRFAQを作る。ミニPRFAQの内容に加えて:
    - 技術的背景(引用したナレッジのkind・statementに基づき、絵に描いた餅にしない)
