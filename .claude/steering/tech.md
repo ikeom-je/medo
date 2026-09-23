@@ -87,7 +87,8 @@ uv run medo --help
 uv run medo requirements get --project <id> --format json
 uv run medo facts list --project <id>            # 市場・国策・業界動向・個社ファクト(出典・stale付き)
 uv run medo fermi calc --project <id> --file <model.yaml>  # フェルミ推定(コードが計算)
-uv run medo knowledge search "<キーワード>"        # 案件横断の技術ナリッジ(出典・stale付き)
+uv run medo knowledge index                       # 何がどれだけあるかの概要(本体を開く前に読む)
+uv run medo knowledge search "<キーワード>"        # 案件横断の技術ナリッジ(出典・stale・打ち切り有無付き)
 uv run medo knowledge save --project <id> --statement "..." --source "..."  # 案件固有ナレッジ(単一案件スコープ・出典URL不要)
 uv run medo status --project <id>   # 現在地(要件・ファクト・生成物・next_step)
 
