@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal, Protocol
 from urllib.parse import urlparse
@@ -12,10 +12,37 @@ import sqlite3
 import yaml
 from pydantic import BaseModel, model_validator
 
-KnowledgeKind = Literal["tech", "market", "policy", "trend", "company"]
+KnowledgeKind = Literal["tech", "market", "policy", "trend", "company", "practice"]
 _URL_KINDS = {"tech", "market", "policy", "trend"}
 _STALE_THRESHOLD_DAYS = {"tech": 30}
 _DEFAULT_STALE_THRESHOLD_DAYS = 180
+
+TrustStatus = Literal["unverified", "machine-confirmed", "human-reviewed"]
+
+# OKF v0.2 の必須フィールドは type だけ。medoのナリッジは1種類なので固定値を書く。
+_OKF_TYPE = "knowledge"
+
+
+def _stale_after(kind: str | None, generated: str) -> str:
+    """鮮度契約の期限。LLMに計算させない(原則1)。kind=None は既定の契約。"""
+    days = _STALE_THRESHOLD_DAYS.get(kind, _DEFAULT_STALE_THRESHOLD_DAYS)
+    return (date.fromisoformat(generated) + timedelta(days=days)).isoformat()
+
+
+def _from_okf(meta: dict) -> dict:
+    """OKF形式と旧形式のどちらのfrontmatterも受ける。
+
+    stale_after はファイルの値を信じない。鮮度契約を変えたとき、保存済みの
+    期限が古い契約のまま残る。
+    """
+    meta = {k: v for k, v in meta.items() if k not in ("type", "stale_after")}
+    if "generated" in meta:
+        meta["retrieved"] = meta.pop("generated")
+    if "sources" in meta and "source" not in meta:
+        sources = meta["sources"]
+        meta["source"] = sources[0] if sources else ""
+    meta.pop("sources", None)
+    return meta
 
 
 class KnowledgeEntry(BaseModel):
@@ -26,7 +53,17 @@ class KnowledgeEntry(BaseModel):
     unit: str = ""
     source: str
     retrieved: str  # ISO日付 YYYY-MM-DD
+    status: TrustStatus = "unverified"
+    actor: str = ""                       # 書いた主体。人間なら human:<id>
     note: str = ""
+
+    def to_okf(self) -> dict:
+        meta = self.model_dump(mode="json", exclude={"entry_id", "source", "retrieved"})
+        return {
+            "type": _OKF_TYPE, "kind": meta.pop("kind"), "statement": meta.pop("statement"),
+            "sources": [self.source], "generated": self.retrieved,
+            "stale_after": _stale_after(self.kind, self.retrieved), **meta,
+        }
 
     @model_validator(mode="after")
     def _validate(self) -> "KnowledgeEntry":
@@ -80,7 +117,7 @@ class KnowledgeStore:
                         nums.append(int(m.group(1)))
             entry = entry.model_copy(update={"entry_id": f"{entry.kind}-{max(nums, default=0) + 1}"})
         path = self._dir(entry.kind) / f"{entry.entry_id}.md"
-        _write_frontmatter(path, entry.model_dump(mode="json", exclude={"entry_id"}))
+        _write_frontmatter(path, entry.to_okf())
         return entry.entry_id
 
     def get(self, kind: str, entry_id: str) -> KnowledgeEntry | None:
@@ -88,7 +125,7 @@ class KnowledgeStore:
         if not path.exists():
             return None
         meta = _read_frontmatter(path)
-        return KnowledgeEntry.model_validate({**meta, "entry_id": entry_id, "kind": kind})
+        return KnowledgeEntry.model_validate({**_from_okf(meta), "entry_id": entry_id, "kind": kind})
 
     def search(self, query: str = "", kind: str | None = None, limit: int = 10) -> list[KnowledgeEntry]:
         q = query.lower()
@@ -97,7 +134,7 @@ class KnowledgeStore:
         for k in sorted(kinds):
             for path in sorted(self._dir(k).glob(f"{k}-*.md")):
                 meta = _read_frontmatter(path)
-                entry = KnowledgeEntry.model_validate({**meta, "entry_id": path.stem, "kind": k})
+                entry = KnowledgeEntry.model_validate({**_from_okf(meta), "entry_id": path.stem, "kind": k})
                 haystack = " ".join([entry.statement, entry.note]).lower()
                 if q and q not in haystack:
                     continue
@@ -116,7 +153,18 @@ class ProjectKnowledgeEntry(BaseModel):
     statement: str
     source: str
     retrieved: str
+    status: TrustStatus = "unverified"
+    actor: str = ""
     note: str = ""
+
+    def to_okf(self) -> dict:
+        meta = self.model_dump(mode="json", exclude={"entry_id", "source", "retrieved"})
+        return {
+            "type": _OKF_TYPE, "project": meta.pop("project"),
+            "statement": meta.pop("statement"), "sources": [self.source],
+            "generated": self.retrieved,
+            "stale_after": _stale_after(None, self.retrieved), **meta,
+        }
 
     @model_validator(mode="after")
     def _validate(self) -> "ProjectKnowledgeEntry":
@@ -157,7 +205,7 @@ class MarkdownKnowledgeBackend:
                         nums.append(int(m.group(1)))
             entry = entry.model_copy(update={"entry_id": f"{entry.project}-{max(nums, default=0) + 1}"})
         path = self._dir(entry.project) / f"{entry.entry_id}.md"
-        _write_frontmatter(path, entry.model_dump(mode="json", exclude={"entry_id"}))
+        _write_frontmatter(path, entry.to_okf())
         return entry.entry_id
 
     def list(self, project: str) -> list[ProjectKnowledgeEntry]:
@@ -171,7 +219,7 @@ class MarkdownKnowledgeBackend:
         entries = []
         for path in sorted(d.glob(f"{project}-*.md"), key=_num):
             meta = _read_frontmatter(path)
-            entries.append(ProjectKnowledgeEntry.model_validate({**meta, "entry_id": path.stem}))
+            entries.append(ProjectKnowledgeEntry.model_validate({**_from_okf(meta), "entry_id": path.stem}))
         return entries
 
     def search(self, project: str, query: str) -> list[ProjectKnowledgeEntry]:

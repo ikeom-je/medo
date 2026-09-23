@@ -198,7 +198,9 @@ def _knowledge_entry_payload(entry) -> dict:
 def knowledge_search(
     query: str = typer.Argument(""),
     project: str | None = typer.Option(None, help="指定時は案件固有ナレッジを検索"),
-    kind: str | None = typer.Option(None, help="tech|market|policy|trend|company(案件横断のみ)"),
+    kind: str | None = typer.Option(
+        None, help="tech|market|policy|trend|company|practice(案件横断のみ)"
+    ),
     format: Literal["json", "digest"] = typer.Option("digest"),
 ):
     if project:
@@ -240,7 +242,7 @@ def knowledge_search(
 
 @knowledge_app.command("get")
 def knowledge_get(
-    kind: str = typer.Option(..., help="tech|market|policy|trend|company"),
+    kind: str = typer.Option(..., help="tech|market|policy|trend|company|practice"),
     id: str = typer.Option(..., "--id"),
     format: Literal["json", "digest"] = typer.Option("json"),
 ):
@@ -260,7 +262,8 @@ def knowledge_save(
     source: str = typer.Option(...),
     project: str | None = typer.Option(None, help="指定時は案件固有ナレッジとして保存"),
     kind: str | None = typer.Option(
-        None, help="案件横断ナレッジのみ必須: tech|market|policy|trend|company"
+        None,
+        help="案件横断ナレッジのみ必須: tech|market|policy|trend|company|practice"
     ),
     value: float | None = typer.Option(None),
     unit: str = typer.Option(""),
