@@ -29,6 +29,7 @@
    - 相互レビューが上限2ラウンドでも重大指摘未解決
    - 該当する場合: `gh pr edit --add-reviewer <ユーザー>` 等で人間レビューを依頼し、承認後にマージ
    - 該当しない場合: Claudeが `gh pr merge --squash` で自動マージ(Issueは自動close)
+   - **判定はClaudeが行い、Jevを第二意見に使う**: `python scripts/jev_merge_judge.py <PR番号>` が上の3条件の確率を返す(`TYPESAFE_API_KEY` が必要)。**Claudeの判定とJevのどちらかが該当とすれば人間レビューに倒す**。Jevが使えない場合はその旨をPR本文に記録してClaudeの判定のみで進める。Jevの確率はPR本文の `review:` 記録の近くに転記する
 8. `git worktree remove .worktrees/<name>` で片付ける
 9. フェーズ完了(統合スモークTask完了)時: `gh pr create --base main --head dev` をClaudeが作成し、**マージは常にユーザーが実行**
 
