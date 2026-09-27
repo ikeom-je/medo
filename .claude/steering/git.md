@@ -29,7 +29,8 @@
    - 相互レビューが上限2ラウンドでも重大指摘未解決
    - 該当する場合: `gh pr edit --add-reviewer <ユーザー>` 等で人間レビューを依頼し、承認後にマージ
    - 該当しない場合: Claudeが `gh pr merge --squash` で自動マージ(Issueは自動close)
-   - **判定はClaudeが行い、Jevを第二意見に使う**: `python scripts/jev_merge_judge.py <PR番号>` が上の3条件の確率を返す(`TYPESAFE_API_KEY` が必要)。**Claudeの判定とJevのどちらかが該当とすれば人間レビューに倒す**。Jevが使えない場合はその旨をPR本文に記録してClaudeの判定のみで進める。Jevの確率はPR本文の `review:` 記録の近くに転記する
+   - **判定はオーケストレータ(workflow.md Section 3 の可用性プロファイル)が行い、Jevを第二意見に使う**: `python scripts/jev_judge.py merge <PR番号>` がファイルごとに契約変更・クラウド課金の確率を返す(`review:` 記録の欠落は判定前にエラーになる)。**オーケストレータとJevのどちらかが該当とすれば人間レビューに倒す**。`unjudged_files`(差分が大きく判定しなかったファイル)はオーケストレータが自分で読んで判定する。Jevの確率はPR本文の `review:` 記録の近くに転記する
+   - Jevが使えないとき: `TYPESAFE_API_KEY` が無い環境では、その旨をPR本文に記録してオーケストレータの判定のみで進める。**鍵があるのにAPI・取得・応答解析が失敗した場合は判定結果として扱わず**、原因を報告して再実行するかユーザーに判断を仰ぐ
 8. `git worktree remove .worktrees/<name>` で片付ける
 9. フェーズ完了(統合スモークTask完了)時: `gh pr create --base main --head dev` をClaudeが作成し、**マージは常にユーザーが実行**
 
