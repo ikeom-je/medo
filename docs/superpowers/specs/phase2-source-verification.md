@@ -1,6 +1,6 @@
 # 出典検証の強化(フェーズ2・並行)
 
-ステータス: 未承認(実装着手前)
+ステータス: 承認済み(相互レビュー Codex+agy 2R)
 
 `facts save` が受け取った出典URLを実際に取得し、LLMが転記した数値が出典本文に書かれているかをコードで確かめる設計。原則1「発想は自由、事実は縛る」の、**出典からの初回転記**という唯一LLMが数値に触れる箇所を塞ぐ。
 
@@ -86,9 +86,11 @@ class Fact(BaseModel):
     verification: Verification | None = None
 ```
 
-- **`legacy` は読み込み時にだけ付く**。保存済みJSONに `verification` が無い場合、`FactStore.get` / `list` が `legacy` として返す。移行は不要
+- **`legacy` は読み込み時にだけ付く**。保存済みJSONに `verification` が無い場合、`FactStore.get` / `list` は対象kindなら `legacy`、`company` なら `not-applicable` として返す。移行は不要
 - **`FactStore.save` は `verification` が `None` のファクトを拒否する**。検証を経ない新規保存が `legacy` に紛れ込むのを、CLIではなくcoreで防ぐ(CLI以外の経路=webapp等も同じ規則に従う)
 - `legacy` を保存し直すことはできない(`save` は `status="legacy"` を拒否する)
+- **kindごとに許す状態を制約する**: 対象kindは `verified` / `unverified`、`company` は `not-applicable` のみ(`Fact` のバリデータで検査)
+- **`verified` を作るのは core の `verify_fact(fact, body)` だけ**とする(照合して `Verification` を付けたファクトを返す)。`save` は照合を経たかを証明できないため、これは呼び出し側の契約であり、CLI以外の経路(webapp等)も `verify_fact` を通す
 - 対象kindで `quote` が空のまま `verified` にはできない(`Fact` のバリデータで検査)
 
 ### 3.5 見える場所
@@ -99,9 +101,9 @@ class Fact(BaseModel):
 |---|---|
 | `facts list --format json` | 各要素に `verification` |
 | `facts list`(digest) | `[UNVERIFIED]` / `[LEGACY]` / `[DOUBTFUL]`(`[STALE]` と並べる) |
-| `fermi calc` | `FermiResult` に `unverified_facts`(参照したファクトのうち `verified` 以外のID)を足し、生成物の `content` に残す。1件以上なら標準出力に警告行を出す |
+| `fermi calc` | `FermiResult` に `unverified_facts`(参照したファクトのうち `unverified` / `legacy` のID。`not-applicable` は検証対象外であって未検証ではないので含めない)と `doubtful_facts`(`verified` だが `support=doubtful` のID)を足し、生成物の `content` に残す。いずれか1件以上なら標準出力に警告行を出す |
 | `status`(`facts` セクション) | `unverified` / `legacy` 件数。要件未作成時の固定ゼロ件(`status.py`)にも同じキーを足す |
-| Skill | 未検証・legacy・doubtful のファクト、およびそれを参照したfermi結果を引用するときは提案文中に注記する(原則4のstale注記と同じ扱い) |
+| Skill | 未検証・legacy・doubtful のファクト、およびそれを参照したfermi結果を引用するときは提案文中に注記する(原則4のstale注記と同じ扱い)。対象は `medo-investigate` / `medo-propose-options` / `medo-grow-prfaq`(fermi結果を再引用するため) |
 
 `legacy` は検証機能の導入前に保存されたことを示すだけで、失敗を意味しない。ただし数値が確かめられていない点は `unverified` と同じなので、fermi・Skillでは同じく注記対象とする。`supported` は表示しない(「事実確認済み」と誤読されるため。§5)。
 
@@ -131,9 +133,9 @@ class Fact(BaseModel):
 
 - 主張値 = `value` × `unit` の倍率語。主張の基底単位 = `unit` から倍率語を除いた残り(`兆円` → `円`、`%` → `%`)
 - 抜粋中の数値が次をすべて満たせば一致:
-  1. **絶対値が主張値と等しい**(浮動小数の誤差のみ許容。相対誤差 1e-9)。表記の変換(`3,215,000百万円` ↔ `3.215兆円`)は情報を失わないので許すが、`3.2兆円` ↔ `3.215兆円` は許さない
+  1. **倍率を掛けた値が、符号を含めて主張値と等しい**(浮動小数の誤差のみ許容。相対誤差 1e-9)。表記の変換(`3,215,000百万円` ↔ `3.215兆円`)は情報を失わないので許すが、`3.2兆円` ↔ `3.215兆円` は許さない
   2. 主張に基底単位があるとき、後続文字列が**主張の基底単位で始まる**(前方一致。`円程度` / `%増` / `円(前年度比)` は `円` / `%` と一致)
-- **倍率語が無い数字**(表中の `3,215,000` など)は、**主張の `unit` の文字列が抜粋のどこかに現れる場合に限り**、主張の単位で書かれた値として照合する(`(単位:百万円)3,215,000` は `3215000 百万円` と一致。`(単位:万人)3,215,000` は一致しない)
+- **倍率語も後続の単位も無い数字**(表中の `3,215,000` など)は、**抜粋中の単位宣言(`単位:X` / `単位：X`)がちょうど1つで、その X が主張の `unit` と等しい場合に限り**、主張の単位で書かれた値として照合する。このとき条件1は `value` との比較になり、条件2(後続文字列の前方一致)は単位宣言の一致で代える。単位宣言が無い・2つ以上ある場合は、どの表・列の単位か決まらないので照合しない
 - 抜粋中の数値のどれか1つが一致すれば合格(年・指標との対応は§5の補助判定に委ねる)
 
 | 抜粋 | 主張 | 結果 |
@@ -149,9 +151,10 @@ class Fact(BaseModel):
 | `▲5.2%` | -5.2 % | 一致 |
 | `▲5.2%` | 5.2 % | 不一致(符号) |
 | `3.2兆人` | 3.2 兆円 | 不一致(基底単位) |
-| `(単位:百万円)3,215,000` | 3215000 百万円 | 一致(`百万円` が抜粋に現れる) |
-| `(単位:万人)3,215,000` | 3215000 百万円 | 不一致(`百万円` が抜粋に現れない) |
-| `2024  3.2`(表の行、単位見出し無し) | 3.2 兆円 | 不一致(`兆円` が抜粋に現れない) |
+| `(単位:百万円)3,215,000` | 3215000 百万円 | 一致(単位宣言が1つで `百万円`) |
+| `(単位:万人)3,215,000` | 3215000 百万円 | 不一致(単位宣言が `万人`) |
+| `(単位:万人)3,215,000 (単位:百万円)42` | 3215000 百万円 | 不一致(単位宣言が2つ) |
+| `2024  3.2`(表の行、単位見出し無し) | 3.2 兆円 | 不一致(単位宣言が無い) |
 
 ### 4.4 v1でやらないこと
 
@@ -197,10 +200,10 @@ class Fact(BaseModel):
 
 | # | 内容 | 影響範囲 |
 |---|---|---|
-| A | `source_check.py` の照合規則、`Fact` / `FactStore` の変更(legacy読み込み・save検査)、`fermi` の `unverified_facts`、`status` の件数 | core |
-| B | 取得・抽出アダプタ、`facts save` の判定とエラー形式、Jevの `support`、`list` / `fermi calc` の表示 **+** `medo-investigate` / `medo-propose-options` の `--quote` の付け方と注記義務 | cli + skills。**`facts save` の入力と出力が変わる = Skill契約に影響(人間レビュー対象)** |
+| A | `source_check.py` の照合規則と `verify_fact`、`Fact` / `FactStore` の変更(legacy読み込み・kind別状態・save検査)、`fermi` の `unverified_facts` / `doubtful_facts` と `fermi calc` の警告行、`facts list` の `verification` と digest表示、`status` の件数 | core + cli(表示のみ) |
+| B | 取得・抽出アダプタ、`facts save` の `--quote` / `--unverifiable-reason` と判定・エラー形式、Jevの `support` **+** `medo-investigate` / `medo-propose-options` / `medo-grow-prfaq` の `--quote` の付け方と注記義務 | cli + skills。**`facts save` の入力が変わる = Skill契約に影響(人間レビュー対象)** |
 
-Aから順に。Aは `facts save` の外部契約を変えない(CLIは既存どおり動く — AのPRではCLIが `verification` を `not-applicable` / 暫定 `unverified(reason: "pre-verification-cli")` で埋める)。**BはCLIとSkillを同じPRで変える** — `--quote` が必須になった時点で既存Skillの保存コマンドが失敗するため、分けると間の版で契約が壊れる。
+Aから順に。Aは `facts save` の**入力**を変えない。Aの間、CLIは対象kindを暫定 `unverified(reason: "pre-verification-cli")`、`company` を `not-applicable` で保存する — 未検証である事実をそのまま表示・警告に出すので、AとBの間の版でも未検証値が気づかれずに計算へ流れることはない。**Bは `facts save` の入力とSkillを同じPRで変える** — `--quote` が必須になった時点で既存Skillの保存コマンドが失敗するため、分けると間の版で契約が壊れる。
 
 ---
 
@@ -208,7 +211,8 @@ Aから順に。Aは `facts save` の外部契約を変えない(CLIは既存ど
 
 - §4.3 の表をそのままテーブル駆動のユニットテストにする(core)
 - `FactStore.save` が `verification=None` と `status="legacy"` を拒否すること、`verification` の無い既存JSONが `legacy` として読めること
-- `fermi` が `verified` 以外の参照を `unverified_facts` に入れること
+- `fermi` が `unverified` / `legacy` の参照を `unverified_facts` に、`doubtful` を `doubtful_facts` に入れ、`not-applicable` はどちらにも入れないこと
+- kind別の許可状態(バリデータが拒否する組み合わせ)と、`verify_fact` が照合結果どおりの `Verification` を付けること
 - 取得は関数注入で偽物に差し替える(HTML本文 / Shift_JIS のHTML / PDF / HTTPエラー / 空本文)。ネットワークに出ない
 - 拒否時のエラーに「近い箇所」と `--unverifiable-reason` の案内が含まれること
 - Jevは既存テストと同じく `urlopen` をモンキーパッチする。`TYPESAFE_API_KEY` 無し・タイムアウトで `unjudged` になること
