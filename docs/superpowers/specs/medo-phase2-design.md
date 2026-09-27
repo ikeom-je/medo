@@ -13,6 +13,7 @@
 | [スライド設計](phase2-slides-design.md) | AsIs説明スライド / 最終提案スライド |
 | [Skill構成と移植性](phase2-skill-portability.md) | Skillの分割、どのAgentでも動かすための条件 |
 | [ナリッジとメモリの階層](phase2-knowledge-memory.md) | 永続ナリッジと一時中間メモリ、OKF形式、概要から辿る検索 |
+| [出典検証の強化](phase2-source-verification.md) | 原文抜粋の必須化、URL取得、数値の決定論照合、Jevの補助判定 |
 
 ---
 
@@ -126,7 +127,7 @@
 | **4** | `model` / `workflow` / `readiness` / `actions` 診断 | 1〜3のデータが揃って初めて合成できる |
 | **5** | Skill 4本 + 討議用スライド生成 | 4の `actions` を読んで動く。討議用スライドはステージ1の成果物なので同時 |
 | **6** | 最終提案スライド + `phase_signoff` ゲート | 5の後。`prfaq` が前提 |
-| 並行 | 出典検証の強化(URLフェッチ + 数値突合) | **他と技術的に独立**。いつ着手してもよい |
+| 並行 | 出典検証の強化(URLフェッチ + 数値突合) | **他と技術的に独立**。いつ着手してもよい。詳細: [source-verification](phase2-source-verification.md) |
 | 後続 | ナレッジ来歴 / `knowledge-digest` / `decision-roadmap` / `build-mock` / `propose-architecture` / pricing / 簡易Webアプリ | **詳細設計が未了**。下記 |
 
 **当初案は依存が閉じていなかった**。「イベント基盤(4)をSkill(6)より先」は正しいが、**イベントの対象である `as-is-report` の型定義が6に含まれていた**ため、4だけでは収束規則もレビューも実装できなかった。また6を「標準周回を回せる最小構成」としながらスライド生成が7にあり、ステージ3が成立しなかった。
@@ -137,7 +138,6 @@
 
 | 項目 | 未了の内容 |
 |---|---|
-| 出典検証の強化 | URLフェッチの失敗時の扱い、数値突合のアルゴリズム |
 | ナレッジ来歴 / `knowledge-digest` | `supersedes` のスキーマ、旧引用の解決規則、統合提案の入出力 |
 | `decision-roadmap` | 出力形式(生成物typeを新設するか `comparison` を使うか)が未決 |
 | pricing(再定義) | クラウド非依存でのゴールデンデータの持ち方 |
