@@ -215,14 +215,15 @@ medo checkpoint answer --project <id> --responds-to ev-1 --answer generate --foc
 
 ```bash
 medo facts save --project <id> --kind market --statement "<出典に忠実な一文>" \
-  --source <URL> --value 1234 --unit 億円 --retrieved 2026-09-01
+  --source <URL> --quote "<出典本文から写した数値と単位を含む原文抜粋>" \
+  --value 1234 --unit 億円 --retrieved 2026-09-01
 medo facts list --project <id>
 medo fermi calc --project <id> --file /tmp/model.yaml
 medo knowledge index                  # 何がどれだけあるか(件数・stale件数)
 medo knowledge search "<キーワード>"    # 実体。索引は経由しない
 ```
 
-**数値は出典に忠実に転記し、加工しない**。換算・集計はフェルミ推定で行い、計算はコードが担う(ast制限の四則演算+累乗)。出典の無いファクト・ナレッジは保存が拒否される。鮮度切れは `stale` として全レスポンスに付く。
+**数値は出典に忠実に転記し、加工しない**。換算・集計はフェルミ推定で行い、計算はコードが担う(ast制限の四則演算+累乗)。出典の無いファクト・ナレッジは保存が拒否される。本文を取得できない場合は未検証として警告付きで保存される。抽出不良を目視で確認した場合は `--unverifiable-reason "抽出不良: <状況>"` を指定できる。鮮度切れは `stale` として全レスポンスに付く。
 
 ---
 

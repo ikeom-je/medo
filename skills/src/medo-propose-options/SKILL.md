@@ -22,9 +22,10 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
 
        medo facts save --project <project-id> --kind <market|policy|trend> \
          --statement "<出典の記述に忠実な一文>" --value <数値> --unit <単位> \
-         --source <出典URL> --retrieved <取得日YYYY-MM-DD>
+         --source <出典URL> --retrieved <取得日YYYY-MM-DD> --quote "<原文の一文>"
 
-   - **数値は出典に忠実に転記し、加工しない**(換算・集計が必要ならフェルミ推定で行う)
+   - **数値は出典に忠実に転記し、加工しない**(換算・集計が必要ならフェルミ推定で行う)。`--quote` は出典本文をそのまま写した最小の一文(`--value` を付けるならその数値を含め、表なら単位見出しも含める。定性ファクトは `--value` / `--unit` を省く)。拒否されたらエラーの「次の手」で直して再実行し、解決しなければエラーをそのまま報告する
+   - 既存ファクトを引用する前に `medo facts list --project <project-id>` で `[UNVERIFIED]` / `[LEGACY]` / `[DOUBTFUL]` を確かめる
    - ヒアリング由来の個社情報は `--kind company --source "ヒアリング(<日付> <相手>)"` で保存する
    - 出典のないデータは保存も引用もしない
 
@@ -77,4 +78,4 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
 
 - 開始時と終了時に `medo status --view summary` を実行し、`actions` をユーザーに報告する。詳しい理由が要るときだけ `--view readiness` を追加で呼ぶ
 - CLIが失敗したら推測で補完せず、エラー内容をそのまま報告する
-- stale・未確認(`confidence: assumed` / `open`)・仮説の項目を引用するときは、その旨を明記する
+- stale・未確認(`confidence: assumed` / `open`)・仮説の項目、および出典未検証(`[UNVERIFIED]` / `[LEGACY]`)・`[DOUBTFUL]` のファクトとそれを使った fermi 結果(`warning:` 行)を引用するときは、その旨を明記する

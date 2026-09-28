@@ -2,12 +2,59 @@
 
 import json
 import os
+from typing import Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from medo_core.research import Candidate, Verdict
 
 API_URL = "https://api.typesafe.ai/v1/systemone"
+
+
+def judge_support(
+    statement: str, quote: str, context: dict
+) -> Literal["supported", "doubtful", "unjudged"]:
+    api_key = os.environ.get("TYPESAFE_API_KEY")
+    if not api_key:
+        raise RuntimeError("TYPESAFE_API_KEY が設定されていません")
+
+    payload = json.dumps({
+        "state": {"statement": statement, "quote": quote, "context": context},
+        "model": "jev-latest",
+        "questions": {
+            "support": {
+                "type": "noul",
+                "instructions": (
+                    "`quote` の年・地域・指標が `statement` の主張と対応しているか判定する。"
+                    "数値そのものの一致は判定しない。"
+                ),
+                "criteria": {
+                    "true": "抜粋の年・地域・指標が主張と対応している",
+                    "false": "年・地域・指標のいずれかが異なる、または対応を確認できない",
+                },
+            }
+        },
+    }).encode()
+    request = Request(
+        API_URL,
+        data=payload,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            probability = json.load(response)["answers"]["support"]["noul"]
+        if isinstance(probability, bool) or not isinstance(probability, (int, float)):
+            raise ValueError("noul が数値ではありません")
+        if not 0 <= probability <= 1:
+            raise ValueError(f"noul が確率の範囲外です: {probability}")
+    except HTTPError as exc:
+        raise RuntimeError(
+            f"Jevの判定に失敗しました: {exc} {exc.read().decode(errors='replace')}"
+        ) from exc
+    except (KeyError, TypeError, ValueError, OSError, URLError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Jevの判定に失敗しました: {exc}") from exc
+    return "supported" if probability >= 0.5 else "doubtful"
 
 
 def judge_candidates(
