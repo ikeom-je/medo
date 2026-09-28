@@ -31,9 +31,9 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
    候補にして繰り返す。`diminishing_returns` で打ち切り、`judge: unavailable` なら
    **選別が効いていないと報告する**。国の施策は `--depth deep` で一次資料まで辿る。
 
-4. 効いたファクトを保存する。数値は出典に忠実に転記し加工しない。`--quote` は出典本文をそのまま写した、数値を含む最小の一文(表なら単位見出しを含める)。拒否されたらエラーの「次の手」に従う(ヒアリング由来は `--kind company --source "ヒアリング(<日付> <相手>)"`、`--quote` 不要):
+4. 効いたファクトを保存する。数値は出典に忠実に転記し加工しない。`--quote` は出典本文をそのまま写した最小の一文(`--value` を付けるならその数値を含め、表なら単位見出しも含める。定性ファクトは `--value` / `--unit` を省く)。拒否されたらエラーの「次の手」で直して再実行し、解決しなければエラーをそのまま報告する(ヒアリング由来は `--kind company --source "ヒアリング(<日付> <相手>)"` で `--quote` 不要):
 
-       medo facts save --project <id> --kind <market|policy|trend|company> \
+       medo facts save --project <id> --kind <market|policy|trend> \
          --statement "<出典の記述に忠実な一文>" --source <出典URL> \
          --value <数値> --unit <単位> --retrieved <YYYY-MM-DD> --quote "<原文の一文>"
 

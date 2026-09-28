@@ -26,7 +26,8 @@ def fetch_body(url: str, *, opener=None, timeout: int = 15) -> FetchResult:
         if not raw:
             return FetchResult(reason="本文が空です")
         # 行政サイトのPDFは application/octet-stream で返ることが多く、Content-Type だけでは漏れる。
-        if content_type == "application/pdf" or raw.startswith(b"%PDF"):
+        # 先頭にBOM・改行が付くものもあるため、ヘッダは先頭1024バイト内で探す(PDF仕様の許容範囲)。
+        if content_type in ("application/pdf", "application/x-pdf") or b"%PDF" in raw[:1024]:
             body = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(raw)).pages)
         elif content_type in ("text/html", "application/xhtml+xml"):
             body = trafilatura.extract(raw)

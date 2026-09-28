@@ -95,3 +95,43 @@ def test_fetch_reports_timeout_and_url_error():
 
     assert "timed out" in fetch_body("https://example.com", opener=timeout).reason
     assert "unavailable" in fetch_body("https://example.com", opener=unavailable).reason
+
+
+def _text_pdf(text: bytes) -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=200, height=200)
+    font = DictionaryObject({NameObject("/Type"): NameObject("/Font"),
+                             NameObject("/Subtype"): NameObject("/Type1"),
+                             NameObject("/BaseFont"): NameObject("/Helvetica")})
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)})
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(b"BT /F1 12 Tf 20 100 Td (" + text + b") Tj ET")
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+@pytest.mark.parametrize("prefix", [b"\xef\xbb\xbf", b"\r\n  "])
+def test_fetch_finds_pdf_header_after_leading_bytes(prefix):
+    raw = prefix + _text_pdf(b"leading bytes evidence")
+    result = fetch_body("https://example.com/a", opener=_opener(raw, "application/octet-stream"))
+    assert result.body and "leading bytes evidence" in result.body
+
+
+def test_fetch_reports_pdf_without_text_as_empty_body():
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    output = BytesIO()
+    writer.write(output)
+    result = fetch_body("https://example.com/a.pdf", opener=_opener(output.getvalue(),
+                                                                      "application/pdf"))
+    assert result.body is None and "空本文" in result.reason
+
+
+def test_fetch_reports_broken_pdf_as_fetch_failure():
+    result = fetch_body("https://example.com/a.pdf",
+                        opener=_opener(b"%PDF-1.7 broken", "application/pdf"))
+    assert result.body is None and result.reason
