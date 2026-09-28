@@ -1,5 +1,5 @@
 import pytest
-from medo_core.facts import Fact
+from medo_core.facts import Fact, Verification
 from medo_core.fermi import FermiModel, FermiVar, evaluate
 from pydantic import ValidationError
 
@@ -13,6 +13,7 @@ def _fact(**kw) -> Fact:
         unit="人",
         source="https://www.jnto.go.jp/statistics/",
         retrieved="2026-07-01",
+        verification=Verification(status="unverified"),
     )
     base.update(kw)
     return Fact(**base)
@@ -32,6 +33,26 @@ def test_evaluate_mixes_facts_and_assumptions():
     assert result.value == 36870000.0 * 0.8 * 5000.0
     assert result.cited_facts == ["fact-1"]
     assert result.resolved["dining_rate"] == 0.8
+    assert result.unverified_facts == ["fact-1"]
+
+
+def test_evaluate_reports_verification_flags():
+    model = FermiModel(name="根拠", variables={
+        "a": FermiVar(fact="fact-1"), "b": FermiVar(fact="fact-2"),
+        "c": FermiVar(fact="fact-3"), "d": FermiVar(fact="fact-4"),
+    }, formula="a+b+c+d")
+    facts = {
+        "fact-1": _fact().model_copy(update={"verification": Verification(status="legacy")}),
+        "fact-2": _fact(fact_id="fact-2", quote="3人", value=3,
+                        verification=Verification(status="verified", support="doubtful")),
+        "fact-3": _fact(fact_id="fact-3", kind="company", source="ヒアリング", value=4,
+                        verification=Verification(status="not-applicable")),
+        "fact-4": _fact(fact_id="fact-4", value=5,
+                        verification=Verification(status="unverified")),
+    }
+    result = evaluate(model, facts)
+    assert result.unverified_facts == ["fact-1", "fact-4"]
+    assert result.doubtful_facts == ["fact-2"]
 
 
 def test_power_operator_enables_cagr():

@@ -10,7 +10,7 @@ from typing import Literal
 import typer
 import yaml
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta, RejectedOption
-from medo_core.facts import Fact, FactStore
+from medo_core.facts import Fact, FactStore, Verification
 from medo_core.fermi import FermiModel, evaluate
 from medo_cli.commands import research as research_commands
 from medo_cli.commands import templates as template_commands
@@ -370,6 +370,11 @@ def facts_save(
             source=source,
             retrieved=retrieved or date.today().isoformat(),
             note=note,
+            verification=Verification(
+                status="not-applicable" if kind == "company" else "unverified",
+                reason="" if kind == "company" else "pre-verification-cli",
+                checked=date.today().isoformat(),
+            ),
         )
     except Exception as e:
         _fail(f"ファクトのスキーマ不正: {e}")
@@ -384,7 +389,14 @@ def facts_list(
 ):
     facts = FactStore(get_storage()).list(project)
     if format == "json":
-        payload = [{"fact": f.model_dump(mode="json"), "stale": f.is_stale()} for f in facts]
+        payload = [
+            {
+                "fact": f.model_dump(mode="json"),
+                "stale": f.is_stale(),
+                "verification": f.verification.model_dump(mode="json"),
+            }
+            for f in facts
+        ]
         typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     if not facts:
@@ -392,7 +404,13 @@ def facts_list(
         return
     for f in facts:
         stale = " [STALE]" if f.is_stale() else ""
-        typer.echo(f"{f.fact_id} [{f.kind}]{stale} {f.statement} (出典: {f.source}, {f.retrieved})")
+        verification = f.verification
+        flag = ""
+        if verification.status in ("unverified", "legacy"):
+            flag = f" [{verification.status.upper()}]"
+        elif verification.status == "verified" and verification.support == "doubtful":
+            flag = " [DOUBTFUL]"
+        typer.echo(f"{f.fact_id} [{f.kind}]{stale}{flag} {f.statement} (出典: {f.source}, {f.retrieved})")
 
 
 @artifacts_app.command("save")
@@ -512,6 +530,12 @@ def fermi_calc(
     artifact_id = ArtifactStore(storage).save(project, artifact)
     typer.echo(f"saved: {artifact_id}")
     typer.echo(f"{result.name} = {result.value}")
+    if result.unverified_facts or result.doubtful_facts:
+        typer.echo(
+            "warning: 出典の検証状態を確認してください "
+            f"(unverified: {', '.join(result.unverified_facts)}; "
+            f"doubtful: {', '.join(result.doubtful_facts)})"
+        )
 
 
 def main() -> None:
