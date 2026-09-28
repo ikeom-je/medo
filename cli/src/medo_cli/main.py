@@ -11,6 +11,7 @@ import typer
 import yaml
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta, RejectedOption
 from medo_core.facts import Fact, FactStore, Verification
+from medo_core.source_check import check, verify_fact
 from medo_core.fermi import FermiModel, evaluate
 from medo_cli.commands import research as research_commands
 from medo_cli.commands import templates as template_commands
@@ -28,6 +29,8 @@ from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.status import project_status, stale_artifact_ids
 from medo_core.workflow import WorkflowRecorder
 from medo_cli.trace import Tracer
+from medo_cli.fetch import fetch_body
+from medo_cli.jev import judge_support
 
 app = typer.Typer(no_args_is_help=True, help="Medo(目処) — クラウド非依存の上流工程Agent CLI")
 requirements_app = typer.Typer(no_args_is_help=True)
@@ -360,7 +363,14 @@ def facts_save(
     unit: str = typer.Option(""),
     retrieved: str | None = typer.Option(None, help="取得日 YYYY-MM-DD(省略時は今日)"),
     note: str = typer.Option(""),
+    quote: str = typer.Option("", help="出典本文から写した原文抜粋"),
+    unverifiable_reason: str | None = typer.Option(None, help="目視確認済みだが照合できない理由"),
 ):
+    if kind in ("market", "policy", "trend") and not quote.strip():
+        _fail("market/policy/trend には --quote が必須です")
+    if unverifiable_reason is not None and not unverifiable_reason.strip():
+        _fail("--unverifiable-reason には理由を指定してください")
+    today = date.today().isoformat()
     try:
         fact = Fact(
             kind=kind,
@@ -368,16 +378,58 @@ def facts_save(
             value=value,
             unit=unit,
             source=source,
-            retrieved=retrieved or date.today().isoformat(),
+            retrieved=retrieved or today,
             note=note,
-            verification=Verification(
-                status="not-applicable" if kind == "company" else "unverified",
-                reason="" if kind == "company" else "pre-verification-cli",
-                checked=date.today().isoformat(),
-            ),
+            quote=quote,
+            verification=Verification(status="not-applicable") if kind == "company" else None,
         )
     except Exception as e:
         _fail(f"ファクトのスキーマ不正: {e}")
+    if kind != "company":
+        if unverifiable_reason is not None:
+            fact = fact.model_copy(update={
+                "verification": Verification(
+                    status="unverified", reason=f"declared: {unverifiable_reason}", checked=today
+                )
+            })
+        else:
+            fetched = fetch_body(source)
+            if fetched.body is None:
+                fact = fact.model_copy(update={
+                    "verification": Verification(
+                        status="unverified", reason=f"fetch-failed: {fetched.reason}",
+                        checked=today,
+                    )
+                })
+                typer.echo(f"warning: 出典本文を取得できません: {fetched.reason}", err=True)
+            else:
+                result = check(quote, fetched.body, value, unit)
+                if not result.verified:
+                    cause = ("抜粋が出典本文に見つかりません" if result.reason == "quote-not-found"
+                             else "抜粋中に主張値と一致する数値が見つかりません")
+                    nearby = result.nearby or "(候補なし)"
+                    _fail(
+                        f"{cause}(本文 {len(fetched.body):,} 文字を取得)\n"
+                        f"  本文中の近い箇所: 「…{nearby}…」\n"
+                        "  次の手: (1) 抜粋を本文どおりに写し直す\n"
+                        "          (2) 出典の数値自体が違う → 転記を見直す\n"
+                        "          (3) 抽出テキストの文字化け・欠落が疑われ、"
+                        "目視で出典に書かれていると確認できた\n"
+                        "              → --unverifiable-reason \"抽出不良: <状況>\" を付けて再実行"
+                    )
+                fact = verify_fact(fact, fetched.body, checked=today)
+                try:
+                    support = judge_support(statement, quote, {
+                        "kind": kind, "source": source, "retrieved": fact.retrieved,
+                    })
+                except Exception as exc:
+                    support = "unjudged"
+                    typer.echo(f"warning: Jevの補助判定ができません: {exc}", err=True)
+                if support == "doubtful":
+                    typer.echo("warning: 抜粋の年・地域・指標が主張を支えるか要確認です", err=True)
+                fact = fact.model_copy(update={
+                    "verification": fact.verification.model_copy(update={"support": support})
+                })
     fact_id = FactStore(get_storage()).save(project, fact)
     typer.echo(f"saved: {fact_id}")
 

@@ -31,11 +31,11 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
    候補にして繰り返す。`diminishing_returns` で打ち切り、`judge: unavailable` なら
    **選別が効いていないと報告する**。国の施策は `--depth deep` で一次資料まで辿る。
 
-4. 効いたファクトを保存する。数値は出典に忠実に転記し加工しない(ヒアリング由来は `--kind company --source "ヒアリング(<日付> <相手>)"`):
+4. 効いたファクトを保存する。数値は出典に忠実に転記し加工しない。`--quote` は出典本文をそのまま写した、数値を含む最小の一文(表なら単位見出しを含める)。拒否されたらエラーの「次の手」に従う(ヒアリング由来は `--kind company --source "ヒアリング(<日付> <相手>)"`、`--quote` 不要):
 
        medo facts save --project <id> --kind <market|policy|trend|company> \
          --statement "<出典の記述に忠実な一文>" --source <出典URL> \
-         --value <数値> --unit <単位> --retrieved <YYYY-MM-DD>
+         --value <数値> --unit <単位> --retrieved <YYYY-MM-DD> --quote "<原文の一文>"
 
 5. 要件の雛形を埋める(既存案件は `requirements get --format json` の出力を編集。
    **既存ノードの id は書き換えない**):
@@ -77,4 +77,4 @@ description: 業界・ビジネス状況・現場の実態をヒアリングと�
 
 - 開始時と終了時に `medo status --view summary` を実行し、`actions`(案件が未作成なら `next_step`)をユーザーに報告する。詳しい理由が要るときだけ `--view readiness` を追加で呼ぶ
 - CLIが失敗したら推測で補完せず、エラー内容をそのまま報告する
-- stale・未確認(`confidence: assumed` / `open`)・仮説の項目を引用するときは、その旨を明記する
+- stale・未確認(`confidence: assumed` / `open`)・仮説の項目、および出典未検証(`[UNVERIFIED]` / `[LEGACY]`)・`[DOUBTFUL]` のファクトとそれを使った fermi 結果(`warning:` 行)を引用するときは、その旨を明記する

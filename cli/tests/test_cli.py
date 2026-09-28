@@ -251,14 +251,19 @@ def test_research_triage_returns_unjudged_candidates_when_typesafe_is_unavailabl
     assert "https://example.com" in result.output
 
 
-def test_facts_save_and_list_with_stale_flag(medo_home: Path):
+def test_facts_save_and_list_with_stale_flag(medo_home: Path, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(body="訪日外国人旅行者数 3,687万人"))
+    monkeypatch.setattr(main, "judge_support", lambda *_: "supported")
     result = runner.invoke(
         app,
         [
             "facts", "save", "--project", "yoyaku", "--kind", "market",
             "--statement", "訪日外国人旅行者数 3,687万人", "--value", "36870000",
             "--unit", "人", "--source", "https://www.jnto.go.jp/statistics/",
-            "--retrieved", "2020-01-01",
+            "--retrieved", "2020-01-01", "--quote", "訪日外国人旅行者数 3,687万人",
         ],
     )
     assert result.exit_code == 0 and "fact-1" in result.output
@@ -266,12 +271,11 @@ def test_facts_save_and_list_with_stale_flag(medo_home: Path):
     result = runner.invoke(app, ["facts", "list", "--project", "yoyaku", "--format", "json"])
     items = json.loads(result.output)
     assert items[0]["fact"]["fact_id"] == "fact-1"
-    assert items[0]["fact"]["verification"]["status"] == "unverified"
-    assert items[0]["verification"]["status"] == "unverified"
-    assert items[0]["fact"]["verification"]["reason"] == "pre-verification-cli"
+    assert items[0]["fact"]["verification"]["status"] == "verified"
+    assert items[0]["verification"]["support"] == "supported"
     assert items[0]["stale"] is True
     digest = runner.invoke(app, ["facts", "list", "--project", "yoyaku"])
-    assert "[UNVERIFIED]" in digest.output
+    assert "[STALE]" in digest.output
 
 
 def test_facts_digest_marks_legacy_and_doubtful(medo_home: Path):
@@ -290,7 +294,10 @@ def test_facts_digest_marks_legacy_and_doubtful(medo_home: Path):
     assert "fact-2 [market] [DOUBTFUL]" in result.output
 
 
-def test_company_save_is_not_applicable(medo_home: Path):
+def test_company_save_is_not_applicable(medo_home: Path, monkeypatch):
+    from medo_cli import main
+
+    monkeypatch.setattr(main, "fetch_body", lambda *_: pytest.fail("company は取得しない"))
     result = runner.invoke(app, [
         "facts", "save", "--project", "yoyaku", "--kind", "company",
         "--statement", "月間予約数", "--source", "ヒアリング",
@@ -310,6 +317,99 @@ def test_facts_save_rejects_non_url_source_for_market(medo_home: Path):
     )
     assert result.exit_code == 1
     assert "error:" in result.output
+
+
+def test_facts_save_requires_quote_for_url_kind(medo_home: Path):
+    result = runner.invoke(app, [
+        "facts", "save", "--project", "yoyaku", "--kind", "market",
+        "--statement", "市場規模", "--source", "https://example.com",
+    ])
+    assert result.exit_code != 0 and "--quote" in result.output
+
+
+def test_facts_save_declared_unverifiable_skips_fetch(medo_home: Path, monkeypatch):
+    from medo_cli import main
+
+    monkeypatch.setattr(main, "fetch_body", lambda *_: pytest.fail("取得しない"))
+    result = runner.invoke(app, [
+        "facts", "save", "--project", "yoyaku", "--kind", "policy",
+        "--statement", "政策を公表", "--source", "https://example.com",
+        "--quote", "政策を公表", "--unverifiable-reason", "PDF抽出不良",
+    ])
+    assert result.exit_code == 0, result.output
+    saved = FactStore(LocalJsonStorage(medo_home)).list("yoyaku")[0]
+    assert saved.verification.reason == "declared: PDF抽出不良"
+
+
+def test_facts_save_rejects_empty_unverifiable_reason(medo_home: Path):
+    result = runner.invoke(app, [
+        "facts", "save", "--project", "yoyaku", "--kind", "policy",
+        "--statement", "政策を公表", "--source", "https://example.com",
+        "--quote", "政策を公表", "--unverifiable-reason", " ",
+    ])
+    assert result.exit_code != 0 and "--unverifiable-reason" in result.output
+
+
+def test_facts_save_fetch_failure_warns_and_saves_unverified(medo_home: Path, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(reason="HTTP 403"))
+    result = runner.invoke(app, [
+        "facts", "save", "--project", "yoyaku", "--kind", "trend",
+        "--statement", "市場拡大", "--source", "https://example.com", "--quote", "市場拡大",
+    ])
+    assert result.exit_code == 0 and "warning:" in result.output
+    saved = FactStore(LocalJsonStorage(medo_home)).list("yoyaku")[0]
+    assert saved.verification.reason == "fetch-failed: HTTP 403"
+
+
+def test_facts_save_rejects_mismatched_quote_with_remedy(medo_home: Path, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(body="市場規模は3.3兆円(2024年)"))
+    result = runner.invoke(app, [
+        "facts", "save", "--project", "yoyaku", "--kind", "market",
+        "--statement", "市場規模は3.2兆円", "--value", "3.2", "--unit", "兆円",
+        "--source", "https://example.com", "--quote", "市場規模は3.2兆円(2024年)",
+    ])
+    assert result.exit_code != 0
+    assert "本文" in result.output and "近い箇所" in result.output
+    assert "--unverifiable-reason" in result.output
+    assert FactStore(LocalJsonStorage(medo_home)).list("yoyaku") == []
+
+
+def test_facts_save_warns_for_doubtful_and_unjudged(medo_home: Path, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(body="市場規模は3.2兆円"))
+    args = ["facts", "save", "--project", "yoyaku", "--kind", "market",
+            "--statement", "市場規模は3.2兆円", "--value", "3.2", "--unit", "兆円",
+            "--source", "https://example.com", "--quote", "市場規模は3.2兆円"]
+    monkeypatch.setattr(main, "judge_support", lambda *_: "doubtful")
+    doubtful = runner.invoke(app, args)
+    assert doubtful.exit_code == 0 and "warning:" in doubtful.output
+    monkeypatch.setattr(main, "judge_support", lambda *_: (_ for _ in ()).throw(RuntimeError("timeout")))
+    unjudged = runner.invoke(app, args)
+    assert unjudged.exit_code == 0 and "timeout" in unjudged.output
+    facts = FactStore(LocalJsonStorage(medo_home)).list("yoyaku")
+    assert [fact.verification.support for fact in facts] == ["doubtful", "unjudged"]
+
+
+def test_facts_save_rejects_value_missing_from_matching_quote(medo_home: Path, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(body="市場規模は3.3兆円"))
+    result = runner.invoke(app, [
+        "facts", "save", "--project", "yoyaku", "--kind", "market",
+        "--statement", "市場規模は3.2兆円", "--value", "3.2", "--unit", "兆円",
+        "--source", "https://example.com", "--quote", "市場規模は3.3兆円",
+    ])
+    assert result.exit_code != 0
+    assert "一致する数値" in result.output and "--unverifiable-reason" in result.output
 
 
 def test_artifacts_list_empty_and_after_save(medo_home: Path):
@@ -453,14 +553,18 @@ def test_artifacts_save_records_covered_challenges(tmp_path):
     assert result.exit_code == 0
 
 
-def test_fermi_calc_saves_artifact_and_recalcs(medo_home: Path):
+def test_fermi_calc_saves_artifact_and_recalcs(medo_home: Path, monkeypatch):
     _save_requirements(medo_home)
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(reason="HTTP 403"))
     runner.invoke(
         app,
         [
             "facts", "save", "--project", "yoyaku", "--kind", "market",
             "--statement", "訪日客数", "--value", "36870000",
-            "--source", "https://www.jnto.go.jp/statistics/",
+            "--source", "https://www.jnto.go.jp/statistics/", "--quote", "訪日客数 36870000人",
         ],
     )
     model = medo_home / "model.yaml"
@@ -791,6 +895,55 @@ def test_jev_state_carries_the_project_so_relevance_can_be_judged(monkeypatch):
     jev.judge_candidates([], {"policy": "国の施策"}, {"goal": "生産計画の自動化"})
 
     assert sent["body"]["state"]["project"] == {"goal": "生産計画の自動化"}
+
+
+def test_jev_support_uses_one_noul_and_threshold(monkeypatch):
+    import medo_cli.jev as jev
+
+    sent = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return json.dumps({"answers": {"support": {"noul": 0.5}}}).encode()
+
+    def fake_urlopen(request, timeout):
+        sent["body"] = json.loads(request.data)
+        sent["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", fake_urlopen)
+    assert jev.judge_support("2024年の市場", "2024年の市場", {"kind": "market"}) == "supported"
+    assert list(sent["body"]["questions"]) == ["support"]
+    assert sent["body"]["questions"]["support"]["type"] == "noul"
+    assert sent["timeout"] == 10
+
+    class DoubtfulResponse(Response):
+        def read(self):
+            return json.dumps({"answers": {"support": {"noul": 0.49}}}).encode()
+
+    monkeypatch.setattr(jev, "urlopen", lambda *args, **kwargs: DoubtfulResponse())
+    assert jev.judge_support("主張", "抜粋", {}) == "doubtful"
+
+
+def test_jev_support_failure_is_reportable(monkeypatch):
+    import medo_cli.jev as jev
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="TYPESAFE_API_KEY"):
+        jev.judge_support("主張", "抜粋", {})
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        TimeoutError("timed out")))
+    with pytest.raises(RuntimeError, match="timed out"):
+        jev.judge_support("主張", "抜粋", {})
 
 
 def test_research_plan_digest_renders_every_field(medo_home: Path):

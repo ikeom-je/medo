@@ -81,4 +81,4 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
 
 - 開始時と終了時に `medo status --view summary` を実行し、`actions` をユーザーに報告する。詳しい理由が要るときだけ `--view readiness` を追加で呼ぶ
 - CLIが失敗したら推測で補完せず、エラー内容をそのまま報告する
-- stale・未確認(`confidence: assumed` / `open`)・仮説の項目を引用するときは、その旨を明記する
+- stale・未確認(`confidence: assumed` / `open`)・仮説の項目、および出典未検証(`[UNVERIFIED]` / `[LEGACY]`)・`[DOUBTFUL]` のファクトとそれを使った fermi 結果(`warning:` 行)を引用するときは、その旨を明記する
