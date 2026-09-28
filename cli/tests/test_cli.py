@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 from medo_cli.main import app
+from medo_core.facts import Fact, FactStore, Verification
+from medo_core.storage import LocalJsonStorage
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -264,7 +266,38 @@ def test_facts_save_and_list_with_stale_flag(medo_home: Path):
     result = runner.invoke(app, ["facts", "list", "--project", "yoyaku", "--format", "json"])
     items = json.loads(result.output)
     assert items[0]["fact"]["fact_id"] == "fact-1"
+    assert items[0]["fact"]["verification"]["status"] == "unverified"
+    assert items[0]["verification"]["status"] == "unverified"
+    assert items[0]["fact"]["verification"]["reason"] == "pre-verification-cli"
     assert items[0]["stale"] is True
+    digest = runner.invoke(app, ["facts", "list", "--project", "yoyaku"])
+    assert "[UNVERIFIED]" in digest.output
+
+
+def test_facts_digest_marks_legacy_and_doubtful(medo_home: Path):
+    storage = LocalJsonStorage(medo_home)
+    storage.put("projects/yoyaku/facts/fact-1", {
+        "fact_id": "fact-1", "kind": "market", "statement": "旧データ",
+        "source": "https://example.com", "retrieved": "2026-07-01",
+    })
+    FactStore(storage).save("yoyaku", Fact(
+        fact_id="fact-2", kind="market", statement="要確認データ", quote="3人",
+        source="https://example.com", retrieved="2026-07-01",
+        verification=Verification(status="verified", support="doubtful"),
+    ))
+    result = runner.invoke(app, ["facts", "list", "--project", "yoyaku"])
+    assert "fact-1 [market] [LEGACY]" in result.output
+    assert "fact-2 [market] [DOUBTFUL]" in result.output
+
+
+def test_company_save_is_not_applicable(medo_home: Path):
+    result = runner.invoke(app, [
+        "facts", "save", "--project", "yoyaku", "--kind", "company",
+        "--statement", "月間予約数", "--source", "ヒアリング",
+    ])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(app, ["facts", "list", "--project", "yoyaku", "--format", "json"])
+    assert json.loads(result.output)[0]["verification"]["status"] == "not-applicable"
 
 
 def test_facts_save_rejects_non_url_source_for_market(medo_home: Path):
@@ -436,6 +469,12 @@ def test_fermi_calc_saves_artifact_and_recalcs(medo_home: Path):
     result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--file", str(model)])
     assert result.exit_code == 0, result.output
     assert "fermi-v1" in result.output and "29496000" in result.output
+    assert "warning:" in result.output and "fact-1" in result.output
+
+    saved = runner.invoke(app, ["artifacts", "get", "--project", "yoyaku", "--id", "fermi-v1"])
+    content = json.loads(json.loads(saved.output)["content"])
+    assert content["result"]["unverified_facts"] == ["fact-1"]
+    assert content["result"]["doubtful_facts"] == []
 
     result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--from-artifact", "fermi-v1"])
     assert result.exit_code == 0 and "fermi-v2" in result.output

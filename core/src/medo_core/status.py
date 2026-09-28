@@ -119,7 +119,7 @@ def _empty_status(project_id: str) -> dict:
     return {
         "project": project_id,
         "requirements": None,
-        "facts": {"count": 0, "stale": 0},
+        "facts": {"count": 0, "stale": 0, "unverified": 0, "legacy": 0},
         "artifacts": [],
         "next_step": "hearing",
     }
@@ -174,6 +174,8 @@ def _phase1_fields(
         "facts": {
             "count": len(facts),
             "stale": sum(1 for f in facts if f.is_stale(today=today)),
+            "unverified": sum(1 for f in facts if f.verification.status == "unverified"),
+            "legacy": sum(1 for f in facts if f.verification.status == "legacy"),
         },
         "artifacts": artifact_rows,
         "next_step": next_step,

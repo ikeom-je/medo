@@ -10,7 +10,7 @@ from medo_core.events import (
     StakeholderResponded,
 )
 from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
-from medo_core.facts import Fact, FactStore
+from medo_core.facts import Fact, FactStore, Verification
 from medo_core.nodes import AsIs, Challenge, Gap, Stakeholder, ToBe
 from medo_core.requirements import (
     FunctionalRequirement,
@@ -82,6 +82,7 @@ def _project_with_both_slide_kinds(tmp_path, stale_discussion=False):
         FactStore(storage).save("p1", Fact(
             fact_id="fact-1", kind="market", statement="旧い根拠", value=1.0,
             source="https://example.com/", retrieved="2020-01-01",
+            verification=Verification(status="unverified"),
         ))
         cited_facts = ["fact-1"]
     artifacts.save("p1", Artifact(
@@ -178,6 +179,7 @@ def _phase_project(tmp_path, *, prfaq=False, final=False, signoff=False):
             FactStore(storage).save("p1", Fact(
                 fact_id="fact-1", kind="market", statement="旧い根拠", value=1.0,
                 source="https://example.com/", retrieved="2020-01-01",
+                verification=Verification(status="unverified"),
             ))
             cited_facts = ["fact-1"]
         artifacts.save("p1", Artifact(
@@ -245,6 +247,7 @@ def test_stale_cited_fact_triggers_regenerate(tmp_path):
     FactStore(s).save("yoyaku", Fact(
         fact_id="fact-1", kind="market", statement="訪日客数", value=1.0,
         source="https://example.com/", retrieved="2025-01-01",
+        verification=Verification(status="unverified"),
     ))
     ArtifactStore(s).save("yoyaku", _mini(cited_facts=["fact-1"]))
     assert project_status(s, "yoyaku", tmp_path / "knowledge", today=TODAY)["next_step"] == "regenerate-stale-artifacts"
@@ -484,6 +487,23 @@ def test_summary_view_keeps_phase1_compatibility_fields(tmp_path):
     status = project_status(_project(tmp_path), "p1", tmp_path)
 
     assert set(status) >= {"requirements", "facts", "artifacts", "next_step"}
+
+
+def test_status_counts_unverified_and_legacy_facts(tmp_path):
+    storage = _project(tmp_path)
+    store = FactStore(storage)
+    store.save("p1", Fact(kind="market", statement="未検証", source="https://example.com",
+                          retrieved="2026-07-01", verification=Verification(status="unverified")))
+    storage.put("projects/p1/facts/fact-2", {
+        "fact_id": "fact-2", "kind": "market", "statement": "旧データ",
+        "source": "https://example.com", "retrieved": "2026-07-01",
+    })
+    assert project_status(storage, "p1", tmp_path)["facts"] == {
+        "count": 2, "stale": 0, "unverified": 1, "legacy": 1,
+    }
+    assert project_status(LocalJsonStorage(tmp_path / "empty"), "none")["facts"] == {
+        "count": 0, "stale": 0, "unverified": 0, "legacy": 0,
+    }
 
 
 def test_compat_artifact_list_stays_keyed_by_type(tmp_path):

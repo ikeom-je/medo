@@ -35,6 +35,8 @@ class FermiResult(BaseModel):
     value: float
     resolved: dict[str, float]
     cited_facts: list[str] = Field(default_factory=list)
+    unverified_facts: list[str] = Field(default_factory=list)
+    doubtful_facts: list[str] = Field(default_factory=list)
 
 
 def _safe_eval(node: ast.AST, names: dict[str, float]) -> float:
@@ -73,6 +75,8 @@ def _safe_eval(node: ast.AST, names: dict[str, float]) -> float:
 def evaluate(model: FermiModel, facts: dict[str, Fact]) -> FermiResult:
     resolved: dict[str, float] = {}
     cited: list[str] = []
+    unverified: list[str] = []
+    doubtful: list[str] = []
     for name, var in model.variables.items():
         if var.fact is not None:
             fact = facts.get(var.fact)
@@ -82,8 +86,18 @@ def evaluate(model: FermiModel, facts: dict[str, Fact]) -> FermiResult:
                 raise ValueError(f"ファクト {var.fact} に数値(value)がありません")
             resolved[name] = fact.value
             cited.append(var.fact)
+            verification = fact.verification
+            if verification and verification.status in ("unverified", "legacy"):
+                if var.fact not in unverified:
+                    unverified.append(var.fact)
+            if verification and verification.status == "verified" and verification.support == "doubtful":
+                if var.fact not in doubtful:
+                    doubtful.append(var.fact)
         else:
             resolved[name] = float(var.assume)  # _exactly_oneによりNoneでないことが保証される
     tree = ast.parse(model.formula, mode="eval")
     value = _safe_eval(tree, resolved)
-    return FermiResult(name=model.name, value=value, resolved=resolved, cited_facts=cited)
+    return FermiResult(
+        name=model.name, value=value, resolved=resolved, cited_facts=cited,
+        unverified_facts=unverified, doubtful_facts=doubtful,
+    )
