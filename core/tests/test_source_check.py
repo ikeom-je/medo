@@ -51,3 +51,5 @@ def test_unit_annotation_in_parentheses_is_ignored_for_matching():
     assert value_matches("F1 scores by up to 43.67%.", 43.67, "%(F1向上率)")
     assert value_matches("(単位:百万円)3,215,000", 3215000, "百万円（売上高）")
     assert not value_matches("F1 scores by up to 43.67%.", 43.6, "%(F1向上率)")
+    assert not value_matches("料金は5円/人", 5, "円/(kWh)(税込)")
+    assert not value_matches("5人", 5, "(%)")

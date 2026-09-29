@@ -83,7 +83,10 @@ def extract_numbers(quote: str) -> list[Number]:
 
 def _without_annotation(unit: str) -> str:
     # 保存済みの単位には「%(F1向上率)」のような注記が付くことがある。注記は出典の表記に現れない。
-    return re.sub(r"\(.*\)$", "", normalize(unit)).strip()
+    # 末尾の括弧書き1つだけを除く。単位本体の括弧(「円/(kWh)」)や括弧だけの単位(「(%)」)は残す。
+    unit = normalize(unit).strip()
+    stripped = re.sub(r"\([^()]*\)$", "", unit).strip()
+    return stripped or unit
 
 
 def _unit_parts(unit: str) -> tuple[int, str]:

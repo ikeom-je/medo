@@ -25,7 +25,7 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
          --source <出典URL> --retrieved <取得日YYYY-MM-DD> --quote "<原文の一文>"
 
    - **数値は出典に忠実に転記し、加工しない**(換算・集計が必要ならフェルミ推定で行う)。`--quote` は出典本文をそのまま写した最小の一文(`--value` を付けるならその数値を含め、表なら単位見出しも含める。定性ファクトは `--value` / `--unit` を省く)。拒否されたらエラーの「次の手」で直して再実行し、解決しなければエラーをそのまま報告する
-   - 既存ファクトを引用する前に `medo facts list --project <project-id>` で `[UNVERIFIED]` / `[LEGACY]` / `[DOUBTFUL]` を確かめる。`[LEGACY]` / `[UNVERIFIED]` は出典を読んで `medo facts verify --project <project-id> --fact <fact-id> --quote "<原文の一文>"` で再検証してから引用する(できなければ注記して引用する)
+   - 既存ファクトを引用する前に `medo facts list --project <project-id>` で `[UNVERIFIED]` / `[LEGACY]` / `[DOUBTFUL]` を確かめる。`[LEGACY]` / `[UNVERIFIED]` は出典を読んで `medo facts verify --project <project-id> --fact <fact-id> --quote "<原文の一文>"` で再検証し、出力が `verified:` のときだけ検証済みとして引用する(`unverified:` や拒否なら注記して引用する)
    - ヒアリング由来の個社情報は `--kind company --source "ヒアリング(<日付> <相手>)"` で保存する
    - 出典のないデータは保存も引用もしない
 
