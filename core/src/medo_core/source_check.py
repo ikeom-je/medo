@@ -81,8 +81,13 @@ def extract_numbers(quote: str) -> list[Number]:
     return numbers
 
 
+def _without_annotation(unit: str) -> str:
+    # 保存済みの単位には「%(F1向上率)」のような注記が付くことがある。注記は出典の表記に現れない。
+    return re.sub(r"\(.*\)$", "", normalize(unit)).strip()
+
+
 def _unit_parts(unit: str) -> tuple[int, str]:
-    unit = normalize(unit)
+    unit = _without_annotation(unit)
     for word in _MULTIPLIERS:
         if unit.startswith(word):
             return _MULTIPLIERS[word], unit[len(word):]
@@ -95,7 +100,7 @@ def value_matches(quote: str, value: float, unit: str) -> bool:
     target = value * unit_multiplier
     for number in extract_numbers(quote):
         if not number.multiplier and not number.suffix:
-            if len(declarations) == 1 and declarations[0] == normalize(unit):
+            if len(declarations) == 1 and declarations[0] == _without_annotation(unit):
                 if math.isclose(number.value, value, rel_tol=1e-9, abs_tol=0):
                     return True
             continue
