@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -195,6 +196,33 @@ def test_status_flow_next_steps(medo_home: Path):
     _save_requirements(medo_home)
     result = runner.invoke(app, ["status", "--project", "yoyaku"])
     assert json.loads(result.output)["next_step"] == "propose-options"
+
+
+def test_status_counts_facts_without_requirements(medo_home: Path, monkeypatch):
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 7, 12)
+
+    monkeypatch.setattr("medo_core.facts.date", FixedDate)
+    storage = LocalJsonStorage(medo_home)
+    FactStore(storage).save("yoyaku", Fact(
+        kind="market", statement="未検証", source="https://example.com",
+        retrieved="2026-07-01", verification=Verification(status="unverified"),
+    ))
+    storage.put("projects/yoyaku/facts/fact-2", {
+        "fact_id": "fact-2", "kind": "market", "statement": "旧データ",
+        "source": "https://example.com", "retrieved": "2025-01-01",
+    })
+
+    result = runner.invoke(app, ["status", "--project", "yoyaku", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["requirements"] is None
+    assert report["facts"] == {"count": 2, "stale": 1, "unverified": 1, "legacy": 1}
+    assert report["artifacts"] == []
+    assert report["next_step"] == "hearing"
 
 
 def test_status_readiness_view_includes_the_phase_judgement(medo_home: Path):
