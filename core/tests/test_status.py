@@ -208,6 +208,28 @@ def test_no_requirements_suggests_hearing(tmp_path):
     assert report["requirements"] is None and report["next_step"] == "hearing"
 
 
+def test_no_requirements_counts_saved_facts_including_unverified_and_legacy(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    FactStore(storage).save("yoyaku", Fact(
+        kind="market", statement="未検証", source="https://example.com",
+        retrieved="2026-07-01", verification=Verification(status="unverified"),
+    ))
+    storage.put("projects/yoyaku/facts/fact-2", {
+        "fact_id": "fact-2", "kind": "market", "statement": "旧データ",
+        "source": "https://example.com", "retrieved": "2025-01-01",
+    })
+
+    report = project_status(storage, "yoyaku", tmp_path / "knowledge", today=TODAY)
+
+    assert report == {
+        "project": "yoyaku",
+        "requirements": None,
+        "facts": {"count": 2, "stale": 1, "unverified": 1, "legacy": 1},
+        "artifacts": [],
+        "next_step": "hearing",
+    }
+
+
 def test_requirements_only_suggests_propose_options(tmp_path):
     s = LocalJsonStorage(tmp_path)
     RequirementsStore(s).save("yoyaku", _doc())

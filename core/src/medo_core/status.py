@@ -30,7 +30,7 @@ def project_status(
 ) -> dict:
     """現在地と次にできることを返す。診断は報告であって強制ではない。"""
     if RequirementsStore(storage).latest_version(project_id) == 0:
-        return _empty_status(project_id)
+        return _empty_status(storage, project_id, today)
 
     ctx = collect(
         storage,
@@ -114,14 +114,24 @@ def _summary(
     }
 
 
-def _empty_status(project_id: str) -> dict:
+def _empty_status(storage: Storage, project_id: str, today: date | None) -> dict:
     """要件が無い案件にフェーズ1互換の初期状態を返す。"""
     return {
         "project": project_id,
         "requirements": None,
-        "facts": {"count": 0, "stale": 0, "unverified": 0, "legacy": 0},
+        "facts": _fact_counts(storage, project_id, today),
         "artifacts": [],
         "next_step": "hearing",
+    }
+
+
+def _fact_counts(storage: Storage, project_id: str, today: date | None) -> dict:
+    facts = FactStore(storage).list(project_id)
+    return {
+        "count": len(facts),
+        "stale": sum(1 for fact in facts if fact.is_stale(today=today)),
+        "unverified": sum(1 for fact in facts if fact.verification.status == "unverified"),
+        "legacy": sum(1 for fact in facts if fact.verification.status == "legacy"),
     }
 
 
@@ -138,8 +148,6 @@ def _phase1_fields(
     counts = {"confirmed": 0, "assumed": 0, "open": 0}
     for item in [*doc.functional, *doc.principles, *doc.challenges]:
         counts[item.confidence] += 1
-
-    facts = FactStore(storage).list(ctx.project_id)
 
     current_artifacts = [
         (artifact_id, ctx.artifacts[artifact_id])
@@ -171,12 +179,7 @@ def _phase1_fields(
             "confidence_counts": counts,
             "open_questions": len(doc.open_questions),
         },
-        "facts": {
-            "count": len(facts),
-            "stale": sum(1 for f in facts if f.is_stale(today=today)),
-            "unverified": sum(1 for f in facts if f.verification.status == "unverified"),
-            "legacy": sum(1 for f in facts if f.verification.status == "legacy"),
-        },
+        "facts": _fact_counts(storage, ctx.project_id, today),
         "artifacts": artifact_rows,
         "next_step": next_step,
     }
