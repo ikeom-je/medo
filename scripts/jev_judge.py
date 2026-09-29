@@ -4,7 +4,7 @@
     python scripts/jev_judge.py triage <items.json>   # レビュー指摘の重大度・妥当性
     python scripts/jev_judge.py merge  <PR番号>        # 人間レビューを要するか(git.md step 7)
 
-items.json は [{"id": "...", "text": "..."}] 。triage は任意で "reviewer" を持てる。
+items.json は [{"id": "...", "text": "..."}] 。triage は任意で "reviewer" と "evidence" を持てる。
 各項目の質問は1リクエストに並べ、Jevが並列に答える。最終判断はオーケストレータが行う。
 """
 
@@ -102,37 +102,55 @@ def route(items: list[dict]) -> dict:
 
 def triage(items: list[dict], context: str) -> dict:
     questions = {}
-    for n, _ in enumerate(items):
-        questions[f"i{n}_severity"] = {
-            "type": "score",
-            "instructions": f"`items[{n}].text` のレビュー指摘が、放置した場合にどれだけ害があるか。",
-            "criteria": [
-                "文言・体裁の問題で、挙動や判断に影響しない",
-                "理解や保守を妨げるが、誤った結果は生まない",
-                "特定の条件で誤った結果・契約違反・データ不整合を生む",
-            ],
-        }
-        questions[f"i{n}_valid"] = {
+    for n, item in enumerate(items):
+        if item.get("evidence"):
+            questions[f"i{n}_premise"] = {
+                "type": "noul",
+                "instructions": (
+                    f"`items[{n}].text` が述べるコードの挙動は、"
+                    f"`items[{n}].evidence` のコードと一致するか。"
+                ),
+                "criteria": {
+                    "true": "指摘が前提とする挙動を、提示されたコードから確認できる",
+                    "false": (
+                        "指摘の前提がコードと食い違う。evidence に書かれていない挙動を"
+                        "仮定している場合も false"
+                    ),
+                },
+            }
+        questions[f"i{n}_in_scope"] = {
             "type": "noul",
             "instructions": (
-                f"`items[{n}].text` の指摘は、`context` に照らして事実として正しく、"
-                "かつこの変更の範囲で対処すべきものか。"
+                f"`items[{n}].text` の問題は、今回の変更(`context`)が招いた、"
+                "または今回直すべき問題か。"
             ),
             "criteria": {
-                "true": "指摘の前提が正しく、今回の変更が招いた・今回直すべき問題である",
-                "false": "前提の誤読、既に対処済み、範囲外の要望、または好みの問題",
+                "true": "今回の変更に起因する、または今回の変更範囲で修正すべき問題",
+                "false": "今回の変更範囲外の問題や新たな要望",
+            },
+        }
+        questions[f"i{n}_severity"] = {
+            "type": "choice",
+            "instructions": (
+                f"`items[{n}].text` が指摘する問題を、放置した場合の結果の種類で分類する。"
+            ),
+            "criteria": {
+                "wrong-result": "特定の入力で誤った判定・誤ったデータを保存または返す",
+                "contract": "CLI・Skill・保存スキーマの約束と食い違う",
+                "resource": "性能・メモリ・タイムアウトなど資源の問題を起こす",
+                "minor": "表示・文言・保守性のみの問題で、結果は変わらない",
             },
         }
     answers = ask({"items": items, "context": context}, questions)
     result = {}
     for n, item in enumerate(items):
         severity = answers[f"i{n}_severity"]
-        levels = len(severity.get("legend") or {}) or len(severity.get("probabilities") or {})
-        if levels < 2:
-            raise JudgeError(f"score の水準数が不正です: {levels}")
         result[item["id"]] = {
-            "severity": min(1.0, max(0.0, severity["score"] / (levels - 1))),
-            "valid": answers[f"i{n}_valid"]["noul"],
+            "premise": answers[f"i{n}_premise"]["noul"] if item.get("evidence") else None,
+            "in_scope": answers[f"i{n}_in_scope"]["noul"],
+            "severity": severity["choice"],
+            "severity_confidence": severity["confidence"],
+            "severity_probabilities": severity["probabilities"],
         }
     return result
 
