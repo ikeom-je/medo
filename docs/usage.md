@@ -217,6 +217,7 @@ medo checkpoint answer --project <id> --responds-to ev-1 --answer generate --foc
 medo facts save --project <id> --kind market --statement "<出典に忠実な一文>" \
   --source <URL> --quote "<出典本文から写した数値と単位を含む原文抜粋>" \
   --value 1234 --unit 億円 --retrieved 2026-09-01
+medo facts verify --project <id> --fact fact-1 --quote "<出典本文から写した原文抜粋>"
 medo facts list --project <id>
 medo fermi calc --project <id> --file /tmp/model.yaml
 medo knowledge index                  # 何がどれだけあるか(件数・stale件数)

@@ -440,6 +440,134 @@ def test_facts_save_rejects_value_missing_from_matching_quote(medo_home: Path, m
     assert "一致する数値" in result.output and "--unverifiable-reason" in result.output
 
 
+def test_facts_verify_legacy_preserves_fact_data(medo_home: Path, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    storage = LocalJsonStorage(medo_home)
+    original = {
+        "fact_id": "fact-1", "kind": "market", "statement": "市場規模は3.2兆円",
+        "value": 3.2, "unit": "兆円", "source": "https://example.com",
+        "retrieved": "2026-07-01", "note": "旧データ",
+    }
+    storage.put("projects/yoyaku/facts/fact-1", original)
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(body="市場規模は3.2兆円"))
+    monkeypatch.setattr(main, "judge_support", lambda *_: "supported")
+
+    result = runner.invoke(app, [
+        "facts", "verify", "--project", "yoyaku", "--fact", "fact-1",
+        "--quote", "市場規模は3.2兆円",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "verified: fact-1"
+    saved = storage.get("projects/yoyaku/facts/fact-1")
+    assert all(saved[key] == value for key, value in original.items())
+    assert saved["quote"] == "市場規模は3.2兆円"
+    assert saved["verification"]["status"] == "verified"
+    assert saved["verification"]["support"] == "supported"
+    assert len(storage.list("projects/yoyaku/facts")) == 1
+
+
+def test_facts_verify_fetch_failure_saves_unverified(medo_home: Path, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    storage = LocalJsonStorage(medo_home)
+    storage.put("projects/yoyaku/facts/fact-1", {
+        "fact_id": "fact-1", "kind": "trend", "statement": "市場拡大",
+        "source": "https://example.com", "retrieved": "2026-07-01",
+        "quote": "旧抜粋", "verification": {
+            "status": "unverified", "reason": "fetch-failed: old",
+        },
+    })
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(reason="HTTP 403"))
+
+    result = runner.invoke(app, [
+        "facts", "verify", "--project", "yoyaku", "--fact", "fact-1",
+        "--quote", "市場拡大",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert "unverified: fact-1 (fetch-failed: HTTP 403)" in result.output
+    saved = storage.get("projects/yoyaku/facts/fact-1")
+    assert saved["quote"] == "市場拡大"
+    assert saved["verification"]["reason"] == "fetch-failed: HTTP 403"
+
+
+def test_facts_verify_mismatched_quote_preserves_legacy(medo_home: Path, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    storage = LocalJsonStorage(medo_home)
+    original = {
+        "fact_id": "fact-1", "kind": "market", "statement": "市場規模は3.2兆円",
+        "value": 3.2, "unit": "兆円", "source": "https://example.com",
+        "retrieved": "2026-07-01",
+    }
+    storage.put("projects/yoyaku/facts/fact-1", original)
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(body="市場規模は3.3兆円"))
+
+    result = runner.invoke(app, [
+        "facts", "verify", "--project", "yoyaku", "--fact", "fact-1",
+        "--quote", "市場規模は3.2兆円",
+    ])
+
+    assert result.exit_code != 0
+    assert "error:" in result.output and "本文中の近い箇所" in result.output
+    assert storage.get("projects/yoyaku/facts/fact-1") == original
+    assert FactStore(storage).get("yoyaku", "fact-1").verification.status == "legacy"
+
+
+@pytest.mark.parametrize("state", ["verified", "company", "missing"])
+def test_facts_verify_rejects_ineligible_fact(medo_home: Path, monkeypatch, state: str):
+    from medo_cli import main
+
+    storage = LocalJsonStorage(medo_home)
+    original = {
+        "fact_id": "fact-1", "kind": "company" if state == "company" else "market",
+        "statement": "市場規模", "source": "ヒアリング" if state == "company" else "https://example.com",
+        "retrieved": "2026-07-01",
+    }
+    if state == "verified":
+        original["quote"] = "市場規模"
+        original["verification"] = {"status": "verified"}
+    if state != "missing":
+        storage.put("projects/yoyaku/facts/fact-1", original)
+    monkeypatch.setattr(main, "fetch_body", lambda *_: pytest.fail("取得しない"))
+
+    result = runner.invoke(app, [
+        "facts", "verify", "--project", "yoyaku", "--fact", "fact-1",
+        "--quote", "市場規模",
+    ])
+
+    assert result.exit_code != 0 and "error:" in result.output
+    if state != "missing":
+        assert storage.get("projects/yoyaku/facts/fact-1") == original
+
+
+def test_facts_verify_declared_unverifiable_saves_quote(medo_home: Path, monkeypatch):
+    from medo_cli import main
+
+    storage = LocalJsonStorage(medo_home)
+    storage.put("projects/yoyaku/facts/fact-1", {
+        "fact_id": "fact-1", "kind": "policy", "statement": "政策を公表",
+        "source": "https://example.com", "retrieved": "2026-07-01",
+    })
+    monkeypatch.setattr(main, "fetch_body", lambda *_: pytest.fail("取得しない"))
+
+    result = runner.invoke(app, [
+        "facts", "verify", "--project", "yoyaku", "--fact", "fact-1",
+        "--quote", "政策を公表", "--unverifiable-reason", "PDF抽出不良",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert "unverified: fact-1 (declared: PDF抽出不良)" in result.output
+    saved = storage.get("projects/yoyaku/facts/fact-1")
+    assert saved["quote"] == "政策を公表"
+    assert saved["verification"]["reason"] == "declared: PDF抽出不良"
+
+
 def test_artifacts_list_empty_and_after_save(medo_home: Path):
     result = runner.invoke(app, ["artifacts", "list", "--project", "yoyaku"])
     assert result.exit_code == 0

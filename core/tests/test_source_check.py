@@ -45,3 +45,11 @@ def test_check_reports_rejection_and_nearby_excerpt():
     assert nearby_excerpt("別の記述 3.2兆円", "数値3.2兆円がありました", 3.2, "兆円")
     assert check("3.2兆円", "3.2兆円", 3.3, "兆円").reason == "value-not-in-quote"
     assert check("定性的な記述", "定性的な記述", None, "").verified
+
+
+def test_unit_annotation_in_parentheses_is_ignored_for_matching():
+    assert value_matches("F1 scores by up to 43.67%.", 43.67, "%(F1向上率)")
+    assert value_matches("(単位:百万円)3,215,000", 3215000, "百万円（売上高）")
+    assert not value_matches("F1 scores by up to 43.67%.", 43.6, "%(F1向上率)")
+    assert not value_matches("料金は5円/人", 5, "円/(kWh)(税込)")
+    assert not value_matches("5人", 5, "(%)")

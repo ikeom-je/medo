@@ -23,7 +23,7 @@ description: 合意案を完全版PRFAQに育て、最終提案スライドと�
        medo requirements get --project <project-id> --format json
 
 4. `medo knowledge index` で何があるかを見てから `medo knowledge search` で技術的背景を
-   深め、必要ならファクトを追加保存する(`medo facts save` は `--quote` 付きで。書き方は `medo-propose-options` の手順2と同じ)。引用する既存ファクトの `[UNVERIFIED]` / `[LEGACY]` / `[DOUBTFUL]` は `medo facts list --project <project-id>` で確かめる。出力末尾のリフレーミング規約はPRFAQ本文にも適用する:
+   深め、必要ならファクトを追加保存する(`medo facts save` は `--quote` 付きで。書き方は `medo-propose-options` の手順2と同じ)。引用する既存ファクトの `[UNVERIFIED]` / `[LEGACY]` / `[DOUBTFUL]` は `medo facts list --project <project-id>` で確かめ、`[LEGACY]` / `[UNVERIFIED]` は `medo facts verify` で抜粋を付けて再検証し、出力が `verified:` のときだけ検証済みとして扱う(書き方は `medo-propose-options` の手順2と同じ)。出力末尾のリフレーミング規約はPRFAQ本文にも適用する:
 
        medo knowledge index
        medo knowledge search "<キーワード>" --format json
