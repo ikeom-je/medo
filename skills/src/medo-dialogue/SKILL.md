@@ -62,7 +62,7 @@ description: レビュー済みの討議用スライドを顧客に提示する�
          --result <completed|finding|undeterminable> --artifact <as-is-report-vN> \
          --note "<顧客の反応>"
 
-   「あるべき姿がまだ描けない」「判断できない」という反応は `--result undeterminable --disposition open` で記録する。**それ自体が発見**である。
+   「あるべき姿がまだ描けない」「判断できない」という反応は `--result undeterminable --disposition open` で記録する。**それ自体が発見**である。要件に未登録の人物が話に出たら `hidden_stakeholders` を、要件と違う決裁者が分かったら `decision_maker` を `--result finding` で記録する(`completed` にしない。`--artifact` は付けず、名前・役割・発言を `--note` に残す。未登録の人物の反応は `respond add` しない)。
 
 6. 終了時に現在地を読み、`actions` を報告する。**効いた問い方・効かなかった問い方を残す**
    (固有名詞を消して文が成り立つなら `--kind practice`、成り立たないなら `--project <id>`):
