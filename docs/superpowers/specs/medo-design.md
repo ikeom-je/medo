@@ -312,7 +312,7 @@ type: `mini-prfaq` / `prfaq` / `fermi` / `comparison` / `architecture` / `slides
 | フェーズ | 内容 | 完了の定義 |
 |---|---|---|
 | 1 | **What/Why縦切りMVP**: core(要件拡張・facts・fermi・knowledge)/ `medo` CLI / Skill 3本(`hearing`, `propose-options`, `grow-prfaq`)をClaude Codeとagyの両方に配布 | 実案件1件で 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(技術ナレッジ根拠付き) が両ホストで通る |
-| 2 | **提案完成形+ナレッジ洗練**: `make-slides` / `build-mock` / `propose-architecture` / pricing計算機 / `decision-roadmap` / **knowledge-digest(蓄積ナレッジの分析・重複統合・鮮度見直し)** / 簡易Webアプリ | 課題→What/Why合意→スライド+モックまで半日で出せる。knowledgeが案件を跨いで洗練される |
+| 2 | **提案完成形+ナレッジ洗練**: `make-slides` / `build-mock` / `propose-architecture` / pricing計算機 / `decision-roadmap` / **knowledge-digest(蓄積ナレッジの分析・重複統合・鮮度見直し)** / 簡易Webアプリ | 課題→標準周回による現状と理想の合意(収束判定を満たす)→共感できるドキュメント+提案スライドまで半日。knowledgeが案件を跨いで洗練される(2026-10 改訂。`build-mock` は後続へ) |
 | 3 | **運用自動化**: 蓄積の類似案件検索 / (必要になれば)特定クラウドAPIとの連携ETLをプラグインとして追加 | ナレッジが人手の負担少なく鮮度維持される |
 | バックログ | `compare-aws` / MCPアダプタ / A2Aサーバー(Gemini Enterprise)/ チーム展開 | — |
 
