@@ -12,6 +12,12 @@ if TYPE_CHECKING:
     from medo_core.facts import Fact
 
 _MULTIPLIERS = {"兆": 10**12, "億": 10**8, "百万": 10**6, "万": 10**4, "千": 10**3}
+_ENGLISH_MULTIPLIERS = {
+    "thousand": 10**3, "million": 10**6, "billion": 10**9, "trillion": 10**12,
+}
+_ENGLISH_MULTIPLIER = re.compile(
+    r"\s*(thousand|million|billion|trillion)(?![a-z])", re.IGNORECASE
+)
 _NUMBER = re.compile(
     r"(?P<sign>マイナス|[-−▲△])?"
     r"(?P<digits>(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)"
@@ -19,6 +25,7 @@ _NUMBER = re.compile(
 )
 _DECLARATION = re.compile(r"単位\s*:\s*([^\s)）]+)")
 _SUFFIX = re.compile(r"[^\d\s,.:;()（）\-−▲△]*")
+_SPACED_SUFFIX = re.compile(r"\s+([a-zA-Z]+|[ぁ-ゖァ-ヺー一-龯々〆〇%]+)")
 
 
 @dataclass(frozen=True)
@@ -56,8 +63,12 @@ def extract_numbers(quote: str) -> list[Number]:
         token = tokens[index]
         multiplier = token.group("mult") or ""
         magnitude = _MULTIPLIERS.get(multiplier, 1)
-        value = float(token.group("digits").replace(",", "")) * magnitude
         end = token.end()
+        if not multiplier and (english := _ENGLISH_MULTIPLIER.match(text, end)):
+            multiplier = english.group(1).lower()
+            magnitude = _ENGLISH_MULTIPLIERS[multiplier]
+            end = english.end()
+        value = float(token.group("digits").replace(",", "")) * magnitude
         next_index = index + 1
         while (
             multiplier
@@ -76,6 +87,8 @@ def extract_numbers(quote: str) -> list[Number]:
         if token.group("sign"):
             value = -value
         suffix = _SUFFIX.match(text, end).group()
+        if not suffix and (spaced := _SPACED_SUFFIX.match(text, end)):
+            suffix = spaced.group(1)
         numbers.append(Number(value=value, multiplier=multiplier, suffix=suffix))
         index = next_index
     return numbers
@@ -94,6 +107,8 @@ def _unit_parts(unit: str) -> tuple[int, str]:
     for word in _MULTIPLIERS:
         if unit.startswith(word):
             return _MULTIPLIERS[word], unit[len(word):]
+    if english := _ENGLISH_MULTIPLIER.match(unit):
+        return _ENGLISH_MULTIPLIERS[english.group(1).lower()], unit[english.end():].strip()
     return 1, unit
 
 
