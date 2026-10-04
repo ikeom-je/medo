@@ -15,6 +15,7 @@ from medo_core.source_check import check, nearby_excerpt, verify_fact
 from medo_core.fermi import FermiModel, evaluate
 from medo_cli.commands import research as research_commands
 from medo_cli.commands import templates as template_commands
+from medo_cli.commands import uncertainty as uncertainty_commands
 from medo_cli.commands import workflow as workflow_commands
 from medo_core.config import get_knowledge_root, get_storage
 from medo_core.knowledge import (
@@ -149,7 +150,7 @@ def requirements_diff(project: str = typer.Option(...)):
     )
 
 
-VIEWS = ("summary", "full", "model", "workflow", "readiness", "actions")
+VIEWS = ("summary", "full", "model", "workflow", "readiness", "actions", "uncertainty")
 EXTRA_SCOPES = ("secondary", "out")
 
 
@@ -175,15 +176,44 @@ def status(
                     f"不明な scope です: {scope}(有効: {', '.join(EXTRA_SCOPES)})"
                 )
             scopes += (scope,)
-        report = project_status(
-            get_storage(), project, get_knowledge_root(), view=view, include_scope=scopes
-        )
-    except ValueError as e:
+        if view == "uncertainty":
+            report = uncertainty_commands.build_view(get_storage(), get_knowledge_root(), project)
+        else:
+            report = project_status(
+                get_storage(), project, get_knowledge_root(), view=view, include_scope=scopes
+            )
+    except (ValueError, RuntimeError) as e:
         _fail(str(e))
     if format == "json":
         typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+    elif view == "uncertainty":
+        _echo_uncertainty_digest(report)
     else:
         _echo_status_digest(report)
+
+
+def _echo_uncertainty_digest(report: dict) -> None:
+    typer.echo(f"{report['project']} uncertainty judge={report['judge']} (近似)")
+    typer.echo(f"mini-prfaq: {report['mini_prfaq']}")
+    pivot = report["pivot"]
+    typer.echo(f"pivot: {pivot['name']} [{pivot['unit']}] range={pivot['range']}")
+    for strategy in report["strategies"]:
+        typer.echo(f"{strategy['name']} [{strategy['tier']}] {strategy['value']} {strategy['unit']}")
+        if strategy.get("error"):
+            typer.echo(f"  error: {strategy['error']['message']}")
+    if error := report["switch"]["error"]:
+        typer.echo(f"switch: {error}")
+    elif name := report["switch"]["always_top"]:
+        typer.echo(f"調べた範囲の格子点では常に {name} が上")
+    for key in ("points", "discontinuities", "undetermined", "excluded"):
+        if values := report["switch"][key]:
+            typer.echo(f"{key}: {json.dumps(values, ensure_ascii=False)}")
+    typer.echo(f"fixed_assumptions: {json.dumps(report['fixed_assumptions'], ensure_ascii=False)}")
+    for key in ("stale", "unverified_facts", "doubtful_facts"):
+        if report[key]:
+            typer.echo(f"{key}: {', '.join(report[key])}")
+    for item in report["items"]:
+        typer.echo(f"{item['id']} switch={item['switch']} reach={item['reach']} ask: {item['ask']}")
 
 
 def _echo_status_digest(report: dict) -> None:
@@ -652,6 +682,12 @@ def artifacts_save(
     cites: str = typer.Option("", help="引用ナレッジエントリID(カンマ区切り)"),
     cites_facts: str = typer.Option("", help="引用ファクトID(カンマ区切り)"),
     options: str = typer.Option("", help="mini-prfaq用: name:approach_type をカンマ区切り"),
+    tier: list[str] = typer.Option([], "--tier", help="<策名>=<main|sub|matsu|take|ume>(複数可)"),
+    option_fermi: list[str] = typer.Option([], "--option-fermi", help="<策名>=fermi-vN(複数可)"),
+    pivot: str = typer.Option("", "--pivot", help="策を分けるパラメタ名"),
+    pivot_unit: str = typer.Option("", "--pivot-unit", help="パラメタの単位・尺度"),
+    pivot_var: list[str] = typer.Option([], "--pivot-var", help="<策名>=<仮定の変数名>(複数可)"),
+    pivot_range: str = typer.Option("", "--pivot-range", help="探索範囲: <下限>,<上限>"),
     grown_from: str = typer.Option("", help="prfaq用: <mini-prfaq-vN>:<打ち手名>"),
     generated_by: str | None = typer.Option(None),
     requirements_version: int = typer.Option(...),
@@ -673,6 +709,33 @@ def artifacts_save(
             OptionMeta(name=name, approach_type=approach)
             for name, _, approach in (o.partition(":") for o in options.split(",") if o)
         ]
+        if tier or option_fermi or pivot_var:
+            names = {option.name for option in option_metas}
+            if len(names) != len(option_metas):
+                raise ValueError("策の名前は一意である必要があります")
+            updates = {name: {} for name in names}
+            for flag, field, values in (("--tier", "tier", tier),
+                                        ("--option-fermi", "fermi", option_fermi),
+                                        ("--pivot-var", "pivot_variable", pivot_var)):
+                seen = set()
+                for value in values:
+                    name, separator, setting = value.partition("=")
+                    if not separator or not name or not setting:
+                        raise ValueError(f"{flag} は <名前>=<値> で指定してください")
+                    if name not in names:
+                        raise ValueError(f"{flag} の策が --options にありません: {name}")
+                    if name in seen:
+                        raise ValueError(f"{flag} の指定が重複しています: {name}")
+                    seen.add(name)
+                    updates[name][field] = setting
+            option_metas = [
+                OptionMeta.model_validate({**option.model_dump(), **updates[option.name]})
+                for option in option_metas
+            ]
+        bounds = None
+        if pivot_range:
+            lo, hi = pivot_range.split(",")
+            bounds = (float(lo), float(hi))
         gf = None
         if grown_from:
             art, _, opt = grown_from.partition(":")
@@ -684,6 +747,9 @@ def artifacts_save(
             cited_knowledge=[c for c in cites.split(",") if c],
             cited_facts=[c for c in cites_facts.split(",") if c],
             options=option_metas,
+            pivot=pivot,
+            pivot_unit=pivot_unit,
+            pivot_range=bounds,
             grown_from=gf,
             generated_by=generated_by,
             slide_kind=slide_kind,
@@ -697,9 +763,9 @@ def artifacts_save(
             ],
             content=file.read_text(encoding="utf-8"),
         )
+        artifact_id = ArtifactStore(get_storage()).save(project, artifact)
     except Exception as e:
         _fail(f"生成物のスキーマ不正: {e}")
-    artifact_id = ArtifactStore(get_storage()).save(project, artifact)
     typer.echo(f"saved: {artifact_id}")
 
 
