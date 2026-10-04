@@ -1,6 +1,6 @@
 # knowledge-digest とナレッジ来歴(フェーズ2・後続)
 
-ステータス: 未承認(実装着手前)
+ステータス: 未承認(相互レビュー Codex+agy 2R 済み、ユーザーレビュー待ち)
 
 案件を跨いで蓄積したナレッジの**重複を統合し、置き換えの来歴を残す**設計。統合の判断はJev(TypeSafe System One)に段階ごとに分類させて絞り込み、確定は人の承認とCLIの決定論に残す。
 
@@ -51,8 +51,8 @@ v1 は**案件横断のナレッジ**(`KnowledgeStore`)に限る。生成物が 
 | ID | 型 | 内容 |
 |---|---|---|
 | `relation` | choice | `duplicate`(同じ事実)/ `updates`(同じ指標の、後の時点の値)/ `complementary`(同じ対象の別の側面)/ `conflicting`(同じ指標・同じ時点なのに値が食い違う)/ `unrelated` |
-| `same_scope` | noul | 2つのエントリの年・地域・対象が一致しているか |
-| `newer` | choice | 2つのエントリのうち、**後の時点のことを述べている**のはどちらか(`a` / `b` / `unknown`)。取得日ではなく、記述内容の時点(調査年・発表年・版)で判断する |
+| `same_scope` | noul | 2つのエントリの**地域・対象・指標**が一致しているか(**時点は問わない**。時点は `newer` で判定する) |
+| `newer` | choice | 2つのエントリが述べている時点の関係(`a` が後 / `b` が後 / `same` 同じ時点 / `unknown`)。取得日ではなく、記述内容の時点(調査年・発表年・版)で判断する |
 | `keep` | choice | `duplicate` のとき、どちらを残すべきか(`a` / `b`)。基準は、出典が一次資料か・記述が具体的か。**新しさは基準に含めない**(`updates` では `newer` が残す側を決める) |
 
 **決定論に残す部分**: 数値が一致するかはCLIが判定し、Jevには判定させない(原則1)。`retrieved` は取得日であって情報の時点ではないので、新旧の判断には使わない。
@@ -66,11 +66,11 @@ v1 は**案件横断のナレッジ**(`KnowledgeStore`)に限る。生成物が 
 | 条件 | 扱い |
 |---|---|
 | `relation` が `conflicting`(何回目の判定でも) | **確信度に関係なく `conflicts`**。値の食い違いは事実の誤りに直結するので、見落とすほうが害が大きい。統合はしない |
-| `relation` が `duplicate` なのに、CLIの検査で両方に `value` があり値が一致しない | `conflicts`(同じ事実と判定されたのに数値が違う) |
+| `relation` が `duplicate` で確信度 ≥ T、`same_scope` ≥ T、注記を除いた `unit` が同じなのに、CLIの検査で両方の `value` が一致しない | `conflicts`(同じ範囲の同じ事実と判定されたのに数値が違う) |
 | `relation` が `complementary` / `unrelated` で確信度 ≥ T | 除外 |
-| `duplicate`:`relation` ≥ T かつ `same_scope` ≥ T かつ `keep` ≥ T | `proposals`(`keep` が選んだ側を残す) |
-| `updates`:`relation` ≥ T かつ `newer` が `a`/`b` で確信度 ≥ T | `proposals`(`newer` が選んだ側を残す) |
-| 上のいずれにも届かず、いずれかの確信度が 0.5 以上 | 根拠を足して**1回だけ**聞き直す(§3.3)。聞き直しの結果も上から順に評価し、届かなければ `held` |
+| `duplicate`:`relation` ≥ T、`same_scope` ≥ T、`newer` が `same` で ≥ T、`keep` ≥ T、注記を除いた `unit` が同じ(片方だけ `value` を持つ組は除く) | `proposals`(`keep` が選んだ側を残す) |
+| `updates`:`relation` ≥ T、`same_scope` ≥ T、`newer` が `a`/`b` で ≥ T | `proposals`(`newer` が選んだ側を残す) |
+| `relation` の確信度が 0.5 以上で、その分類に必要な判定(`duplicate` なら same_scope・newer・keep、`updates` なら same_scope・newer)のどれかが T 未満 | 根拠を足して**1回だけ**聞き直す(§3.3)。聞き直しの結果も上から順に評価し、届かなければ `held` |
 | それ以外 | `held` |
 
 確定には、いずれの場合も人の承認が要る。
@@ -85,11 +85,11 @@ v1 は**案件横断のナレッジ**(`KnowledgeStore`)に限る。生成物が 
 
 ### 3.4 案どうしの検査
 
-同じエントリを含む案は、まとめて検査する。次のどれかに当たれば、その組の案を**すべて `held`** にする(一部だけを残すと、承認の順番で結果が変わるため)。
+`proposals` の組を辺、エントリを頂点とするグラフを作り、**つながった塊ごとに**検査する。次のどれかに当たれば、その塊の `proposals` を**すべて `held`** にする(`conflicts` はそのまま残す)。一部だけを残すと、承認の順番で結果が変わるため。
 
+- 塊の中のどれか2つのエントリの組が `conflicts` に入っている(A→C と B→C の合流で A と B が食い違う場合を含む)
 - 1つのエントリに複数の後継が提案された(A→B と A→C)
-- 案をつなぐと連鎖になり(A→B→C)、その両端の組が `conflicts` に入っている
-- 案の後継側が、別の案で置き換えられる側になっている(連鎖は確定させず、人が順に判断する)
+- 案の後継側が、別の案で置き換えられる側になっている(A→B と B→C。連鎖は確定させず、人が順に判断する)
 
 ---
 
@@ -152,7 +152,7 @@ superseded_on: str = ""                                    # 置き換えた日 
 | `medo knowledge dedupe --kind <k> [--format json\|digest]` | §3 の①〜④を実行し、`proposals` / `conflicts` / `held` を出力する。**書き込みはしない** |
 | `medo knowledge supersede --kind <k> --old <id> --by <id> --reason duplicate\|updates` | 承認された1組を確定する。§4.1 の検査を通し、索引を作り直す。影響する生成物を全案件から一覧表示する(下記) |
 
-**影響する生成物の一覧**: 案件は `Storage.list("projects")` が返すパスの第2セグメントで列挙する(Storage に案件列挙の専用操作は足さない)。各案件で、旧エントリを直接引用している生成物と、`freshness` の伝播でそこから stale になる子孫(派生スライド等)を、案件の status 計算と同じ経路で求めて表示する。
+**影響する生成物の一覧**: `Storage` に `list_children(prefix) -> list[str]`(中身の有無にかかわらず直下の子の名前を返す)を足し、`list_children("projects")` で案件を列挙する。今の `list` は直下の `*.json` しか返さず、サブコレクションだけを持つ案件ディレクトリを拾えないため。`FirestoreStorage` はドキュメントの実体が無い親も返す API で実装する。各案件で、旧エントリを直接引用している生成物と、`freshness` の伝播でそこから stale になる子孫(派生スライド等)を、案件の status 計算と同じ経路で求めて表示する。
 
 `proposals` の各要素は `old`(置き換えられる側)/ `by`(残す側)/ `reason` / `relation` とその確信度 / `same_scope` / `newer` または `keep` とその確信度 / `requeried`(聞き直したか)を持つ。`conflicts` と `held` は組と分類・確信度を持つ。
 
@@ -174,7 +174,7 @@ superseded_on: str = ""                                    # 置き換えた日 
 1. `medo knowledge index` で全体を見る
 2. kind ごとに `medo knowledge dedupe --kind <k>` を実行する
 3. `proposals` / `conflicts` / `held` を、根拠(分類・確信度・出典)と一緒にユーザーに見せる。`conflicts` は統合せず、ユーザーが出典を開いて確認するよう案内する(**Agentが自分で出典を読んで解決しに行かない**)
-4. `proposals` を**1組ずつユーザーに承認を尋ね、返答を待ってから** `medo knowledge supersede` で確定する。承認されなかった組は確定しない
+4. `proposals` を**1組ずつユーザーに承認を尋ね、返答を待ってから** `medo knowledge supersede` で確定する。承認されなかった組は確定しない。`held` の組は見せるだけでよい。ユーザーが根拠を見て統合したいと明言した組に限り、残す側と理由をユーザーに確かめてから `supersede` で確定してよい
 5. 作り直しが要る生成物(`supersede` の出力)を報告する
 
 `judge: unavailable` のときは、候補の組を見せて判定できなかったことを報告し、統合はしない。
@@ -185,6 +185,7 @@ superseded_on: str = ""                                    # 置き換えた日 
 
 | 層 | 内容 |
 |---|---|
+| core `storage.py` | `list_children`(Local / Firestore) |
 | core `knowledge.py` | 来歴フィールド、§4.1 の検査を含む `supersede`、検索と索引からの除外、逆引き |
 | core `knowledge_dedupe.py`(新規) | 候補の組の生成(純関数)、振り分けと案どうしの検査(純関数)、影響する生成物の全案件からの列挙 |
 | core `context.py` / `artifacts.py` | 引用の判定をIDごとの理由付きにし、「引用先が置き換えられた」による stale と終端の後継を理由に含める |
@@ -199,14 +200,14 @@ coreはJevを呼ばない(LLM・外部API呼び出しはcliのアダプタ側。
 ## 8. テストと評価
 
 - 候補の組の生成、§4.1 の検査、検索からの除外、stale の判定は決定論のユニットテストにする
-- Jevは既存のテストと同じく `urlopen` を差し替える。`TYPESAFE_API_KEY` 無し・失敗で `judge: unavailable` になること、聞き直しが1回で止まること
+- Jevは既存のテストと同じく `urlopen` を差し替える。`TYPESAFE_API_KEY` 無しで `judge: unavailable`(終了コード0)、鍵ありで呼び出し・解析が失敗したら非ゼロ終了になること。聞き直しが1回で止まり、根拠の取得に失敗した組は聞き直さず `held` になること
 - **正解付きの評価セット**(`scripts/eval/` に triage と同じ形式で置く)。次の5種類を含め、**閾値を調整する組と検証する組に分ける**(同じ組で調整と判定をすると過適合する)
   - 同じ論文を abs と pdf から引いた重複(`duplicate`)
   - 同じ指標の新旧の値(`updates`)。取得日の新旧と記述の時点の新旧が逆になっている組を必ず含める
   - 同じ指標で値が食い違う(`conflicting`)。言い回しも出典も違う組を含める(候補生成の取り落としを測るため)
   - 同じ対象の別の側面(`complementary`)
   - 無関係な組(`unrelated`)
-- **受け入れ条件**(検証用の組で測る): 誤った統合案が0件、`conflicting` の組は候補生成からの通しで全件が `conflicts` に入る、正しい統合案の検出率が目標以上(全件 `held` に落として誤統合0件を満たす、という逃げ方を防ぐ)。閾値 T は調整用の組で、誤った統合案が0件になる最も低い値に決める
+- **受け入れ条件**(検証用の組で測る): 誤った統合案が0件、`conflicting` の組は候補生成からの通しで全件が `conflicts` に入る、正しい統合の組(検証用の `duplicate` と `updates` の組)のうち **8割以上が `proposals` に入る**(全件 `held` に落として誤統合0件を満たす、という逃げ方を防ぐ。この数値は検証用の組を評価する前に固定し、後から動かさない)。閾値 T は調整用の組で、誤った統合案が0件になる最も低い値に決める
 
 ---
 
@@ -214,11 +215,11 @@ coreはJevを呼ばない(LLM・外部API呼び出しはcliのアダプタ側。
 
 | # | 内容 | 担当 |
 |---|---|---|
-| A | core: 来歴スキーマ、§4.1 の検査(save の上書き拒否・原子的書き込み・読み込み時の検査を含む)、連鎖の終端、検索と索引からの除外、引用の判定の理由付き化と「置き換え」による stale、候補の組の生成、振り分けと案どうしの検査、影響する生成物の列挙 | Codex が実装、Claude がレビュー |
+| A | core: 来歴スキーマ、`Storage.list_children`、§4.1 の検査(save の上書き拒否・原子的書き込み・読み込み時の検査を含む)、連鎖の終端、検索と索引からの除外、引用の判定の理由付き化と「置き換え」による stale、候補の組の生成、振り分けと案どうしの検査、影響する生成物の列挙 | Codex が実装、Claude がレビュー |
 | B | cli と jev: `dedupe` / `supersede`、Jevの4問と聞き直し、Jev失敗時の扱い、評価セット(調整用・検証用)と閾値の決定 | Codex が実装、Claude がレビュー |
 | C | Skill `medo-knowledge-digest` と設計書・tech.md の同期(digest のLLM方針を Gemini Flash から本設計へ改める) | Claude が書き、Codex と agy がレビュー |
 
-Aから順に。B と C は CLI の契約(新しいコマンド)と Skill を変えるので人間レビューの対象。**Bの `knowledge search` / `index` の出力から置き換え済みが消えるのもSkill契約に影響する**。
+Aから順に。B と C は CLI の契約(新しいコマンド)と Skill を変えるので人間レビューの対象。**Aで `knowledge search` / `index` の出力から置き換え済みが消えるのもSkill契約に影響する**ため、Aも人間レビューの対象とする。
 
 ---
 
