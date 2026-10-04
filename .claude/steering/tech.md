@@ -15,7 +15,7 @@
            knowledge/ は既定でMEDO_HOME配下の別gitリポジトリ(案件データと分離、GitHub非公開)
               ↑
 [洗練フロー] フェーズ1: ホストLLM検索→CLIが出典検証して保存(facts同様)+git履歴レビュー
-           フェーズ2: knowledge-digest(蓄積ナリッジの分析・重複統合。Gemini Flash等で構造化・圧縮)
+           フェーズ2: knowledge-digest(重複統合と来歴。決定論の候補抽出+Jevの段階的な分類+人の承認。新しい文は生成しない)
 ```
 
 ---
@@ -41,7 +41,6 @@ medo CLI/coreの実行に必須のクラウド依存はない(既定バックエ
 | サービス | 用途 | ライブラリ |
 |---|---|---|
 | Firestore | 本番ストレージに選ぶ場合(要件・facts・knowledge・生成物) | google-cloud-firestore >= 2.16 |
-| Gemini API | (フェーズ2)knowledge-digestでの構造化・圧縮に使う場合 | google-genai >= 1.0 |
 | Cloud Storage | (フェーズ2)スライド・モック実体 | — |
 
 Firestoreを選ぶ場合の認証はADC(`gcloud auth application-default login`)。**フェーズ1のknowledge層は自動ETLを持たず、クラウドクライアントへの実行時依存は発生しない**(ホストLLM検索+CLI出典検証のみ)。
@@ -54,7 +53,7 @@ Firestoreを選ぶ場合の認証はADC(`gcloud auth application-default login`)
 |---|---|---|
 | ヒアリング・打ち手提案(ミニPRFAQ)・PRFAQ育成・スライド生成 | ホストLLM(Claude Code=Claude / agy=Gemini) | Skillが手順を規定。生成物に `generated_by: claude|gemini` を記録し比較可能 |
 | 市場・国策・業界動向・技術ナリッジの検索 | ホストLLMの検索能力 | 取得結果は `medo facts save` / `medo knowledge save` でCLIが出典検証して保存(出典なしは拒否)。数値は出典に忠実に転記し加工しない(換算・集計はfermi) |
-| (フェーズ2)knowledge-digestの構造化・圧縮 | Gemini Flash等(注入可能な`generate`関数) | 安価・大量処理。出力は必ずpydantic検証、出典必須 |
+| (フェーズ2)knowledge-digestの重複判定 | Jev(TypeSafe System One)の分類のみ | 関係・範囲・時点・残す側を確率で返す。確定は人の承認とCLI。新しい文は生成せず、数値はCLIが比較する(詳細: `docs/superpowers/specs/phase2-knowledge-digest.md`) |
 | 保存後の数値・フェルミ計算・鮮度 | **LLMを使わない** | コード(CLI/core)が保存・計算・返却する(fermiはast制限の四則演算+累乗のみ) |
 
 ---
@@ -66,7 +65,7 @@ Firestoreを選ぶ場合の認証はADC(`gcloud auth application-default login`)
 | `MEDO_BACKEND` | `local`(既定) / `firestore` | ストレージバックエンド切替 |
 | `MEDO_HOME` | 既定 `~/.medo` | localバックエンドのルートディレクトリ(knowledge/もこの配下、既定で別gitリポジトリ) |
 | `GOOGLE_CLOUD_PROJECT` | プロジェクトID | Firestoreを使う場合のみ |
-| `GEMINI_API_KEY` | (ADCを使わない場合) | フェーズ2 knowledge-digestで使う場合のみ |
+| `TYPESAFE_API_KEY` | TypeSafe のAPIキー | Jev(research triage・出典の補助判定・knowledge-digest)。無ければ各機能は `unavailable` を返して判定を飛ばす |
 
 ---
 
@@ -110,7 +109,7 @@ cp -r skills/dist/* .agents/skills/     # agy(プロジェクトレベル。リ�
 | core(スキーマ・バージョニング・鮮度判定) | ユニットテスト(LocalJsonStorage + tmp_path) |
 | CLI | typer.testing.CliRunner(env: MEDO_BACKEND=local, MEDO_HOME=tmp) |
 | pricing計算機(フェーズ2) | 公式Pricing Calculatorとの突合ゴールデンテスト |
-| knowledge-digest(フェーズ2) | LLM構造化はMagicMockまたは注入可能なgenerate関数で分離。LLM実呼び出しをテストに含めない |
+| knowledge-digest(フェーズ2) | Jevは `urlopen` を差し替えてテストし、実呼び出しを含めない。閾値は正解付きの評価セット(`scripts/eval/run_dedupe_eval.py`)で決める |
 | Skill | 実案件1件のevalケース(同一要件→提案の安定性を目視確認) |
 | 実環境スモーク | フェーズ1 Task 10(手動。Firestoreを使う場合のみクラウド認証が絡む) |
 
