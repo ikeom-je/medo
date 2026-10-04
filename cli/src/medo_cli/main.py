@@ -11,7 +11,7 @@ import typer
 import yaml
 from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta, RejectedOption
 from medo_core.facts import Fact, FactStore, Verification
-from medo_core.source_check import check, verify_fact
+from medo_core.source_check import check, nearby_excerpt, verify_fact
 from medo_core.fermi import FermiModel, evaluate
 from medo_cli.commands import research as research_commands
 from medo_cli.commands import templates as template_commands
@@ -26,11 +26,21 @@ from medo_core.knowledge import (
     resolve_knowledge_backend,
 )
 from medo_core.requirements import RequirementsDoc, RequirementsStore
+from medo_core.knowledge_dedupe import (
+    PairJudgment,
+    Routing,
+    affected_artifacts,
+    candidate_pairs,
+    check_components,
+    route,
+)
 from medo_core.status import project_status, stale_artifact_ids
 from medo_core.workflow import WorkflowRecorder
 from medo_cli.trace import Tracer
 from medo_cli.fetch import fetch_body
-from medo_cli.jev import judge_support
+from medo_cli.jev import JevUnavailable, judge_pairs, judge_support
+
+CANDIDATE_OVERLAP_THRESHOLD = 0.2
 
 app = typer.Typer(no_args_is_help=True, help="Medo(目処) — クラウド非依存の上流工程Agent CLI")
 requirements_app = typer.Typer(no_args_is_help=True)
@@ -218,6 +228,7 @@ def knowledge_search(
         None, help="tech|market|policy|trend|company|practice(案件横断のみ)"
     ),
     format: Literal["json", "digest"] = typer.Option("digest"),
+    include_superseded: bool = typer.Option(False, "--include-superseded"),
 ):
     if project:
         backend = _project_backend(project)
@@ -237,7 +248,9 @@ def knowledge_search(
             typer.echo(f"({result.total}件中 {len(result.entries)}件を表示。予算で打ち切り)")
         return
 
-    result = KnowledgeStore(get_knowledge_root()).search(query, kind=kind)
+    result = KnowledgeStore(get_knowledge_root()).search(
+        query, kind=kind, include_superseded=include_superseded,
+    )
     if format == "json":
         typer.echo(json.dumps({
             "entries": [_knowledge_entry_payload(e) for e in result.entries],
@@ -259,12 +272,13 @@ def knowledge_index(
     kind: str | None = typer.Option(None, help="省略時は全kind"),
     project: str | None = typer.Option(None, help="指定時は案件固有ナレッジの索引"),
     format: Literal["json", "digest"] = typer.Option("digest"),
+    include_superseded: bool = typer.Option(False, "--include-superseded"),
 ):
     """何がどれだけあるかの概要を返す。本体を開く前に読む。"""
     if project:
         rows = [_project_backend(project).index(project).model_dump(mode="json")]
     else:
-        rows = _cross_project_index_rows(kind)
+        rows = _cross_project_index_rows(kind, include_superseded)
     if format == "json":
         typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
         return
@@ -277,14 +291,16 @@ def knowledge_index(
             f"{row['scope']}  entries={row['entry_count']}  stale={stale}"
             f"  generated={row['generated']}"
         )
+        for warning in row.get("warnings", []):
+            typer.echo(f"warning: {warning}")
 
 
-def _cross_project_index_rows(kind: str | None) -> list[dict]:
+def _cross_project_index_rows(kind: str | None, include_superseded: bool = False) -> list[dict]:
     store = KnowledgeStore(get_knowledge_root())
     return [
         index.model_dump(mode="json")
         for k in ([kind] if kind else store.kinds())
-        if (index := store.index(k)) is not None
+        if (index := store.index(k, include_superseded=include_superseded)) is not None
     ]
 
 
@@ -302,6 +318,138 @@ def knowledge_get(
         return
     stale = " [STALE]" if entry.is_stale() else ""
     typer.echo(f"{entry.entry_id}{stale} {entry.statement[:60]}")
+    if entry.superseded_by:
+        typer.echo(f"superseded_by: {entry.superseded_by}")
+
+
+@knowledge_app.command("dedupe")
+def knowledge_dedupe(
+    kind: str = typer.Option(..., help="tech|market|policy|trend|company|practice"),
+    format: Literal["json", "digest"] = typer.Option("digest"),
+    threshold: float = typer.Option(0.5, min=0, max=1),
+):
+    """重複の候補を判定し、統合案・食い違い・保留を返す。保存はしない。"""
+    store = KnowledgeStore(get_knowledge_root())
+    entries = {e.entry_id: e for e in store.search(
+        "", kind=kind, limit=10**6, char_budget=10**9,
+    ).entries}
+    pairs = candidate_pairs(list(entries.values()), overlap_threshold=CANDIDATE_OVERLAP_THRESHOLD)
+    result = {
+        "kind": kind, "judge": "ok", "candidates": [list(p) for p in pairs],
+        "proposals": [], "conflicts": [], "held": [],
+    }
+    try:
+        first = _judge_dedupe_pairs(pairs, entries)
+    except JevUnavailable:
+        result["judge"] = "unavailable"
+        _echo_dedupe(result, format)
+        return
+    except RuntimeError as exc:
+        _fail(f"Jevの判定に失敗: {exc}")
+    judgments = dict(zip(pairs, first, strict=True))
+    routed = {p: route(entries[p[0]], entries[p[1]], j, threshold) for p, j in judgments.items()}
+    requery = [p for p, r in routed.items() if r.bucket == "requery"]
+    evidence, unfetched = _evidence_for(requery, entries)
+    retry = []
+    for p in requery:
+        if p[0] in unfetched or p[1] in unfetched:
+            routed[p] = Routing(bucket="held")
+        else:
+            retry.append(p)
+    if retry:
+        try:
+            second = _judge_dedupe_pairs(retry, entries, evidence)
+        except RuntimeError as exc:
+            _fail(f"Jevの判定に失敗: {exc}")
+        for p, j in zip(retry, second, strict=True):
+            judgments[p] = j
+            r = route(entries[p[0]], entries[p[1]], j, threshold)
+            routed[p] = Routing(bucket="held") if r.bucket == "requery" else r
+    conflicts = [p for p, r in routed.items() if r.bucket == "conflict"]
+    keep, blocked = check_components(
+        [r for r in routed.values() if r.bucket == "proposal"], conflicts,
+    )
+    for p, r in routed.items():
+        payload = _pair_payload(p, judgments[p], p in retry)
+        if r in keep:
+            result["proposals"].append({
+                "old": r.old, "by": r.by, "reason": r.reason, **payload,
+            })
+        elif r.bucket == "conflict":
+            result["conflicts"].append(payload)
+        elif r.bucket == "held" or r in blocked:
+            result["held"].append(payload)
+    _echo_dedupe(result, format)
+
+
+def _judge_dedupe_pairs(pairs, entries, evidence=None) -> list[PairJudgment]:
+    judgments = judge_pairs([(entries[a], entries[b]) for a, b in pairs], evidence=evidence)
+    if len(judgments) != len(pairs):
+        raise RuntimeError("Jevの応答の組数が一致しません")
+    return judgments
+
+
+def _evidence_for(pairs, entries) -> tuple[dict[str, str], set[str]]:
+    evidence = {}
+    unfetched = set()
+    for entry_id in dict.fromkeys(entry_id for p in pairs for entry_id in p):
+        entry = entries[entry_id]
+        result = fetch_body(entry.source)
+        if result.body and result.body.strip():
+            evidence[entry_id] = nearby_excerpt(
+                entry.statement, result.body, entry.value, entry.unit,
+            ) or result.body[:400]
+        else:
+            unfetched.add(entry_id)
+    return evidence, unfetched
+
+
+def _pair_payload(pair, judgment: PairJudgment, requeried: bool) -> dict:
+    return {"pair": list(pair), **judgment.model_dump(mode="json"), "requeried": requeried}
+
+
+def _echo_dedupe(result: dict, format: str) -> None:
+    if format == "json":
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    typer.echo(f"judge: {result['judge']}")
+    if result["judge"] == "unavailable":
+        for a, b in result["candidates"]:
+            typer.echo(f"candidate: {a} / {b}")
+        return
+    for bucket in ("proposals", "conflicts", "held"):
+        typer.echo(f"{bucket}:")
+        for row in result[bucket]:
+            pair = (f"{row['old']} -> {row['by']} ({row['reason']})" if bucket == "proposals"
+                    else " / ".join(row["pair"]))
+            typer.echo(
+                f"  {pair} relation={row['relation']} ({row['relation_confidence']:.2f})"
+                f" same_scope={row['same_scope']:.2f}"
+                f" newer={row['newer']} ({row['newer_confidence']:.2f})"
+                f" keep={row['keep']} ({row['keep_confidence']:.2f})"
+                f" requeried={row['requeried']}"
+            )
+
+
+@knowledge_app.command("supersede")
+def knowledge_supersede(
+    kind: str = typer.Option(...),
+    old: str = typer.Option(...),
+    by: str = typer.Option(...),
+    reason: Literal["duplicate", "updates"] = typer.Option(...),
+):
+    """承認済みの組を置き換え、影響する全案件の生成物を返す。"""
+    root = get_knowledge_root()
+    try:
+        KnowledgeStore(root).supersede(kind, old, by, reason)
+    except ValueError as exc:
+        _fail(str(exc))
+    typer.echo(f"superseded: {old} -> {by}")
+    rows = affected_artifacts(get_storage(), root, kind, old)
+    if not rows:
+        typer.echo("affected: (なし)")
+    for row in rows:
+        typer.echo(f"affected: {row['project']}/{row['artifact']} ({row['via']})")
 
 
 @knowledge_app.command("save")

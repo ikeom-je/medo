@@ -1032,6 +1032,8 @@ git commit -m "feat(cli): knowledge dedupe と supersede"
 
 ### Task 7: 評価セットと閾値の決定
 
+実装時の評価補足: Step 2のサンプルはすべての組をJevに渡しているが、実際のCLIと同じく候補生成を通った組だけを渡し、候補に入らない組はheldとして数える。文字2-gramの閾値はspec §8に従ってtune組のみで選び、CLIにも反映する。残す側に加えて置き換え理由の誤りも誤統合に数える。評価後のCLI既定値は文字2-gramが0.20、判定Tが0.50。Step 3に従い、聞き直しのテストは明示の `--threshold 0.8` で初期のテスト条件を保つ。
+
 **Files:**
 - Create: `scripts/eval/dedupe_cases.json`, `scripts/eval/run_dedupe_eval.py`
 

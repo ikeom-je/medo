@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 from medo_cli.main import app
 from medo_core.facts import Fact, FactStore, Verification
+from medo_core.knowledge import KnowledgeEntry
+from medo_core.knowledge_dedupe import PairJudgment
 from medo_core.storage import LocalJsonStorage
 from typer.testing import CliRunner
 
@@ -1102,6 +1104,105 @@ def test_jev_support_failure_is_reportable(monkeypatch):
         jev.judge_support("主張", "抜粋", {})
 
 
+class _FakeResponse:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self):
+        return json.dumps(self.body).encode()
+
+
+def _pair_entry(n):
+    return KnowledgeEntry(
+        entry_id=f"tech-{n}", kind="tech", statement="同じ論文の主張",
+        source="https://e.com/paper", retrieved="2026-09-01", value=12, unit="件",
+    )
+
+
+def test_judge_pairs_sends_four_questions_per_pair_without_numbers_to_judge(monkeypatch):
+    import medo_cli.jev as jev
+
+    sent = {}
+
+    def fake(request, timeout):
+        sent.update(json.loads(request.data))
+        assert timeout == 60
+        answers = {}
+        for n in range(2):
+            answers[f"p{n}_relation"] = {"choice": "duplicate", "confidence": 0.9}
+            answers[f"p{n}_same_scope"] = {"noul": 0.85}
+            answers[f"p{n}_newer"] = {"choice": "same", "confidence": 0.8}
+            answers[f"p{n}_keep"] = {"choice": "a", "confidence": 0.7}
+        return _FakeResponse({"answers": answers})
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", fake)
+    result = jev.judge_pairs([(_pair_entry(1), _pair_entry(2)), (_pair_entry(3), _pair_entry(4))])
+
+    assert len(sent["questions"]) == 8
+    assert result[0].relation == "duplicate" and result[0].keep_confidence == 0.7
+    assert "数値が同じかどうかは判断しない" in sent["questions"]["p0_relation"]["instructions"]
+    assert sent["state"]["pairs"][0]["a"]["value"] == 12
+    assert "retrieved" in sent["questions"]["p0_newer"]["instructions"]
+
+
+def test_judge_pairs_without_key_raises_unavailable(monkeypatch):
+    import medo_cli.jev as jev
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with pytest.raises(jev.JevUnavailable):
+        jev.judge_pairs([])
+
+
+def test_judge_pairs_adds_evidence_without_changing_entry(monkeypatch):
+    import medo_cli.jev as jev
+
+    sent = {}
+
+    def fake(request, timeout):
+        sent.update(json.loads(request.data))
+        return _FakeResponse({"answers": {}})
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", fake)
+    entry = _pair_entry(1)
+    with pytest.raises(RuntimeError, match="応答が不正"):
+        jev.judge_pairs([(entry, _pair_entry(2))], evidence={"tech-1": "原文"})
+    assert sent["state"]["pairs"][0]["a"]["evidence"] == "原文"
+    assert "evidence" not in sent["state"]["pairs"][0]["b"]
+    assert entry.statement == "同じ論文の主張"
+
+
+@pytest.mark.parametrize("body", [[], {}, {"answers": []}, {"answers": {}}])
+def test_judge_pairs_malformed_response_is_reportable(monkeypatch, body):
+    import medo_cli.jev as jev
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", lambda *_a, **_k: _FakeResponse(body))
+    with pytest.raises(RuntimeError):
+        jev.judge_pairs([(_pair_entry(1), _pair_entry(2))])
+
+
+def test_judge_pairs_http_failure_includes_response_body(monkeypatch):
+    import io
+    from urllib.error import HTTPError
+    import medo_cli.jev as jev
+
+    def fail(*_a, **_k):
+        raise HTTPError(jev.API_URL, 400, "bad request", {}, io.BytesIO(b"invalid criteria"))
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", fail)
+    with pytest.raises(RuntimeError, match="invalid criteria"):
+        jev.judge_pairs([(_pair_entry(1), _pair_entry(2))])
+
+
 def test_research_plan_digest_renders_every_field(medo_home: Path):
     """既定はdigest。json経路しか試さないと、フィールド改名で既定出力が壊れる。"""
     _save_minimal_requirements(medo_home, "digest-project")
@@ -1181,3 +1282,272 @@ def test_knowledge_index_reports_counts_without_opening_entries(medo_home: Path)
     rows = json.loads(result.output)
     assert rows[0]["entry_count"] == 1
     assert rows[0]["stale_count"] == 1
+
+
+def _save_k(kind, statement, source="https://e.com/a"):
+    r = runner.invoke(app, ["knowledge", "save", "--kind", kind, "--statement", statement,
+                            "--source", source])
+    assert r.exit_code == 0, r.output
+
+
+def _pj(relation="duplicate", scope=0.9, newer="same", keep="a"):
+    return PairJudgment(relation=relation, relation_confidence=0.9, same_scope=scope,
+                        newer=newer, newer_confidence=0.9, keep=keep, keep_confidence=0.9)
+
+
+def test_dedupe_without_key_returns_candidates_only(medo_home, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _save_k("market", "市場規模は2024年に3.2兆円")
+    _save_k("market", "2024年の市場規模は3.2兆円")
+    r = runner.invoke(app, ["knowledge", "dedupe", "--kind", "market", "--format", "json"])
+    out = json.loads(r.stdout)
+    assert r.exit_code == 0 and out["judge"] == "unavailable"
+    assert out["candidates"] == [["market-1", "market-2"]] and out["proposals"] == []
+
+
+def test_dedupe_jev_failure_exits_nonzero(medo_home, monkeypatch):
+    from medo_cli import main
+    _save_k("market", "市場規模は2024年に3.2兆円")
+    _save_k("market", "2024年の市場規模は3.2兆円")
+
+    def boom(*_a, **_k):
+        raise RuntimeError("HTTP 500")
+
+    monkeypatch.setattr(main, "judge_pairs", boom)
+    r = runner.invoke(app, ["knowledge", "dedupe", "--kind", "market"])
+    assert r.exit_code != 0 and "error:" in r.output
+
+
+def test_dedupe_requeries_once_with_evidence_then_holds(medo_home, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+    _save_k("market", "市場規模は2024年に3.2兆円")
+    _save_k("market", "2024年の市場規模は3.2兆円")
+    calls = []
+
+    def judge(pairs, evidence=None, timeout=60):
+        calls.append(evidence)
+        return [_pj(scope=0.6) for _ in pairs]
+
+    monkeypatch.setattr(main, "judge_pairs", judge)
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(body="市場規模は2024年に3.2兆円"))
+    out = json.loads(runner.invoke(
+        app, ["knowledge", "dedupe", "--kind", "market", "--format", "json", "--threshold", "0.8"]).stdout)
+    assert len(calls) == 2 and calls[0] is None and calls[1]
+    assert [h["pair"] for h in out["held"]] == [["market-1", "market-2"]] and out["proposals"] == []
+
+
+def test_dedupe_fetch_failure_holds_without_requery(medo_home, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+    _save_k("market", "市場規模は2024年に3.2兆円")
+    _save_k("market", "2024年の市場規模は3.2兆円")
+    calls = []
+    monkeypatch.setattr(main, "judge_pairs",
+                        lambda pairs, evidence=None, timeout=60: calls.append(1) or
+                        [_pj(scope=0.6) for _ in pairs])
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(reason="HTTP 403"))
+    out = json.loads(runner.invoke(
+        app, ["knowledge", "dedupe", "--kind", "market", "--format", "json", "--threshold", "0.8"]).stdout)
+    assert len(calls) == 1 and [h["pair"] for h in out["held"]] == [["market-1", "market-2"]]
+
+
+def test_dedupe_proposes_duplicate(medo_home, monkeypatch):
+    from medo_cli import main
+    _save_k("market", "市場規模は2024年に3.2兆円")
+    _save_k("market", "2024年の市場規模は3.2兆円")
+    monkeypatch.setattr(main, "judge_pairs",
+                        lambda pairs, evidence=None, timeout=60: [_pj(keep="b") for _ in pairs])
+    out = json.loads(runner.invoke(
+        app, ["knowledge", "dedupe", "--kind", "market", "--format", "json"]).stdout)
+    assert [(p["old"], p["by"], p["reason"]) for p in out["proposals"]] == [
+        ("market-1", "market-2", "duplicate")]
+
+
+def test_supersede_with_no_projects(medo_home):
+    _save_k("practice", "a", source="medo-test")
+    _save_k("practice", "b", source="medo-test")
+    r = runner.invoke(app, ["knowledge", "supersede", "--kind", "practice", "--old", "practice-1",
+                            "--by", "practice-2", "--reason", "duplicate"])
+    assert r.exit_code == 0
+    assert "superseded: practice-1 -> practice-2" in r.stdout and "affected: (なし)" in r.stdout
+
+
+def test_supersede_lists_citing_artifacts(medo_home, tmp_path):
+    _save_k("practice", "a", source="medo-test")
+    _save_k("practice", "b", source="medo-test")
+    content = tmp_path / "research.md"
+    content.write_text("調査", encoding="utf-8")
+    r = runner.invoke(app, ["artifacts", "save", "--project", "p1", "--type", "research",
+                            "--cites", "practice-1", "--file", str(content),
+                            "--requirements-version", "0",
+                            "--generated-by", "claude"])
+    assert r.exit_code == 0, r.output
+    r = runner.invoke(app, ["knowledge", "supersede", "--kind", "practice", "--old", "practice-1",
+                            "--by", "practice-2", "--reason", "duplicate"])
+    assert "affected: p1/research-v1 (cited)" in r.stdout
+
+
+def test_supersede_rejects_invalid_pair(medo_home):
+    _save_k("practice", "a", source="medo-test")
+    r = runner.invoke(app, ["knowledge", "supersede", "--kind", "practice", "--old", "practice-1",
+                            "--by", "practice-1", "--reason", "duplicate"])
+    assert r.exit_code != 0 and "error:" in r.output
+
+
+def test_search_hides_superseded_unless_flag(medo_home):
+    _save_k("practice", "重複A", source="medo-test")
+    _save_k("practice", "重複B", source="medo-test")
+    runner.invoke(app, ["knowledge", "supersede", "--kind", "practice", "--old", "practice-1",
+                        "--by", "practice-2", "--reason", "duplicate"])
+    hidden = runner.invoke(app, ["knowledge", "search", "重複", "--kind", "practice"]).stdout
+    shown = runner.invoke(app, ["knowledge", "search", "重複", "--kind", "practice",
+                                "--include-superseded"]).stdout
+    assert "practice-1" not in hidden and "practice-1" in shown
+
+
+def test_index_hides_superseded_unless_flag(medo_home):
+    _save_k("practice", "重複A", source="medo-test")
+    _save_k("practice", "重複B", source="medo-test")
+    r = runner.invoke(app, ["knowledge", "supersede", "--kind", "practice", "--old", "practice-1",
+                            "--by", "practice-2", "--reason", "duplicate"])
+    assert r.exit_code == 0, r.output
+    hidden = runner.invoke(app, ["knowledge", "index", "--kind", "practice", "--format", "json"])
+    shown = runner.invoke(app, ["knowledge", "index", "--kind", "practice", "--format", "json",
+                                "--include-superseded"])
+    assert json.loads(hidden.stdout)[0]["entry_count"] == 1
+    assert json.loads(shown.stdout)[0]["entry_count"] == 2
+
+
+def test_knowledge_get_returns_all_provenance_fields(medo_home):
+    _save_k("practice", "a", source="medo-test")
+    _save_k("practice", "b", source="medo-test")
+    from medo_core.knowledge import KnowledgeStore
+    from medo_core.config import get_knowledge_root
+
+    KnowledgeStore(get_knowledge_root()).supersede(
+        "practice", "practice-1", "practice-2", "duplicate", today=date(2026, 9, 1),
+    )
+    result = runner.invoke(app, ["knowledge", "get", "--kind", "practice", "--id", "practice-1"])
+    entry = json.loads(result.stdout)["entry"]
+    assert entry["superseded_by"] == "practice-2"
+    assert entry["supersede_reason"] == "duplicate"
+    assert entry["superseded_on"] == "2026-09-01"
+    digest = runner.invoke(app, ["knowledge", "get", "--kind", "practice", "--id", "practice-1",
+                                 "--format", "digest"])
+    assert "superseded_by: practice-2" in digest.stdout
+
+
+def test_knowledge_index_digest_reports_broken_provenance(medo_home):
+    from medo_core.config import get_knowledge_root
+
+    _save_k("practice", "a", source="medo-test")
+    path = get_knowledge_root() / "practice" / "practice-1.md"
+    path.write_text(path.read_text().replace("---\n", "---\nsuperseded_by: practice-2\n", 1))
+    result = runner.invoke(app, ["knowledge", "index", "--kind", "practice"])
+    assert result.exit_code == 0, result.output
+    assert "warning:" in result.stdout and "practice-1" in result.stdout
+
+
+def test_dedupe_uses_final_judgment_in_proposals_without_writing(medo_home, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+    from medo_core.config import get_knowledge_root
+
+    _save_k("market", "市場規模は2024年に3.2兆円")
+    _save_k("market", "2024年の市場規模は3.2兆円")
+    before = {p: p.read_bytes() for p in get_knowledge_root().rglob("*.md")}
+    calls = []
+
+    def judge(pairs, evidence=None, timeout=60):
+        calls.append(evidence)
+        return [_pj(scope=0.6) if evidence is None else _pj(keep="b") for _ in pairs]
+
+    monkeypatch.setattr(main, "judge_pairs", judge)
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(body="原文: 2024年に3.2兆円"))
+    r = runner.invoke(app, ["knowledge", "dedupe", "--kind", "market", "--format", "json", "--threshold", "0.8"])
+    assert r.exit_code == 0, r.output
+    proposal = json.loads(r.stdout)["proposals"][0]
+    assert proposal["by"] == "market-2" and proposal["keep"] == "b"
+    assert proposal["same_scope"] == 0.9 and proposal["requeried"] is True
+    assert len(calls) == 2
+    assert before == {p: p.read_bytes() for p in get_knowledge_root().rglob("*.md")}
+
+
+def test_dedupe_low_confidence_conflict_is_reported_with_judgment(medo_home, monkeypatch):
+    from medo_cli import main
+
+    _save_k("market", "市場規模は2024年に3.2兆円")
+    _save_k("market", "2024年の市場規模は4兆円")
+    judgment = _pj(relation="conflicting").model_copy(update={"relation_confidence": 0.1})
+    monkeypatch.setattr(main, "judge_pairs", lambda *_a, **_k: [judgment])
+    r = runner.invoke(app, ["knowledge", "dedupe", "--kind", "market", "--format", "json"])
+    conflict = json.loads(r.stdout)["conflicts"][0]
+    assert conflict["pair"] == ["market-1", "market-2"]
+    assert conflict["relation"] == "conflicting" and conflict["relation_confidence"] == 0.1
+
+
+def test_dedupe_component_conflict_holds_all_proposals(medo_home, monkeypatch):
+    from medo_cli import main
+
+    for text in ("a", "b", "c"):
+        _save_k("practice", text, source="https://e.com/a")
+    monkeypatch.setattr(main, "judge_pairs", lambda *_a, **_k: [
+        _pj(relation="conflicting"), _pj(keep="b"), _pj(keep="b"),
+    ])
+    r = runner.invoke(app, ["knowledge", "dedupe", "--kind", "practice", "--format", "json"])
+    out = json.loads(r.stdout)
+    assert out["proposals"] == [] and len(out["conflicts"]) == 1
+    assert [h["pair"] for h in out["held"]] == [
+        ["practice-1", "practice-3"], ["practice-2", "practice-3"],
+    ]
+
+
+def test_dedupe_unavailable_digest_shows_candidates(medo_home, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _save_k("practice", "a", source="https://e.com/a")
+    _save_k("practice", "b", source="https://e.com/a")
+    r = runner.invoke(app, ["knowledge", "dedupe", "--kind", "practice"])
+    assert r.exit_code == 0 and "judge: unavailable" in r.stdout
+    assert "practice-1" in r.stdout and "practice-2" in r.stdout
+
+
+def test_dedupe_missing_judgment_exits_nonzero(medo_home, monkeypatch):
+    from medo_cli import main
+
+    _save_k("practice", "a", source="https://e.com/a")
+    _save_k("practice", "b", source="https://e.com/a")
+    monkeypatch.setattr(main, "judge_pairs", lambda *_a, **_k: [])
+    r = runner.invoke(app, ["knowledge", "dedupe", "--kind", "practice"])
+    assert r.exit_code != 0 and "error:" in r.output
+
+
+def test_dedupe_retry_failure_exits_nonzero(medo_home, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    _save_k("practice", "a", source="https://e.com/a")
+    _save_k("practice", "b", source="https://e.com/a")
+
+    def judge(pairs, evidence=None, timeout=60):
+        if evidence:
+            raise RuntimeError("retry failed")
+        return [_pj(scope=0.6) for _ in pairs]
+
+    monkeypatch.setattr(main, "judge_pairs", judge)
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(body="原文"))
+    r = runner.invoke(app, ["knowledge", "dedupe", "--kind", "practice", "--threshold", "0.8"])
+    assert r.exit_code != 0 and "error:" in r.output and "retry failed" in r.output
+
+
+def test_dedupe_default_threshold_uses_evaluation_result(medo_home, monkeypatch):
+    from medo_cli import main
+    from medo_cli.fetch import FetchResult
+
+    _save_k("practice", "a", source="https://e.com/a")
+    _save_k("practice", "b", source="https://e.com/a")
+    monkeypatch.setattr(main, "judge_pairs", lambda *_a, **_k: [_pj(scope=0.6)])
+    monkeypatch.setattr(main, "fetch_body", lambda *_: FetchResult(reason="HTTP 403"))
+    result = runner.invoke(app, ["knowledge", "dedupe", "--kind", "practice", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    assert len(json.loads(result.stdout)["proposals"]) == 1
