@@ -28,6 +28,7 @@ class FermiModel(BaseModel):
     name: str
     variables: dict[str, FermiVar]
     formula: str
+    unit: str = ""
 
 
 class FermiResult(BaseModel):

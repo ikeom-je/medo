@@ -661,3 +661,41 @@ def test_review_approval_expires_when_the_report_goes_stale(tmp_path):
     review = project_status(storage, "p1", tmp_path, view="workflow")["workflow"]["review"]
 
     assert review["approved"] is False
+
+
+def test_single_option_adds_alternative_option_action(tmp_path):
+    storage = _project(tmp_path)
+    mini_id = ArtifactStore(storage).save("p1", _mini(project="p1"))
+    report = project_status(storage, "p1", tmp_path / "knowledge", today=TODAY, view="summary")
+    actions = [a for a in report["actions"] if a["code"] == "add_alternative_option"]
+    assert actions == [{"code": "add_alternative_option", "refs": [mini_id],
+                        "reason": "策が1つで比べられない"}]
+
+
+def test_add_alternative_option_uses_current_mini_prfaq_only(tmp_path):
+    storage = _project(tmp_path)
+    artifacts = ArtifactStore(storage)
+    artifacts.save("p1", _mini(project="p1", options=[OptionMeta(name="A"), OptionMeta(name="B")]))
+    latest = artifacts.save("p1", _mini(project="p1"))
+    report = project_status(storage, "p1", tmp_path / "knowledge", today=TODAY)
+    assert [a["refs"] for a in report["actions"] if a["code"] == "add_alternative_option"] == [[latest]]
+    artifacts.save("p1", _mini(project="p1", options=[OptionMeta(name="A"), OptionMeta(name="B")]))
+    report = project_status(storage, "p1", tmp_path / "knowledge", today=TODAY)
+    assert not any(a["code"] == "add_alternative_option" for a in report["actions"])
+
+
+def test_add_alternative_option_not_emitted_without_mini_prfaq(tmp_path):
+    report = project_status(_project(tmp_path), "p1", tmp_path / "knowledge", today=TODAY)
+    assert not any(a["code"] == "add_alternative_option" for a in report["actions"])
+
+
+def test_add_alternative_option_precedes_regeneration_of_stale_mini(tmp_path):
+    storage = _project(tmp_path)
+    ArtifactStore(storage).save("p1", _mini(project="p1", cited_facts=["fact-1"]))
+    FactStore(storage).save("p1", Fact(
+        kind="market", statement="古い根拠", value=1.0, source="https://example.com",
+        retrieved="2020-01-01", verification=Verification(status="unverified"),
+    ))
+    report = project_status(storage, "p1", tmp_path / "knowledge", today=TODAY)
+    codes = [a["code"] for a in report["actions"]]
+    assert codes.index("add_alternative_option") < codes.index("regenerate_stale_artifacts")

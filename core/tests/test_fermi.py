@@ -106,3 +106,8 @@ def test_var_requires_exactly_one_of_fact_or_assume():
         FermiVar(fact="fact-1", assume=1.0)
     with pytest.raises(ValidationError):
         FermiVar()
+
+
+def test_fermi_model_unit_defaults_to_empty():
+    m = FermiModel.model_validate({"name": "n", "variables": {"x": {"assume": 1}}, "formula": "x"})
+    assert m.unit == ""
