@@ -244,6 +244,9 @@ def build_actions(
         add("explore_undeterminable", open_undeterminable)
     if unpromoted := _unpromoted_conflicts(ctx.doc):
         add("consider_promotion", unpromoted)
+    mini_id = _current_artifact_ids(ctx.artifacts).get("mini-prfaq")
+    if mini_id and len(ctx.artifacts[mini_id].options) == 1:
+        add("add_alternative_option", [mini_id], reason="策が1つで比べられない")
     if stale and not loop_in_progress:
         add("regenerate_stale_artifacts", stale)
     if action := readiness_actions.get("elicit_internal_as_is"):

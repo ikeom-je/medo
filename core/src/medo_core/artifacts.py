@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from datetime import date
 from typing import Literal
 
@@ -46,9 +48,17 @@ DEPENDENT_SECTIONS: dict[tuple[str, str | None], tuple[str, ...]] = {
 }
 
 
+Tier = Literal["", "main", "sub", "matsu", "take", "ume"]
+_TIER_LIMITS = {"main": 1, "sub": 2, "matsu": 1, "take": 1, "ume": 1}
+_TIER_FAMILY = {"main": "ms", "sub": "ms", "matsu": "mtu", "take": "mtu", "ume": "mtu"}
+
+
 class OptionMeta(BaseModel):
     name: str
     approach_type: str = ""
+    tier: Tier = ""
+    fermi: str = ""
+    pivot_variable: str = ""
 
 
 class GrownFrom(BaseModel):
@@ -82,6 +92,9 @@ class Artifact(BaseModel):
     cited_knowledge: list[str] = Field(default_factory=list)
     cited_facts: list[str] = Field(default_factory=list)
     options: list[OptionMeta] = Field(default_factory=list)
+    pivot: str = ""
+    pivot_unit: str = ""
+    pivot_range: tuple[float, float] | None = None
     grown_from: GrownFrom | None = None
     derived_from: list[str] = Field(default_factory=list)
     slide_kind: SlideKind | None = None
@@ -112,6 +125,31 @@ class Artifact(BaseModel):
         return self
 
 
+def _validate_options(artifact: Artifact) -> None:
+    if artifact.type != "mini-prfaq":
+        return
+    opts = artifact.options
+    if len(opts) > 3:
+        raise ValueError("策は最大3つです(松竹梅)")
+    tiers = [o.tier for o in opts if o.tier]
+    for tier, limit in _TIER_LIMITS.items():
+        if tiers.count(tier) > limit:
+            raise ValueError(f"tier {tier} は {limit} つまでです")
+    if len({_TIER_FAMILY[t] for t in tiers}) > 1:
+        raise ValueError("main/sub と松竹梅を混ぜられません")
+    if (tiers or any(o.fermi or o.pivot_variable for o in opts)) and len(
+            {o.name for o in opts}) != len(opts):
+        raise ValueError("策の名前は一意である必要があります")
+    if artifact.pivot:
+        missing = [o.name for o in opts if o.fermi and not o.pivot_variable]
+        if missing:
+            raise ValueError(f"pivot を指定したら fermi を持つ策すべてに pivot_variable が要ります: {missing}")
+    if artifact.pivot_range is not None:
+        lo, hi = artifact.pivot_range
+        if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
+            raise ValueError("pivot_range は有限で 下限 < 上限 である必要があります")
+
+
 class ArtifactStore:
     def __init__(self, storage: Storage):
         self._storage = storage
@@ -121,6 +159,7 @@ class ArtifactStore:
 
     def save(self, project_id: str, artifact: Artifact) -> str:
         existing = {a_id: a for a_id, a in self._load_all(project_id).items()}
+        _validate_options(artifact)
         self._validate_parents(artifact, existing)
         self._validate_grown_from(artifact, existing)
         self._validate_version_monotonicity(artifact, existing)

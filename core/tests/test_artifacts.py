@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from medo_core.artifacts import Artifact, ArtifactStore
+from medo_core.artifacts import Artifact, ArtifactStore, OptionMeta
 from medo_core.manifest import ChangeManifest, ManifestStore, SectionChange
 from medo_core.storage import LocalJsonStorage
 
@@ -431,3 +431,57 @@ def test_superseded_citation_reason_and_staleness_propagate_to_descendants(tmp_p
     assert freshness["as-is-report-v1"].state == "stale"
     assert freshness["slides-v1"].state == "stale"
     assert store.get("p1", "research-v1").cited_knowledge == [a]
+
+
+def _mini(options, **kw):
+    return Artifact(project="p1", type="mini-prfaq", requirements_version=1, content="候補",
+                    generated_by="claude", options=options, **kw)
+
+
+def test_legacy_mini_prfaq_loads(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    storage.put("projects/p1/artifacts/mini-prfaq-v1", {
+        "project": "p1", "type": "mini-prfaq", "version": 1, "requirements_version": 1,
+        "content": "x", "generated_by": "claude", "options": [{"name": "A", "approach_type": "既存解決"}]})
+    a = ArtifactStore(storage).get("p1", "mini-prfaq-v1")
+    assert a.options[0].tier == "" and a.pivot == ""
+
+
+def test_single_option_is_saved(tmp_path):
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    assert store.save("p1", _mini([OptionMeta(name="A", tier="main")])) == "mini-prfaq-v1"
+
+
+@pytest.mark.parametrize("tiers", [
+    ["main", "main"], ["sub", "sub", "sub"], ["matsu", "matsu"], ["main", "matsu"]])
+def test_invalid_tier_sets_are_rejected(tmp_path, tiers):
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    with pytest.raises(ValueError):
+        store.save("p1", _mini([OptionMeta(name=f"o{i}", tier=t) for i, t in enumerate(tiers)]))
+
+
+def test_four_options_are_rejected(tmp_path):
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    with pytest.raises(ValueError, match="最大3"):
+        store.save("p1", _mini([OptionMeta(name=f"o{i}") for i in range(4)]))
+
+
+def test_pivot_requires_variable_for_every_option_with_fermi(tmp_path):
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    opts = [OptionMeta(name="A", fermi="fermi-v1", pivot_variable="rate"),
+            OptionMeta(name="B", fermi="fermi-v2")]
+    with pytest.raises(ValueError, match="pivot_variable"):
+        store.save("p1", _mini(opts, pivot="利用率", pivot_unit="比率"))
+
+
+@pytest.mark.parametrize("rng", [(1.0, 1.0), (2.0, 1.0), (float("inf"), 2.0)])
+def test_invalid_pivot_range_is_rejected(tmp_path, rng):
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    with pytest.raises(ValueError, match="pivot_range"):
+        store.save("p1", _mini([OptionMeta(name="A")], pivot="x", pivot_range=rng))
+
+
+def test_duplicate_option_names_rejected_when_tiers_used(tmp_path):
+    store = ArtifactStore(LocalJsonStorage(tmp_path))
+    with pytest.raises(ValueError, match="一意"):
+        store.save("p1", _mini([OptionMeta(name="A", tier="main"), OptionMeta(name="A", tier="sub")]))
