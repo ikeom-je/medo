@@ -1,0 +1,787 @@
+"""medo CLI。事実と計算の決定論的インターフェース。失敗時は推測せずエラーを返す。"""
+
+import os
+import json
+import sys
+from datetime import date
+from pathlib import Path
+from typing import Literal
+
+import typer
+import yaml
+from medo_core.artifacts import Artifact, ArtifactStore, GrownFrom, OptionMeta, RejectedOption
+from medo_core.facts import Fact, FactStore, Verification
+from medo_core.source_check import check, nearby_excerpt, verify_fact
+from medo_core.fermi import FermiModel, evaluate
+from medo_cli.commands import research as research_commands
+from medo_cli.commands import templates as template_commands
+from medo_cli.commands import workflow as workflow_commands
+from medo_core.config import get_knowledge_root, get_storage
+from medo_core.knowledge import (
+    DEFAULT_CHAR_BUDGET,
+    KnowledgeEntry,
+    KnowledgeStore,
+    ProjectKnowledgeEntry,
+    apply_budget,
+    resolve_knowledge_backend,
+)
+from medo_core.requirements import RequirementsDoc, RequirementsStore
+from medo_core.knowledge_dedupe import (
+    PairJudgment,
+    Routing,
+    affected_artifacts,
+    candidate_pairs,
+    check_components,
+    route,
+)
+from medo_core.status import project_status, stale_artifact_ids
+from medo_core.workflow import WorkflowRecorder
+from medo_cli.trace import Tracer
+from medo_cli.fetch import fetch_body
+from medo_cli.jev import JevUnavailable, judge_pairs, judge_support
+
+CANDIDATE_OVERLAP_THRESHOLD = 0.2
+
+app = typer.Typer(no_args_is_help=True, help="Medo(目処) — クラウド非依存の上流工程Agent CLI")
+requirements_app = typer.Typer(no_args_is_help=True)
+knowledge_app = typer.Typer(no_args_is_help=True)
+artifacts_app = typer.Typer(no_args_is_help=True)
+facts_app = typer.Typer(no_args_is_help=True)
+fermi_app = typer.Typer(no_args_is_help=True)
+research_app = typer.Typer(no_args_is_help=True, help="深掘り調査の計画と選別")
+requirements_app.command("template")(template_commands.requirements_template)
+artifacts_app.command("outline")(template_commands.artifacts_outline)
+app.add_typer(requirements_app, name="requirements", help="要件ドキュメント(バージョン管理)")
+app.add_typer(knowledge_app, name="knowledge", help="技術ナレッジ(案件横断)/ 案件固有ナレッジ")
+app.add_typer(artifacts_app, name="artifacts", help="生成物の保存・一覧")
+app.add_typer(facts_app, name="facts", help="市場・国策・業界動向・個社ファクト(出典必須)")
+app.add_typer(fermi_app, name="fermi", help="フェルミ推定(仮定明示・コードが計算)")
+app.add_typer(research_app, name="research")
+research_app.command("plan")(research_commands.research_plan)
+research_app.command("triage")(research_commands.research_triage)
+app.add_typer(workflow_commands.check_app, name="check")
+workflow_commands.check_app.command("list")(template_commands.check_list)
+app.add_typer(workflow_commands.review_app, name="review")
+app.add_typer(workflow_commands.respond_app, name="respond")
+app.add_typer(workflow_commands.checkpoint_app, name="checkpoint")
+
+
+def _fail(reason: str) -> None:
+    typer.echo(f"error: {reason}", err=True)
+    raise typer.Exit(code=1)
+
+
+def _recorder() -> WorkflowRecorder:
+    return WorkflowRecorder(get_storage())
+
+
+def _latest_version(project: str) -> int:
+    return RequirementsStore(get_storage()).latest_version(project)
+
+
+@requirements_app.command("save")
+def requirements_save(
+    project: str = typer.Option(...),
+    file: Path = typer.Option(..., exists=True, readable=True),
+    editorial: list[str] = typer.Option(
+        [],
+        "--editorial",
+        help=(
+            "誤字・言い回しの修正のみと宣言するセクション名"
+            "(text以外に差分があるセクションの宣言は無視される)"
+        ),
+    ),
+) -> None:
+    try:
+        data = yaml.safe_load(file.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("YAMLのトップレベルはマッピングである必要があります")
+        doc = RequirementsDoc.model_validate({**data, "project": project})
+        version = WorkflowRecorder(get_storage()).save_requirements(
+            project, doc, editorial_sections=tuple(editorial)
+        )
+    except Exception as e:  # yaml.YAMLError, ValueError, pydantic.ValidationError
+        _fail(f"要件のスキーマ不正: {e}")
+    typer.echo(f"saved: v{version}")
+
+
+@requirements_app.command("get")
+def requirements_get(
+    project: str = typer.Option(...),
+    version: int | None = typer.Option(None),
+    format: Literal["json", "digest"] = typer.Option("json"),
+):
+    doc = RequirementsStore(get_storage()).get(project, version)
+    if doc is None:
+        _fail(f"プロジェクト '{project}' の要件が見つかりません")
+    if format == "json":
+        typer.echo(json.dumps(doc.model_dump(mode="json"), ensure_ascii=False, indent=2))
+    else:
+        typer.echo(f"{doc.project} v{doc.version}: {doc.goal}")
+        if doc.background:
+            typer.echo(f"  背景: {doc.background}")
+        for p in doc.principles:
+            typer.echo(f"  理念 [{p.confidence}] {p.text}")
+        for c in doc.challenges:
+            typer.echo(f"  課題 [{c.confidence}] {c.text}")
+        for f in doc.functional:
+            typer.echo(f"  - [{f.confidence}] {f.text}")
+        for q in doc.open_questions:
+            typer.echo(f"  ? {q.text}")
+
+
+@requirements_app.command("diff")
+def requirements_diff(project: str = typer.Option(...)):
+    storage = get_storage()
+    req_store = RequirementsStore(storage)
+    current = req_store.latest_version(project)
+    if current == 0:
+        _fail(f"プロジェクト '{project}' の要件が見つかりません")
+    typer.echo(
+        json.dumps(
+            {
+                "requirements": req_store.diff(project),
+                "stale_artifacts": stale_artifact_ids(storage, project, get_knowledge_root()),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+VIEWS = ("summary", "full", "model", "workflow", "readiness", "actions")
+EXTRA_SCOPES = ("secondary", "out")
+
+
+@app.command()
+def status(
+    project: str = typer.Option(...),
+    view: str = typer.Option("summary", "--view", help=f"表示範囲: {' | '.join(VIEWS)}"),
+    include_scope: str = typer.Option(
+        "", "--include-scope", help=f"診断対象に加えるscope: {' | '.join(EXTRA_SCOPES)}"
+    ),
+    format: str = typer.Option("json", "--format", help="json|digest"),
+):
+    """現在地と次にできることを返す。既定は summary(actions が先頭)。"""
+    try:
+        if view not in VIEWS:
+            raise ValueError(f"不明な view です: {view}(有効: {', '.join(VIEWS)})")
+        if format not in ("json", "digest"):
+            raise ValueError(f"不明な format です: {format}(有効: json, digest)")
+        scopes = ("core",)
+        for scope in (s.strip() for s in include_scope.split(",") if s.strip()):
+            if scope not in EXTRA_SCOPES:
+                raise ValueError(
+                    f"不明な scope です: {scope}(有効: {', '.join(EXTRA_SCOPES)})"
+                )
+            scopes += (scope,)
+        report = project_status(
+            get_storage(), project, get_knowledge_root(), view=view, include_scope=scopes
+        )
+    except ValueError as e:
+        _fail(str(e))
+    if format == "json":
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        _echo_status_digest(report)
+
+
+def _echo_status_digest(report: dict) -> None:
+    for action in report.get("actions", []):
+        refs = f" [{', '.join(action['refs'])}]" if action.get("refs") else ""
+        typer.echo(f"- {action['code']}{refs}")
+    if phase := report.get("diagnostic_phase"):
+        typer.echo(f"phase: {phase}")
+    loop = report.get("workflow", {}).get("loop", {})
+    if checkpoint := loop.get("checkpoint"):
+        typer.echo(f"checkpoint: {checkpoint.get('state')}")
+    if delta := loop.get("round_delta"):
+        typer.echo(f"round_delta: progress={delta.get('progress_count')}")
+    if next_step := report.get("next_step"):
+        typer.echo(f"next_step: {next_step}")
+
+
+def _project_backend(project: str):
+    """案件ごとに選ばれたバックエンドを解決する。"""
+    doc = RequirementsStore(get_storage()).get(project)
+    return resolve_knowledge_backend(
+        doc.knowledge_backend if doc else "markdown",
+        project,
+        get_knowledge_root(),
+        Path(os.environ.get("MEDO_HOME", str(Path.home() / ".medo"))),
+    )
+
+
+def _knowledge_entry_payload(entry) -> dict:
+    return (
+        {"entry": entry.model_dump(mode="json"), "stale": entry.is_stale()}
+        if hasattr(entry, "is_stale")
+        else entry.model_dump(mode="json")
+    )
+
+
+@knowledge_app.command("search")
+def knowledge_search(
+    query: str = typer.Argument(""),
+    project: str | None = typer.Option(None, help="指定時は案件固有ナレッジを検索"),
+    kind: str | None = typer.Option(
+        None, help="tech|market|policy|trend|company|practice(案件横断のみ)"
+    ),
+    format: Literal["json", "digest"] = typer.Option("digest"),
+    include_superseded: bool = typer.Option(False, "--include-superseded"),
+):
+    if project:
+        backend = _project_backend(project)
+        result = apply_budget(backend.search(project, query), 10, DEFAULT_CHAR_BUDGET)
+        if format == "json":
+            typer.echo(json.dumps({
+                "entries": [e.model_dump(mode="json") for e in result.entries],
+                "total": result.total, "truncated": result.truncated,
+            }, ensure_ascii=False, indent=2))
+            return
+        if not result.entries:
+            typer.echo("(該当なし)")
+            return
+        for e in result.entries:
+            typer.echo(f"{e.entry_id} {e.statement[:60]} (出典: {e.source}, {e.retrieved})")
+        if result.truncated:
+            typer.echo(f"({result.total}件中 {len(result.entries)}件を表示。予算で打ち切り)")
+        return
+
+    result = KnowledgeStore(get_knowledge_root()).search(
+        query, kind=kind, include_superseded=include_superseded,
+    )
+    if format == "json":
+        typer.echo(json.dumps({
+            "entries": [_knowledge_entry_payload(e) for e in result.entries],
+            "total": result.total, "truncated": result.truncated,
+        }, ensure_ascii=False, indent=2))
+        return
+    if not result.entries:
+        typer.echo("(該当なし)")
+        return
+    for e in result.entries:
+        stale = " [STALE]" if e.is_stale() else ""
+        typer.echo(f"{e.entry_id} [{e.kind}]{stale} {e.statement[:60]}")
+    if result.truncated:
+        typer.echo(f"({result.total}件中 {len(result.entries)}件を表示。予算で打ち切り)")
+
+
+@knowledge_app.command("index")
+def knowledge_index(
+    kind: str | None = typer.Option(None, help="省略時は全kind"),
+    project: str | None = typer.Option(None, help="指定時は案件固有ナレッジの索引"),
+    format: Literal["json", "digest"] = typer.Option("digest"),
+    include_superseded: bool = typer.Option(False, "--include-superseded"),
+):
+    """何がどれだけあるかの概要を返す。本体を開く前に読む。"""
+    if project:
+        rows = [_project_backend(project).index(project).model_dump(mode="json")]
+    else:
+        rows = _cross_project_index_rows(kind, include_superseded)
+    if format == "json":
+        typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
+        return
+    if not rows:
+        typer.echo("(索引なし)")
+        return
+    for row in rows:
+        stale = "-" if row["stale_count"] is None else row["stale_count"]
+        typer.echo(
+            f"{row['scope']}  entries={row['entry_count']}  stale={stale}"
+            f"  generated={row['generated']}"
+        )
+        for warning in row.get("warnings", []):
+            typer.echo(f"warning: {warning}")
+
+
+def _cross_project_index_rows(kind: str | None, include_superseded: bool = False) -> list[dict]:
+    store = KnowledgeStore(get_knowledge_root())
+    return [
+        index.model_dump(mode="json")
+        for k in ([kind] if kind else store.kinds())
+        if (index := store.index(k, include_superseded=include_superseded)) is not None
+    ]
+
+
+@knowledge_app.command("get")
+def knowledge_get(
+    kind: str = typer.Option(..., help="tech|market|policy|trend|company|practice"),
+    id: str = typer.Option(..., "--id"),
+    format: Literal["json", "digest"] = typer.Option("json"),
+):
+    entry = KnowledgeStore(get_knowledge_root()).get(kind, id)
+    if entry is None:
+        _fail(f"ナレッジに {kind}/{id} が見つかりません")
+    if format == "json":
+        typer.echo(json.dumps(_knowledge_entry_payload(entry), ensure_ascii=False, indent=2))
+        return
+    stale = " [STALE]" if entry.is_stale() else ""
+    typer.echo(f"{entry.entry_id}{stale} {entry.statement[:60]}")
+    if entry.superseded_by:
+        typer.echo(f"superseded_by: {entry.superseded_by}")
+
+
+@knowledge_app.command("dedupe")
+def knowledge_dedupe(
+    kind: str = typer.Option(..., help="tech|market|policy|trend|company|practice"),
+    format: Literal["json", "digest"] = typer.Option("digest"),
+    threshold: float = typer.Option(0.5, min=0, max=1),
+):
+    """重複の候補を判定し、統合案・食い違い・保留を返す。保存はしない。"""
+    store = KnowledgeStore(get_knowledge_root())
+    entries = {e.entry_id: e for e in store.search(
+        "", kind=kind, limit=10**6, char_budget=10**9,
+    ).entries}
+    pairs = candidate_pairs(list(entries.values()), overlap_threshold=CANDIDATE_OVERLAP_THRESHOLD)
+    result = {
+        "kind": kind, "judge": "ok", "candidates": [list(p) for p in pairs],
+        "proposals": [], "conflicts": [], "held": [],
+    }
+    try:
+        first = _judge_dedupe_pairs(pairs, entries)
+    except JevUnavailable:
+        result["judge"] = "unavailable"
+        _echo_dedupe(result, format)
+        return
+    except RuntimeError as exc:
+        _fail(f"Jevの判定に失敗: {exc}")
+    judgments = dict(zip(pairs, first, strict=True))
+    routed = {p: route(entries[p[0]], entries[p[1]], j, threshold) for p, j in judgments.items()}
+    requery = [p for p, r in routed.items() if r.bucket == "requery"]
+    evidence, unfetched = _evidence_for(requery, entries)
+    retry = []
+    for p in requery:
+        if p[0] in unfetched or p[1] in unfetched:
+            routed[p] = Routing(bucket="held")
+        else:
+            retry.append(p)
+    if retry:
+        try:
+            second = _judge_dedupe_pairs(retry, entries, evidence)
+        except RuntimeError as exc:
+            _fail(f"Jevの判定に失敗: {exc}")
+        for p, j in zip(retry, second, strict=True):
+            judgments[p] = j
+            r = route(entries[p[0]], entries[p[1]], j, threshold)
+            routed[p] = Routing(bucket="held") if r.bucket == "requery" else r
+    conflicts = [p for p, r in routed.items() if r.bucket == "conflict"]
+    keep, blocked = check_components(
+        [r for r in routed.values() if r.bucket == "proposal"], conflicts,
+    )
+    for p, r in routed.items():
+        payload = _pair_payload(p, judgments[p], p in retry)
+        if r in keep:
+            result["proposals"].append({
+                "old": r.old, "by": r.by, "reason": r.reason, **payload,
+            })
+        elif r.bucket == "conflict":
+            result["conflicts"].append(payload)
+        elif r.bucket == "held" or r in blocked:
+            result["held"].append(payload)
+    _echo_dedupe(result, format)
+
+
+def _judge_dedupe_pairs(pairs, entries, evidence=None) -> list[PairJudgment]:
+    judgments = judge_pairs([(entries[a], entries[b]) for a, b in pairs], evidence=evidence)
+    if len(judgments) != len(pairs):
+        raise RuntimeError("Jevの応答の組数が一致しません")
+    return judgments
+
+
+def _evidence_for(pairs, entries) -> tuple[dict[str, str], set[str]]:
+    evidence = {}
+    unfetched = set()
+    for entry_id in dict.fromkeys(entry_id for p in pairs for entry_id in p):
+        entry = entries[entry_id]
+        result = fetch_body(entry.source)
+        if result.body and result.body.strip():
+            evidence[entry_id] = nearby_excerpt(
+                entry.statement, result.body, entry.value, entry.unit,
+            ) or result.body[:400]
+        else:
+            unfetched.add(entry_id)
+    return evidence, unfetched
+
+
+def _pair_payload(pair, judgment: PairJudgment, requeried: bool) -> dict:
+    return {"pair": list(pair), **judgment.model_dump(mode="json"), "requeried": requeried}
+
+
+def _echo_dedupe(result: dict, format: str) -> None:
+    if format == "json":
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    typer.echo(f"judge: {result['judge']}")
+    if result["judge"] == "unavailable":
+        for a, b in result["candidates"]:
+            typer.echo(f"candidate: {a} / {b}")
+        return
+    for bucket in ("proposals", "conflicts", "held"):
+        typer.echo(f"{bucket}:")
+        for row in result[bucket]:
+            pair = (f"{row['old']} -> {row['by']} ({row['reason']})" if bucket == "proposals"
+                    else " / ".join(row["pair"]))
+            typer.echo(
+                f"  {pair} relation={row['relation']} ({row['relation_confidence']:.2f})"
+                f" same_scope={row['same_scope']:.2f}"
+                f" newer={row['newer']} ({row['newer_confidence']:.2f})"
+                f" keep={row['keep']} ({row['keep_confidence']:.2f})"
+                f" requeried={row['requeried']}"
+            )
+
+
+@knowledge_app.command("supersede")
+def knowledge_supersede(
+    kind: str = typer.Option(...),
+    old: str = typer.Option(...),
+    by: str = typer.Option(...),
+    reason: Literal["duplicate", "updates"] = typer.Option(...),
+):
+    """承認済みの組を置き換え、影響する全案件の生成物を返す。"""
+    root = get_knowledge_root()
+    try:
+        KnowledgeStore(root).supersede(kind, old, by, reason)
+    except ValueError as exc:
+        _fail(str(exc))
+    typer.echo(f"superseded: {old} -> {by}")
+    rows = affected_artifacts(get_storage(), root, kind, old)
+    if not rows:
+        typer.echo("affected: (なし)")
+    for row in rows:
+        typer.echo(f"affected: {row['project']}/{row['artifact']} ({row['via']})")
+
+
+@knowledge_app.command("save")
+def knowledge_save(
+    statement: str = typer.Option(...),
+    source: str = typer.Option(...),
+    project: str | None = typer.Option(None, help="指定時は案件固有ナレッジとして保存"),
+    kind: str | None = typer.Option(
+        None,
+        help="案件横断ナレッジのみ必須: tech|market|policy|trend|company|practice"
+    ),
+    value: float | None = typer.Option(None),
+    unit: str = typer.Option(""),
+    retrieved: str | None = typer.Option(None, help="取得日 YYYY-MM-DD(省略時は今日)"),
+    note: str = typer.Option(""),
+):
+    retrieved = retrieved or date.today().isoformat()
+    if project:
+        try:
+            entry = ProjectKnowledgeEntry(
+                project=project,
+                statement=statement,
+                source=source,
+                retrieved=retrieved,
+                note=note,
+            )
+        except Exception as e:
+            _fail(f"案件固有ナレッジのスキーマ不正: {e}")
+        backend = _project_backend(project)
+        entry_id = backend.append(entry)
+        typer.echo(f"saved: {entry_id}")
+        return
+
+    if not kind:
+        _fail("--project 未指定の場合は --kind が必須です")
+    try:
+        entry = KnowledgeEntry(
+            kind=kind,
+            statement=statement,
+            value=value,
+            unit=unit,
+            source=source,
+            retrieved=retrieved,
+            note=note,
+        )
+    except Exception as e:
+        _fail(f"ナレッジのスキーマ不正: {e}")
+    entry_id = KnowledgeStore(get_knowledge_root()).save(entry)
+    typer.echo(f"saved: {entry_id}")
+
+
+def _verify_fact_source(fact: Fact, unverifiable_reason: str | None, today: str) -> Fact:
+    if unverifiable_reason is not None:
+        return fact.model_copy(update={
+            "verification": Verification(
+                status="unverified", reason=f"declared: {unverifiable_reason}", checked=today
+            )
+        })
+
+    fetched = fetch_body(fact.source)
+    if fetched.body is None:
+        typer.echo(f"warning: 出典本文を取得できません: {fetched.reason}", err=True)
+        return fact.model_copy(update={
+            "verification": Verification(
+                status="unverified", reason=f"fetch-failed: {fetched.reason}", checked=today,
+            )
+        })
+
+    result = check(fact.quote, fetched.body, fact.value, fact.unit)
+    if not result.verified:
+        cause = ("抜粋が出典本文に見つかりません" if result.reason == "quote-not-found"
+                 else "抜粋中に主張値と一致する数値が見つかりません")
+        nearby = result.nearby or "(候補なし)"
+        _fail(
+            f"{cause}(本文 {len(fetched.body):,} 文字を取得)\n"
+            f"  本文中の近い箇所: 「…{nearby}…」\n"
+            "  次の手: (1) 抜粋を本文どおりに写し直す\n"
+            "          (2) 出典の数値自体が違う → 転記を見直す\n"
+            "          (3) 抽出テキストの文字化け・欠落が疑われ、"
+            "目視で出典に書かれていると確認できた\n"
+            "              → --unverifiable-reason \"抽出不良: <状況>\" を付けて再実行"
+        )
+    fact = verify_fact(fact, fetched.body, checked=today)
+    try:
+        support = judge_support(fact.statement, fact.quote, {
+            "kind": fact.kind, "source": fact.source, "retrieved": fact.retrieved,
+        })
+    except Exception as exc:
+        support = "unjudged"
+        typer.echo(f"warning: Jevの補助判定ができません: {exc}", err=True)
+    if support == "doubtful":
+        typer.echo("warning: 抜粋の年・地域・指標が主張を支えるか要確認です", err=True)
+    return fact.model_copy(update={
+        "verification": fact.verification.model_copy(update={"support": support})
+    })
+
+
+@facts_app.command("save")
+def facts_save(
+    project: str = typer.Option(...),
+    kind: str = typer.Option(..., help="market | policy | trend | company"),
+    statement: str = typer.Option(...),
+    source: str = typer.Option(..., help="market/policy/trendはURL、companyは由来表記"),
+    value: float | None = typer.Option(None),
+    unit: str = typer.Option(""),
+    retrieved: str | None = typer.Option(None, help="取得日 YYYY-MM-DD(省略時は今日)"),
+    note: str = typer.Option(""),
+    quote: str = typer.Option("", help="出典本文から写した原文抜粋"),
+    unverifiable_reason: str | None = typer.Option(None, help="目視確認済みだが照合できない理由"),
+):
+    if kind in ("market", "policy", "trend") and not quote.strip():
+        _fail("market/policy/trend には --quote が必須です")
+    if unverifiable_reason is not None and not unverifiable_reason.strip():
+        _fail("--unverifiable-reason には理由を指定してください")
+    today = date.today().isoformat()
+    try:
+        fact = Fact(
+            kind=kind,
+            statement=statement,
+            value=value,
+            unit=unit,
+            source=source,
+            retrieved=retrieved or today,
+            note=note,
+            quote=quote,
+            verification=Verification(status="not-applicable") if kind == "company" else None,
+        )
+    except Exception as e:
+        _fail(f"ファクトのスキーマ不正: {e}")
+    if kind != "company":
+        fact = _verify_fact_source(fact, unverifiable_reason, today)
+    fact_id = FactStore(get_storage()).save(project, fact)
+    typer.echo(f"saved: {fact_id}")
+
+
+@facts_app.command("verify")
+def facts_verify(
+    project: str = typer.Option(...),
+    fact_id: str = typer.Option(..., "--fact"),
+    quote: str = typer.Option(..., help="出典本文から写した原文抜粋"),
+    unverifiable_reason: str | None = typer.Option(None, help="目視確認済みだが照合できない理由"),
+) -> None:
+    if not quote.strip():
+        _fail("--quote には原文抜粋を指定してください")
+    if unverifiable_reason is not None and not unverifiable_reason.strip():
+        _fail("--unverifiable-reason には理由を指定してください")
+    store = FactStore(get_storage())
+    fact = store.get(project, fact_id)
+    if fact is None:
+        _fail(f"ファクトが見つかりません: {fact_id}")
+    if fact.kind not in ("market", "policy", "trend") or fact.verification.status not in (
+        "legacy", "unverified"
+    ):
+        _fail(f"再検証できないファクトです: {fact_id}")
+    fact = _verify_fact_source(fact.model_copy(update={"quote": quote}), unverifiable_reason,
+                               date.today().isoformat())
+    store.save(project, fact)
+    if fact.verification.status == "verified":
+        typer.echo(f"verified: {fact_id}")
+    else:
+        typer.echo(f"unverified: {fact_id} ({fact.verification.reason})")
+
+
+@facts_app.command("list")
+def facts_list(
+    project: str = typer.Option(...),
+    format: Literal["json", "digest"] = typer.Option("digest"),
+):
+    facts = FactStore(get_storage()).list(project)
+    if format == "json":
+        payload = [
+            {
+                "fact": f.model_dump(mode="json"),
+                "stale": f.is_stale(),
+                "verification": f.verification.model_dump(mode="json"),
+            }
+            for f in facts
+        ]
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    if not facts:
+        typer.echo("(ファクトなし)")
+        return
+    for f in facts:
+        stale = " [STALE]" if f.is_stale() else ""
+        verification = f.verification
+        flag = ""
+        if verification.status in ("unverified", "legacy"):
+            flag = f" [{verification.status.upper()}]"
+        elif verification.status == "verified" and verification.support == "doubtful":
+            flag = " [DOUBTFUL]"
+        typer.echo(f"{f.fact_id} [{f.kind}]{stale}{flag} {f.statement} (出典: {f.source}, {f.retrieved})")
+
+
+@artifacts_app.command("save")
+def artifacts_save(
+    project: str = typer.Option(...),
+    artifact_type: str = typer.Option(..., "--type"),
+    file: Path = typer.Option(..., exists=True, readable=True),
+    cites: str = typer.Option("", help="引用ナレッジエントリID(カンマ区切り)"),
+    cites_facts: str = typer.Option("", help="引用ファクトID(カンマ区切り)"),
+    options: str = typer.Option("", help="mini-prfaq用: name:approach_type をカンマ区切り"),
+    grown_from: str = typer.Option("", help="prfaq用: <mini-prfaq-vN>:<打ち手名>"),
+    generated_by: str | None = typer.Option(None),
+    requirements_version: int = typer.Option(...),
+    slide_kind: str | None = typer.Option(
+        None, "--slide-kind", help="slides用: discussion|final"
+    ),
+    derived_from: str = typer.Option(
+        "", "--derived-from", help="内容依存の親artifact ID(カンマ区切り)"
+    ),
+    covers: str = typer.Option("", "--covers", help="扱った課題ID(カンマ区切り)"),
+    rejected: list[str] = typer.Option(
+        [],
+        "--rejected",
+        help="見送った案: <名前>:<理由>[:<受け入れたリスク>](複数可)",
+    ),
+):
+    try:
+        option_metas = [
+            OptionMeta(name=name, approach_type=approach)
+            for name, _, approach in (o.partition(":") for o in options.split(",") if o)
+        ]
+        gf = None
+        if grown_from:
+            art, _, opt = grown_from.partition(":")
+            gf = GrownFrom(artifact=art, option=opt)
+        artifact = Artifact(
+            project=project,
+            type=artifact_type,
+            requirements_version=requirements_version,
+            cited_knowledge=[c for c in cites.split(",") if c],
+            cited_facts=[c for c in cites_facts.split(",") if c],
+            options=option_metas,
+            grown_from=gf,
+            generated_by=generated_by,
+            slide_kind=slide_kind,
+            derived_from=[c for c in derived_from.split(",") if c],
+            covered_challenge_ids=[c for c in covers.split(",") if c] if covers else None,
+            rejected_options=[
+                RejectedOption(name=n, reason=r, accepted_risk=risk)
+                for n, r, risk in (
+                    (*v.split(":", 2), "", "")[:3] for v in rejected
+                )
+            ],
+            content=file.read_text(encoding="utf-8"),
+        )
+    except Exception as e:
+        _fail(f"生成物のスキーマ不正: {e}")
+    artifact_id = ArtifactStore(get_storage()).save(project, artifact)
+    typer.echo(f"saved: {artifact_id}")
+
+
+@artifacts_app.command("get")
+def artifacts_get(
+    project: str = typer.Option(...),
+    id: str = typer.Option(..., "--id", help="例: mini-prfaq-v1"),
+):
+    artifact = ArtifactStore(get_storage()).get(project, id)
+    if artifact is None:
+        _fail(f"生成物 {id} が見つかりません")
+    typer.echo(json.dumps(artifact.model_dump(mode="json"), ensure_ascii=False, indent=2))
+
+
+@artifacts_app.command("list")
+def artifacts_list(project: str = typer.Option(...)):
+    items = ArtifactStore(get_storage()).list(project)
+    for a in items:
+        by = f" by {a.generated_by}" if a.generated_by else ""
+        typer.echo(f"{a.type}-v{a.version} (req v{a.requirements_version}){by}")
+    if not items:
+        typer.echo("(生成物なし)")
+
+
+@fermi_app.command("calc")
+def fermi_calc(
+    project: str = typer.Option(...),
+    file: Path | None = typer.Option(None, exists=True, readable=True, help="モデルYAML"),
+    from_artifact: str | None = typer.Option(None, help="保存済みfermi生成物から再計算(例: fermi-v1)"),
+):
+    storage = get_storage()
+    try:
+        if from_artifact and file:
+            raise ValueError("--file と --from-artifact は同時に指定できません")
+        if from_artifact:
+            saved = ArtifactStore(storage).get(project, from_artifact)
+            if saved is None:
+                raise ValueError(f"生成物 {from_artifact} が見つかりません")
+            model = FermiModel.model_validate(json.loads(saved.content)["model"])
+        elif file:
+            model = FermiModel.model_validate(yaml.safe_load(file.read_text(encoding="utf-8")))
+        else:
+            raise ValueError("--file か --from-artifact のどちらかを指定してください")
+        facts = {f.fact_id: f for f in FactStore(storage).list(project)}
+        result = evaluate(model, facts)
+    except Exception as e:
+        _fail(f"フェルミ計算に失敗: {e}")
+    artifact = Artifact(
+        project=project,
+        type="fermi",
+        requirements_version=RequirementsStore(storage).latest_version(project),
+        cited_facts=result.cited_facts,
+        content=json.dumps(
+            {"model": model.model_dump(mode="json"), "result": result.model_dump(mode="json")},
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+    artifact_id = ArtifactStore(storage).save(project, artifact)
+    typer.echo(f"saved: {artifact_id}")
+    typer.echo(f"{result.name} = {result.value}")
+    if result.unverified_facts or result.doubtful_facts:
+        typer.echo(
+            "warning: 出典の検証状態を確認してください "
+            f"(unverified: {', '.join(result.unverified_facts)}; "
+            f"doubtful: {', '.join(result.doubtful_facts)})"
+        )
+
+
+def main() -> None:
+    """console_script のエントリーポイント。MEDO_TRACE 指定時は呼び出しを記録する。"""
+    tracer = Tracer.from_env()
+    code = 0
+    try:
+        app()
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 1
+        raise
+    finally:
+        if tracer:
+            tracer.record(sys.argv[1:], exit_code=code)
+
+
+if __name__ == "__main__":
+    main()
