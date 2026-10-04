@@ -40,36 +40,40 @@ v1 は**案件横断のナレッジ**(`KnowledgeStore`)に限る。生成物が 
 
 | 段 | 担い手 | 内容 |
 |---|---|---|
-| ① 候補の組を作る | CLI(決定論) | 同じ kind の中で、次のいずれかを満たす組だけを候補にする: 出典URLのホストとパスが同じ(クエリと拡張子の差、arXiv の `abs`/`pdf` の差は同一視)/ `value` と `unit`(注記を除く)が同じ / `statement` の語の重なり(Jaccard)が閾値以上。全組み合わせをJevに投げないための前処理 |
-| ② 関係を分類する | **Jev** | 全組の質問を1リクエストに並べて並列に判定する(下表の `relation` / `same_scope` / `primary_source`) |
-| ③ 残す側を選ぶ | **Jev** | `duplicate` / `updates` の組について `keep` を判定する |
-| ④ 統合案を組み立てる | CLI(決定論) | ②③の結果と確信度から、`proposals` / `conflicts` / `held` に振り分ける(§3.2)。**新しい文は生成しない**。既存エントリのどちらかを残す |
+| ① 候補の組を作る | CLI(決定論) | 同じ kind の中で、次のいずれかを満たす組だけを候補にする: 出典URLのホストとパスが同じ(クエリと拡張子の差、arXiv の `abs`/`pdf` の差は同一視)/ 注記を除いた `unit` が同じ / `statement` の重なりが閾値以上(NFKC後の文字2-gramの Jaccard。閾値は評価で決める)。全組み合わせをJevに投げないための前処理 |
+| ② 関係を分類する | **Jev** | 全組の質問を1リクエストに並べて並列に判定する(§3.1) |
+| ③ 振り分ける | CLI(決定論) | Jevの判定・確信度と、CLIによる数値の一致検査から、`proposals` / `conflicts` / `held` / 除外 に振り分ける(§3.2)。**新しい文は生成しない**。既存エントリのどちらかを残す |
+| ④ 案どうしを検査する | CLI(決定論) | 同じエントリを含む案をまとめて検査する(§3.4) |
 | ⑤ 確定する | 人の承認 → CLI | 承認された組だけ `supersede` で確定する(§5) |
 
 ### 3.1 Jevに聞く質問(1組あたり)
 
 | ID | 型 | 内容 |
 |---|---|---|
-| `relation` | choice | `duplicate`(同じ事実)/ `updates`(同じ指標の新しい値)/ `complementary`(同じ対象の別の側面)/ `conflicting`(同じ指標なのに値が食い違う)/ `unrelated` |
-| `same_scope` | noul | 2つのエントリの年・地域・対象が一致しているか(`duplicate` と `updates` を分ける根拠) |
-| `primary_source` | noul ×2 | 各エントリの出典が一次資料か |
-| `keep` | choice | `duplicate` / `updates` のとき、どちらを残すべきか。基準は一次資料か・具体的か・新しいか |
+| `relation` | choice | `duplicate`(同じ事実)/ `updates`(同じ指標の、後の時点の値)/ `complementary`(同じ対象の別の側面)/ `conflicting`(同じ指標・同じ時点なのに値が食い違う)/ `unrelated` |
+| `same_scope` | noul | 2つのエントリの年・地域・対象が一致しているか |
+| `newer` | choice | 2つのエントリのうち、**後の時点のことを述べている**のはどちらか(`a` / `b` / `unknown`)。取得日ではなく、記述内容の時点(調査年・発表年・版)で判断する |
+| `keep` | choice | `duplicate` のとき、どちらを残すべきか(`a` / `b`)。基準は、出典が一次資料か・記述が具体的か。**新しさは基準に含めない**(`updates` では `newer` が残す側を決める) |
 
-**決定論に残す部分**: どちらが新しいかは `retrieved` の日付でCLIが決める。数値が一致するかはCLIが判定し、Jevには判定させない(原則1)。
+**決定論に残す部分**: 数値が一致するかはCLIが判定し、Jevには判定させない(原則1)。`retrieved` は取得日であって情報の時点ではないので、新旧の判断には使わない。
 
 `state` には各エントリの `statement` / `value` / `unit` / `source` / `retrieved` / `note` を渡す。Jevに数値を書かせることはなく、Jevの出力は分類と選択だけである。
 
-### 3.2 確信度による振り分け
+### 3.2 振り分け
 
-`relation` の確信度(choice の `confidence`)で段階を分ける。
+上から順に評価し、最初に当てはまった行で決める。確信度は choice の `confidence`、noul は確率(T=閾値、出発点は 0.8)。
 
 | 条件 | 扱い |
 |---|---|
-| `conflicting` | **確信度に関係なく `conflicts` に入れる**。値の食い違いは事実の誤りに直結するので、見落とすほうが害が大きい。統合はしない |
-| `complementary` / `unrelated` で確信度 0.8 以上 | 偽の重複として除く |
-| `duplicate` / `updates` で確信度 0.8 以上 | `proposals` に入れる(確定には人の承認が要る) |
-| 確信度 0.5〜0.8 | 各エントリの出典本文の抜粋を足して**1回だけ**聞き直す(§3.3)。0.8 以上になれば上の行に従い、ならなければ `held` |
-| 確信度 0.5 未満 | `held` |
+| `relation` が `conflicting`(何回目の判定でも) | **確信度に関係なく `conflicts`**。値の食い違いは事実の誤りに直結するので、見落とすほうが害が大きい。統合はしない |
+| `relation` が `duplicate` なのに、CLIの検査で両方に `value` があり値が一致しない | `conflicts`(同じ事実と判定されたのに数値が違う) |
+| `relation` が `complementary` / `unrelated` で確信度 ≥ T | 除外 |
+| `duplicate`:`relation` ≥ T かつ `same_scope` ≥ T かつ `keep` ≥ T | `proposals`(`keep` が選んだ側を残す) |
+| `updates`:`relation` ≥ T かつ `newer` が `a`/`b` で確信度 ≥ T | `proposals`(`newer` が選んだ側を残す) |
+| 上のいずれにも届かず、いずれかの確信度が 0.5 以上 | 根拠を足して**1回だけ**聞き直す(§3.3)。聞き直しの結果も上から順に評価し、届かなければ `held` |
+| それ以外 | `held` |
+
+確定には、いずれの場合も人の承認が要る。
 
 **同じ質問をそのまま聞き直さない**。Jevは同じ入力にほぼ同じ確率を返す(triage の評価セットを2回流したとき、premise の変動は ±0.06 程度だった)。確信度を上げるのは聞き直しではなく入力の追加である(triage は根拠のコード片を渡しただけで識別不能から 8/8 に改善した, #160)。
 
@@ -77,7 +81,15 @@ v1 は**案件横断のナレッジ**(`KnowledgeStore`)に限る。生成物が 
 
 ### 3.3 聞き直しの根拠
 
-出典検証で作った取得の仕組み(`cli/src/medo_cli/fetch.py`)で各エントリの `source` を取得し、`statement` の数値の周辺(出典検証の「近い箇所」と同じ抽出)を `evidence` として `state` に足す。取得に失敗したエントリは evidence 無しのまま聞き直す。聞き直しは1組につき1回までとする。
+出典検証で作った取得の仕組み(`cli/src/medo_cli/fetch.py`)で各エントリの `source` を取得し、`statement` の数値の周辺(出典検証の「近い箇所」と同じ抽出)を `evidence` として `state` に足す。**どちらかのエントリの取得に失敗したら聞き直さず `held` にする**(入力が増えないまま聞き直しても確信度は変わらない)。聞き直しは1組につき1回までとする。
+
+### 3.4 案どうしの検査
+
+同じエントリを含む案は、まとめて検査する。次のどれかに当たれば、その組の案を**すべて `held`** にする(一部だけを残すと、承認の順番で結果が変わるため)。
+
+- 1つのエントリに複数の後継が提案された(A→B と A→C)
+- 案をつなぐと連鎖になり(A→B→C)、その両端の組が `conflicts` に入っている
+- 案の後継側が、別の案で置き換えられる側になっている(連鎖は確定させず、人が順に判断する)
 
 ---
 
@@ -101,7 +113,17 @@ superseded_on: str = ""                                    # 置き換えた日 
 - 旧エントリが置き換え済みでない(同じエントリを2度置き換えない)
 - 旧と後継が同じIDでない(循環は上の2条件で起こり得ない)
 
-### 4.2 検索と索引
+**書き込みの直前に検査をやり直し**、ファイルは一時ファイルからの置き換えで原子的に書き換える。個人利用のCLIで同時実行は想定しないため、ロックは入れない(同時に走らせて検査を両方が通る経路は残る。チーム展開時に見直す)。
+
+**通常の `save` は既存IDの上書きを拒否する**(追記のみを強制)。今の `KnowledgeStore.save` は明示IDで上書きでき、来歴が空のエントリで上書きすると置き換えが消えるため。来歴を変えられるのは `supersede` だけとする。
+
+**読み込み時の検査**: 来歴の3フィールドは、すべて空かすべて埋まっているかのどちらかでなければならない。`superseded_on` はISO日付。`superseded_by` の指す先が存在しない、または連鎖が循環している場合は、`knowledge index` が警告を出す(読み込みは止めない)。
+
+### 4.2 連鎖の終端
+
+置き換えは連鎖しうる(A→B のあとで B→C)。後継を案内するときは**終端まで辿る**(A の後継として C を示す)。B を案内すると、作り直した版もまた stale になるため。
+
+### 4.3 検索と索引
 
 - `knowledge search` / `knowledge index` は置き換え済みのエントリを既定で除く。`--include-superseded` で含める。`index.md` の件数も置き換え済みを除いて数える
 - `knowledge get`(IDでの直接読み出し)は従来どおり返し、`superseded_by` を表示する。古い引用を人が追えるようにするため
@@ -111,7 +133,7 @@ superseded_on: str = ""                                    # 置き換えた日 
 ## 5. 旧エントリを引用している生成物
 
 - 生成物は版ごとに固定した記録なので、**引用IDを自動で書き換えない**。書き換えると、その版が実際には参照していなかった内容を引用したことになる
-- 引用先が置き換え済みなら、その生成物を **stale** と判定する。`make_citation_checker`(`core/src/medo_core/context.py`)の判定に「引用先が置き換えられた」を足す。理由には後継のIDを添え、作り直す版が何を引用すべきかを示す
+- 引用先が置き換え済みなら、その生成物を **stale** と判定する。引用の判定関数(`make_citation_checker`、`core/src/medo_core/context.py`)は今、stale な引用のIDの配列を返し、`freshness` がそれを固定文に連結している(`core/src/medo_core/artifacts.py`)。これを**IDごとに理由を持つ形**(`{id, reason: missing|stale|superseded, successor}`、`successor` は終端の後継)に改め、`freshness` の理由文に後継のIDを含める。既存の「引用先が無い」「鮮度切れ」の判定はそのまま残す
 - status の `regenerate_stale_artifacts` にそのまま載るので、Skillは既存の手順で作り直せる
 - `duplicate` も `updates` も扱いは同じ stale とする。数値が変わり得るので、作り直さずに済ませる経路は作らない
 
@@ -128,13 +150,18 @@ superseded_on: str = ""                                    # 置き換えた日 
 | コマンド | 内容 |
 |---|---|
 | `medo knowledge dedupe --kind <k> [--format json\|digest]` | §3 の①〜④を実行し、`proposals` / `conflicts` / `held` を出力する。**書き込みはしない** |
-| `medo knowledge supersede --kind <k> --old <id> --by <id> --reason duplicate\|updates` | 承認された1組を確定する。§4.1 の検査を通し、索引を作り直す。旧エントリを引用している生成物を**全案件から探して一覧表示**する |
+| `medo knowledge supersede --kind <k> --old <id> --by <id> --reason duplicate\|updates` | 承認された1組を確定する。§4.1 の検査を通し、索引を作り直す。影響する生成物を全案件から一覧表示する(下記) |
 
-`proposals` の各要素は `old`(置き換えられる側)/ `by`(残す側)/ `reason` / `relation` / `confidence` / `same_scope` / `primary_source` / `requeried`(聞き直したか)を持つ。`conflicts` と `held` は組と分類・確信度を持つ。
+**影響する生成物の一覧**: 案件は `Storage.list("projects")` が返すパスの第2セグメントで列挙する(Storage に案件列挙の専用操作は足さない)。各案件で、旧エントリを直接引用している生成物と、`freshness` の伝播でそこから stale になる子孫(派生スライド等)を、案件の status 計算と同じ経路で求めて表示する。
+
+`proposals` の各要素は `old`(置き換えられる側)/ `by`(残す側)/ `reason` / `relation` とその確信度 / `same_scope` / `newer` または `keep` とその確信度 / `requeried`(聞き直したか)を持つ。`conflicts` と `held` は組と分類・確信度を持つ。
 
 ### 6.2 Jevが使えないとき
 
-既存の `research triage` と同じ扱いにそろえる。`TYPESAFE_API_KEY` が無いか呼び出しに失敗したら、①の候補の組だけを `judge: unavailable` 付きで返し、統合案は出さない。
+既存の `research triage` と同じ扱いにそろえる。
+
+- `TYPESAFE_API_KEY` が無い: ①の候補の組だけを `judge: unavailable` 付きで返し、統合案は出さない(終了コード0)
+- 鍵があるのにJevの呼び出し・応答の解析が失敗した: 非ゼロ終了し、`error:` に理由を出す。判定結果として扱わない
 
 決定論だけで統合案を作る代わりの経路は設けない。誤った統合は引用の連鎖を通じて広がるので、推測で補わずそのまま人に見せる(原則5)。
 
@@ -146,8 +173,8 @@ superseded_on: str = ""                                    # 置き換えた日 
 
 1. `medo knowledge index` で全体を見る
 2. kind ごとに `medo knowledge dedupe --kind <k>` を実行する
-3. `proposals` / `conflicts` / `held` を、根拠(分類・確信度・出典)と一緒にユーザーに見せる。`conflicts` は統合せず、出典を開いて確認するよう案内する
-4. **ユーザーが承認した組だけ** `medo knowledge supersede` で確定する
+3. `proposals` / `conflicts` / `held` を、根拠(分類・確信度・出典)と一緒にユーザーに見せる。`conflicts` は統合せず、ユーザーが出典を開いて確認するよう案内する(**Agentが自分で出典を読んで解決しに行かない**)
+4. `proposals` を**1組ずつユーザーに承認を尋ね、返答を待ってから** `medo knowledge supersede` で確定する。承認されなかった組は確定しない
 5. 作り直しが要る生成物(`supersede` の出力)を報告する
 
 `judge: unavailable` のときは、候補の組を見せて判定できなかったことを報告し、統合はしない。
@@ -159,9 +186,9 @@ superseded_on: str = ""                                    # 置き換えた日 
 | 層 | 内容 |
 |---|---|
 | core `knowledge.py` | 来歴フィールド、§4.1 の検査を含む `supersede`、検索と索引からの除外、逆引き |
-| core `knowledge_dedupe.py`(新規) | 候補の組の生成(純関数)、確信度による振り分け(純関数)、引用している生成物の全案件からの逆引き |
-| core `context.py` | 「引用先が置き換えられた」による stale |
-| cli `jev.py` | 組ごとの4問の判定(`judge_pairs`)。聞き直しの evidence を含む |
+| core `knowledge_dedupe.py`(新規) | 候補の組の生成(純関数)、振り分けと案どうしの検査(純関数)、影響する生成物の全案件からの列挙 |
+| core `context.py` / `artifacts.py` | 引用の判定をIDごとの理由付きにし、「引用先が置き換えられた」による stale と終端の後継を理由に含める |
+| cli `jev.py` | 組ごとの4問(relation / same_scope / newer / keep)の判定(`judge_pairs`)。聞き直しの evidence を含む |
 | cli `main.py` | `knowledge dedupe` / `knowledge supersede` |
 | skills | `medo-knowledge-digest` |
 
@@ -173,12 +200,13 @@ coreはJevを呼ばない(LLM・外部API呼び出しはcliのアダプタ側。
 
 - 候補の組の生成、§4.1 の検査、検索からの除外、stale の判定は決定論のユニットテストにする
 - Jevは既存のテストと同じく `urlopen` を差し替える。`TYPESAFE_API_KEY` 無し・失敗で `judge: unavailable` になること、聞き直しが1回で止まること
-- **正解付きの評価セット**(`scripts/eval/` に triage と同じ形式で置く)。次の5種類を含め、Jevの分類が正解と合うかを実装の受け入れ条件にする。閾値(§3.2)はこの評価で、誤った統合案が0件になる最も低い値に決める
+- **正解付きの評価セット**(`scripts/eval/` に triage と同じ形式で置く)。次の5種類を含め、**閾値を調整する組と検証する組に分ける**(同じ組で調整と判定をすると過適合する)
   - 同じ論文を abs と pdf から引いた重複(`duplicate`)
-  - 同じ指標の新旧の値(`updates`)
-  - 同じ指標で値が食い違う(`conflicting`)
+  - 同じ指標の新旧の値(`updates`)。取得日の新旧と記述の時点の新旧が逆になっている組を必ず含める
+  - 同じ指標で値が食い違う(`conflicting`)。言い回しも出典も違う組を含める(候補生成の取り落としを測るため)
   - 同じ対象の別の側面(`complementary`)
   - 無関係な組(`unrelated`)
+- **受け入れ条件**(検証用の組で測る): 誤った統合案が0件、`conflicting` の組は候補生成からの通しで全件が `conflicts` に入る、正しい統合案の検出率が目標以上(全件 `held` に落として誤統合0件を満たす、という逃げ方を防ぐ)。閾値 T は調整用の組で、誤った統合案が0件になる最も低い値に決める
 
 ---
 
@@ -186,8 +214,8 @@ coreはJevを呼ばない(LLM・外部API呼び出しはcliのアダプタ側。
 
 | # | 内容 | 担当 |
 |---|---|---|
-| A | core: 来歴スキーマ、§4.1 の検査、検索と索引からの除外、「置き換え」による stale、候補の組の生成、振り分け、逆引き | Codex が実装、Claude がレビュー |
-| B | cli と jev: `dedupe` / `supersede`、Jevの4問と聞き直し、評価セットと閾値の決定 | Codex が実装、Claude がレビュー |
+| A | core: 来歴スキーマ、§4.1 の検査(save の上書き拒否・原子的書き込み・読み込み時の検査を含む)、連鎖の終端、検索と索引からの除外、引用の判定の理由付き化と「置き換え」による stale、候補の組の生成、振り分けと案どうしの検査、影響する生成物の列挙 | Codex が実装、Claude がレビュー |
+| B | cli と jev: `dedupe` / `supersede`、Jevの4問と聞き直し、Jev失敗時の扱い、評価セット(調整用・検証用)と閾値の決定 | Codex が実装、Claude がレビュー |
 | C | Skill `medo-knowledge-digest` と設計書・tech.md の同期(digest のLLM方針を Gemini Flash から本設計へ改める) | Claude が書き、Codex と agy がレビュー |
 
 Aから順に。B と C は CLI の契約(新しいコマンド)と Skill を変えるので人間レビューの対象。**Bの `knowledge search` / `index` の出力から置き換え済みが消えるのもSkill契約に影響する**。
