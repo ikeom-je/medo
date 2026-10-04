@@ -13,6 +13,7 @@
 | [スライド設計](phase2-slides-design.md) | AsIs説明スライド / 最終提案スライド |
 | [Skill構成と移植性](phase2-skill-portability.md) | Skillの分割、どのAgentでも動かすための条件 |
 | [ナリッジとメモリの階層](phase2-knowledge-memory.md) | 永続ナリッジと一時中間メモリ、OKF形式、概要から辿る検索 |
+| [decision-roadmap](phase2-decision-roadmap.md) | 次に潰すべき不確実性: 決め手の仮説、重要なパラメタ、策(2〜3つ)の切り替え点 |
 | [knowledge-digest とナレッジ来歴](phase2-knowledge-digest.md) | 重複統合の段階的なJev判定、supersedes の来歴、置き換えによる生成物のstale |
 | [出典検証の強化](phase2-source-verification.md) | 原文抜粋の必須化、URL取得、数値の決定論照合、Jevの補助判定 |
 
@@ -139,7 +140,6 @@
 
 | 項目 | 未了の内容 |
 |---|---|
-| `decision-roadmap` | 出力形式(生成物typeを新設するか `comparison` を使うか)が未決 |
 | pricing(再定義) | クラウド非依存でのゴールデンデータの持ち方 |
 | `build-mock` | 合意形成用モックの生成物type・保存形式 |
 | `propose-architecture` | 完全版PRFAQの技術的背景との関係、出力形式 |
@@ -162,6 +162,6 @@
 
 1. ~~重複検知(MECEのE)を `knowledge-digest` と実装共有するか、別機能にするか~~ → [knowledge-digest](phase2-knowledge-digest.md) の候補の組の生成とJevの関係分類を共有する前提で設計した(要件ノードへの適用は後続)
 2. 差別化の訴求(証跡追跡可能性)を正本のどこに書くか。**競合ツールの具体的な弱点は未検証のため、出典なしにドキュメントへ書かない**
-3. `decision-roadmap` の出力形式(生成物typeを新設するか、既存の `comparison` を使うか)
+3. ~~`decision-roadmap` の出力形式(生成物typeを新設するか、既存の `comparison` を使うか)~~ → どちらでもなく、呼ぶたびに計算する `status --view uncertainty` とした([decision-roadmap](phase2-decision-roadmap.md) §1)
 4. **Strawman提示のバイアス誘導リスクへの対処**(未解決)。仮説の精度が低いと初期信用を失い、顧客が迎合的だと誤った仮説が固定化される。撤退基準は未定
 5. **進行記録の状態をSkillが会話ログから正確に判定・更新できるか**(未検証)。実案件で検証する
