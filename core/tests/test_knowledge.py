@@ -398,3 +398,145 @@ def test_entries_are_ordered_by_number_not_lexically(store: KnowledgeStore):
     assert [e.entry_id for e in store.search(limit=11).entries][:3] == [
         "tech-1", "tech-2", "tech-3",
     ]
+
+
+def test_save_refuses_existing_id(store):
+    entry_id = store.save(_entry())
+    with pytest.raises(ValueError, match="上書き"):
+        store.save(_entry(entry_id=entry_id, statement="別の文"))
+    assert store.get("tech", entry_id).statement == _entry().statement
+
+
+def test_supersede_records_provenance_and_hides_from_search(store, tmp_path):
+    old = store.save(_entry(statement="旧"))
+    new = store.save(_entry(statement="新"))
+
+    updated = store.supersede("tech", old, new, "duplicate", today=date(2026, 10, 4))
+
+    assert (updated.superseded_by, updated.supersede_reason, updated.superseded_on) == (
+        new, "duplicate", "2026-10-04")
+    assert updated.is_superseded
+    assert [e.entry_id for e in store.search("", kind="tech").entries] == [new]
+    assert {e.entry_id for e in store.search(
+        "", kind="tech", include_superseded=True).entries} == {old, new}
+    assert store.index("tech").entry_count == 1
+    assert store.index("tech", include_superseded=True).entry_count == 2
+    assert store.get("tech", old).superseded_by == new
+    meta = yaml.safe_load((tmp_path / "tech" / "index.md").read_text().split("---")[1])
+    assert meta["entry_count"] == 1
+    assert old not in store.index("tech").body
+    assert not store.get("tech", new).is_superseded
+
+
+@pytest.mark.parametrize("case", ["same", "missing", "kind", "old_done", "new_done"])
+def test_supersede_rejects_invalid(store, case):
+    a, b, c = (store.save(_entry()) for _ in range(3))
+    m = store.save(_entry(kind="market", source="https://example.com/m"))
+    if case == "old_done":
+        store.supersede("tech", a, b, "duplicate")
+    if case == "new_done":
+        store.supersede("tech", b, c, "duplicate")
+    args = {"same": (a, a), "missing": (a, "tech-99"), "kind": (a, m),
+            "old_done": (a, c), "new_done": (a, b)}[case]
+    with pytest.raises(ValueError):
+        store.supersede("tech", *args, "duplicate")
+
+
+def test_terminal_follows_chain(store):
+    a, b, c = (store.save(_entry()) for _ in range(3))
+    store.supersede("tech", a, b, "updates")
+    store.supersede("tech", b, c, "updates")
+    assert store.terminal("tech", a) == c
+    assert store.terminal("tech", c) == c
+
+
+def test_index_warns_on_broken_provenance(store, tmp_path):
+    a = store.save(_entry())
+    path = tmp_path / "tech" / f"{a}.md"
+    path.write_text(path.read_text(encoding="utf-8").replace(
+        "---\n", "---\nsuperseded_by: tech-99\n", 1), encoding="utf-8")
+
+    index = store.index("tech")
+    assert index is not None
+    assert any("tech-99" in w for w in index.warnings)
+    assert store.get("tech", a).statement == _entry().statement
+    assert store.search().total == 1
+
+
+def test_provenance_fields_are_all_or_nothing():
+    with pytest.raises(ValueError):
+        _entry(superseded_by="tech-2")
+
+
+@pytest.mark.parametrize("day", ["bad", "2026-02-30", "20261004", "2026-W40-7"])
+def test_provenance_date_requires_iso_calendar_date(day):
+    with pytest.raises(ValueError):
+        _entry(superseded_by="tech-2", supersede_reason="duplicate", superseded_on=day)
+
+
+def test_save_refuses_existing_id_after_supersede(store):
+    a, b = (store.save(_entry()) for _ in range(2))
+    store.supersede("tech", a, b, "duplicate")
+    with pytest.raises(ValueError, match="上書き"):
+        store.save(_entry(entry_id=a))
+    assert store.get("tech", a).superseded_by == b
+
+
+def test_save_refuses_new_entry_with_provenance(store):
+    with pytest.raises(ValueError, match="supersede"):
+        store.save(_entry(superseded_by="tech-2", supersede_reason="duplicate",
+                          superseded_on="2026-10-04"))
+    assert store.search().total == 0
+
+
+def test_supersede_rejects_invalid_reason_without_writing(store):
+    a, b = (store.save(_entry()) for _ in range(2))
+    with pytest.raises(ValueError):
+        store.supersede("tech", a, b, "invalid")
+    assert not store.get("tech", a).is_superseded
+
+
+@pytest.mark.parametrize("broken", ["missing", "cycle"])
+def test_terminal_and_index_report_broken_chains(store, tmp_path, broken):
+    a, b = (store.save(_entry()) for _ in range(2))
+    store.supersede("tech", a, b, "updates")
+    path = tmp_path / "tech" / f"{b}.md"
+    meta = yaml.safe_load(path.read_text().split("---")[1])
+    meta.update(superseded_by="tech-99" if broken == "missing" else a,
+                supersede_reason="updates", superseded_on="2026-10-04")
+    path.write_text(f"---\n{yaml.safe_dump(meta)}---\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="見つかりません" if broken == "missing" else "循環"):
+        store.terminal("tech", a)
+    assert len(store.index("tech").warnings) == 2
+
+
+def test_index_warns_on_invalid_provenance_date(store, tmp_path):
+    a, b = (store.save(_entry()) for _ in range(2))
+    store.supersede("tech", a, b, "updates", today=date(2026, 10, 4))
+    path = tmp_path / "tech" / f"{a}.md"
+    path.write_text(path.read_text().replace("2026-10-04", "bad"), encoding="utf-8")
+    assert store.index("tech").warnings
+    assert store.get("tech", a).statement == _entry().statement
+
+
+def test_index_stale_count_excludes_superseded(store):
+    a = store.save(_entry(retrieved="2026-01-01"))
+    b = store.save(_entry(retrieved="2026-10-01"))
+    store.supersede("tech", a, b, "updates")
+    assert store.index("tech", today=date(2026, 10, 4)).stale_count == 0
+    assert store.index("tech", today=date(2026, 10, 4), include_superseded=True).stale_count == 1
+
+
+def test_supersede_atomic_failure_keeps_existing_entry(store, tmp_path, monkeypatch):
+    a, b = (store.save(_entry()) for _ in range(2))
+    path = tmp_path / "tech" / f"{a}.md"
+    before = path.read_bytes()
+
+    def fail_replace(self, target):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="replace failed"):
+        store.supersede("tech", a, b, "duplicate")
+    assert path.read_bytes() == before

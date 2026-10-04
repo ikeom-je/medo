@@ -400,3 +400,34 @@ def test_uncovered_challenges_are_exposed_as_structured_field(tmp_path):
                                 core_challenge_ids={"ch-1", "ch-2"})
 
     assert freshness["mini-prfaq-v1"].uncovered_challenge_ids == ["ch-2"]
+
+
+def test_superseded_citation_reason_and_staleness_propagate_to_descendants(tmp_path):
+    from datetime import date
+
+    from medo_core.context import make_citation_checker
+    from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
+
+    today = date(2026, 10, 4)
+    storage = LocalJsonStorage(tmp_path / "data")
+    knowledge = KnowledgeStore(tmp_path / "knowledge")
+    a, b, c = (knowledge.save(KnowledgeEntry(
+        kind="tech", statement=f"s{i}", source="https://example.com",
+        retrieved=today.isoformat())) for i in range(3))
+    knowledge.supersede("tech", a, b, "duplicate", today=today)
+    knowledge.supersede("tech", b, c, "updates", today=today)
+    store = ArtifactStore(storage)
+    store.save("p1", _artifact(type="research", cited_knowledge=[a]))
+    store.save("p1", _artifact(derived_from=["research-v1"]))
+    store.save("p1", _artifact(type="slides", slide_kind="discussion",
+                              derived_from=["as-is-report-v1"]))
+
+    freshness = store.freshness(
+        "p1", 1, set(), today=today,
+        is_citation_stale=make_citation_checker(storage, "p1", tmp_path / "knowledge"))
+
+    assert freshness["research-v1"].state == "stale"
+    assert freshness["research-v1"].reasons == [f"引用が古くなっています: {a}(置き換え済み → {c})"]
+    assert freshness["as-is-report-v1"].state == "stale"
+    assert freshness["slides-v1"].state == "stale"
+    assert store.get("p1", "research-v1").cited_knowledge == [a]
