@@ -105,6 +105,7 @@ medo status --project <id> --include-scope secondary   # 診断範囲を広げ�
 | 振り返る・次へ進む | `medo-decide` | `requirements save` / `checkpoint answer` / `requirements diff` |
 | 打ち手の提案 | `medo-propose-options` | `facts save` / `fermi calc` / `knowledge search` / `artifacts save --type mini-prfaq` |
 | PRFAQ育成と最終提案 | `medo-grow-prfaq` | `artifacts save --type prfaq --rejected` / `artifacts outline --slide-kind final` / `artifacts save --type slides --slide-kind final` / `respond add --purpose phase_signoff` |
+| ナレッジの保守(標準周回の外) | `medo-knowledge-digest` | `knowledge dedupe` / `knowledge get` / `knowledge supersede` |
 
 `medo-hearing` は `medo-investigate` に統合済み(移行期間中のポインタとして残している)。
 
@@ -222,6 +223,8 @@ medo facts list --project <id>
 medo fermi calc --project <id> --file /tmp/model.yaml
 medo knowledge index                  # 何がどれだけあるか(件数・stale件数)
 medo knowledge search "<キーワード>"    # 実体。索引は経由しない
+medo knowledge dedupe --kind tech      # 重複の統合案(書き込まない)。Skill medo-knowledge-digest が使う
+medo knowledge supersede --kind tech --old tech-1 --by tech-2 --reason duplicate  # 承認した組を確定
 ```
 
 **数値は出典に忠実に転記し、加工しない**。換算・集計はフェルミ推定で行い、計算はコードが担う(ast制限の四則演算+累乗)。出典の無いファクト・ナレッジは保存が拒否される。本文を取得できない場合は未検証として警告付きで保存される。抽出不良を目視で確認した場合は `--unverifiable-reason "抽出不良: <状況>"` を指定できる。鮮度切れは `stale` として全レスポンスに付く。

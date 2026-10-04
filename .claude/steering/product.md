@@ -59,7 +59,7 @@
 |---|---|---|
 | 手順(ヒアリング・打ち手提案・PRFAQ育成の進め方) | Skill(ホストLLMが実行) | 生成的 |
 | 事実と計算(ファクト保存検証・フェルミ計算・技術ナリッジ・要件保存) | medo CLI + core | 決定論 |
-| かさばる検索(市場・国策・業界動向・技術/サービス情報) | ホストLLMの検索 +(フェーズ2)knowledge-digest | 生成的だが出典必須 |
+| かさばる検索(市場・国策・業界動向・技術/サービス情報) | ホストLLMの検索 | 生成的だが出典必須 |
 
 ### 原則3: 課題も要件も最初から確定しない
 
@@ -97,6 +97,6 @@ CLI失敗時は非ゼロ終了+構造化エラー。出典のないファクト�
 | フェーズ | 内容 | 完了の定義 |
 |---|---|---|
 | 1 | What/Why縦切りMVP: core(要件拡張・facts・fermi・knowledge)+`medo` CLI+Skill 3本(hearing / propose-options / grow-prfaq) | 実案件1件で 課題ヒアリング→市場ファクト+フェルミ推定→打ち手ミニPRFAQ比較→合意案の完全版PRFAQ(技術ナリッジ根拠付き) がClaude Code/agy両方で通る |
-| 2 | 提案完成形+ナリッジ洗練: make-slides / build-mock / propose-architecture / pricing計算機 / decision-roadmap / knowledge-digest(蓄積ナリッジの分析・重複統合・鮮度見直し) / 簡易Webアプリ | 課題→標準周回による現状と理想の合意(収束判定を満たす)→共感できるドキュメント+提案スライドまで半日。knowledgeが案件を跨いで洗練される(`build-mock` は後続) |
+| 2 | 提案完成形+ナリッジ洗練: make-slides / build-mock / propose-architecture / pricing計算機 / decision-roadmap / knowledge-digest(蓄積ナリッジの重複統合と来歴) / 簡易Webアプリ | 課題→標準周回による現状と理想の合意(収束判定を満たす)→共感できるドキュメント+提案スライドまで半日。knowledgeが案件を跨いで洗練される(`build-mock` は後続) |
 | 3 | 運用自動化: 類似案件検索 /(必要になれば)特定クラウドAPI連携ETLをプラグインとして追加 | ナリッジが人手の負担少なく鮮度維持される |
 | バックログ | compare-aws / MCPアダプタ / A2Aサーバー(Gemini Enterprise) / チーム展開 | — |

@@ -319,3 +319,15 @@ def test_knowledge_is_read_through_the_index_first(tmp_path):
     """索引を読まずに実体を引くと、蓄積が増えるほどコンテキストを食う。"""
     for name in ("medo-propose-options", "medo-grow-prfaq"):
         assert "medo knowledge index" in _built(tmp_path, name), name
+
+
+MAINTENANCE_SKILLS = ["medo-knowledge-digest"]
+
+
+def test_knowledge_digest_skill_confirms_each_proposal_before_superseding(tmp_path):
+    """承認を待たずに置き換えると、誤った統合が引用の連鎖で広がる(設計 §6.3)。"""
+    text = _built(tmp_path, "medo-knowledge-digest")
+    assert "medo knowledge dedupe" in text and "medo knowledge supersede" in text
+    assert "1組ずつ" in text and "judge: unavailable" in text
+    body = text.partition("## 契約")[2]
+    assert len([line for line in body.splitlines() if line.startswith("- ")]) == 3

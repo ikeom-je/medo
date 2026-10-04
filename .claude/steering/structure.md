@@ -42,13 +42,14 @@ core/
 │   ├── requirements.py  # RequirementsDoc(背景・方針/理念・課題・要件)+ Store(自動バージョン採番・diff)
 │   ├── facts.py         # Fact + FactStore(kind: market/policy/trend/company。案件スコープ・出典必須・180日stale判定)
 │   ├── fermi.py         # フェルミ推定の決定論計算(ファクト参照+明示的仮定×式。ast制限の四則演算+累乗。モデル込み保存で再計算可能)
-│   ├── knowledge.py     # KnowledgeEntry + KnowledgeStore(案件横断・出典必須・OKF形式で保存。kind: tech/market/policy/trend/company/practice) + ProjectKnowledgeEntry + KnowledgeBackend(markdown/sqlite。案件固有・単一案件スコープ)
+│   ├── knowledge_dedupe.py  # 重複の候補の組・振り分け・案どうしの検査・影響する生成物の列挙(Jevの判定を受け取る純関数)
+│   ├── knowledge.py     # KnowledgeEntry + KnowledgeStore(案件横断・出典必須・OKF形式で保存・置き換えの来歴。kind: tech/market/policy/trend/company/practice) + ProjectKnowledgeEntry + KnowledgeBackend(markdown/sqlite。案件固有・単一案件スコープ)
 │   ├── artifacts.py     # Artifact + ArtifactStore(要件バージョン・引用ファクト/ナリッジ紐づけ・陳腐化検出)
 │   └── status.py        # project_status(): 現在地と次ステップ(next_step)の決定論導出
 └── tests/
 ```
 
-**責務**: 要件・ファクト・フェルミ計算・技術ナリッジ・生成物のスキーマと永続化・決定論計算。LLM呼び出しを含まない(唯一の例外は将来の knowledge-digest = 構造化・圧縮専任)。
+**責務**: 要件・ファクト・フェルミ計算・技術ナリッジ・生成物のスキーマと永続化・決定論計算。LLM・外部APIの呼び出しを含まない(knowledge-digest の Jev 判定は cli のアダプタが行い、core は判定結果を受け取る純関数だけを持つ)。
 
 ---
 
@@ -73,7 +74,8 @@ skills/
 ├── src/                       # 共通Skill(frontmatter付き)。1フォルダ=1 Skill
 │   ├── medo-hearing/SKILL.md            # 業界・ビジネス状況・課題・経営思想/方針の構造化
 │   ├── medo-propose-options/SKILL.md    # 市場ファクト+フェルミ+技術ナリッジ根拠→打ち手候補のミニPRFAQ候補セット化
-│   └── medo-grow-prfaq/SKILL.md         # 合意案を完全版PRFAQへ育成し、最終提案スライドと承認記録まで運ぶ
+│   ├── medo-grow-prfaq/SKILL.md         # 合意案を完全版PRFAQへ育成し、最終提案スライドと承認記録まで運ぶ
+│   └── medo-knowledge-digest/SKILL.md   # 蓄積ナレッジの重複を統合し来歴を残す(標準周回とは別の保守作業)
 ├── build.py             # dist/<name>/SKILL.md を生成(3ホスト共通形式・変換なし)
 ├── tests/
 └── dist/                # ビルド出力(.gitignored)
