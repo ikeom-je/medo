@@ -1,8 +1,10 @@
 from datetime import date
 
 from medo_core.artifacts import Artifact, ArtifactStore
-from medo_core.context import collect, workflow_branch
+from medo_core.context import collect, make_citation_checker, workflow_branch
 from medo_core.events import ArtifactTarget, AsIsReportReviewed, StakeholderResponded
+from medo_core.facts import Fact, FactStore, Verification
+from medo_core.knowledge import KnowledgeEntry, KnowledgeStore
 from medo_core.nodes import AsIs, Challenge, Stakeholder
 from medo_core.requirements import RequirementsDoc, RequirementsStore
 from medo_core.storage import LocalJsonStorage
@@ -211,3 +213,61 @@ def test_historical_freshness_marks_dependent_change_stale():
     )]
 
     assert _historical_freshness(artifacts, manifests)["as-is-report-v1"].state == "stale"
+
+
+def _artifact(**kw):
+    return Artifact(**{
+        "project": "p1", "type": "research", "requirements_version": 1,
+        "generated_by": "codex", "content": "x", **kw,
+    })
+
+
+def test_citation_reason_names_terminal_successor(tmp_path):
+    knowledge = KnowledgeStore(tmp_path / "knowledge")
+    a, b, c = (knowledge.save(KnowledgeEntry(
+        kind="tech", statement=f"s{i}", source="https://example.com",
+        retrieved=TODAY.isoformat())) for i in range(3))
+    knowledge.supersede("tech", a, b, "updates", today=TODAY)
+    knowledge.supersede("tech", b, c, "updates", today=TODAY)
+    storage = LocalJsonStorage(tmp_path / "data")
+    checker = make_citation_checker(storage, "p1", knowledge_root=tmp_path / "knowledge")
+
+    issues = checker(_artifact(cited_knowledge=[a]), TODAY)
+
+    assert [(i.id, i.reason, i.successor) for i in issues] == [(a, "superseded", c)]
+    assert str(issues[0]) == f"{a}(置き換え済み → {c})"
+
+
+def test_citation_checker_keeps_missing_and_stale(tmp_path):
+    storage = LocalJsonStorage(tmp_path / "data")
+    checker = make_citation_checker(storage, "p1", knowledge_root=tmp_path / "knowledge")
+    issues = checker(_artifact(cited_facts=["fact-9"], cited_knowledge=["tech-9"]), TODAY)
+    assert {(i.id, i.reason) for i in issues} == {("fact-9", "missing"), ("tech-9", "missing")}
+    assert {str(i) for i in issues} == {"fact-9", "tech-9"}
+
+
+def test_citation_checker_reports_expired_facts_and_knowledge(tmp_path):
+    storage = LocalJsonStorage(tmp_path / "data")
+    fact_id = FactStore(storage).save("p1", Fact(
+        kind="market", statement="s", source="https://example.com",
+        retrieved="2026-01-01", verification=Verification(status="unverified")))
+    entry_id = KnowledgeStore(tmp_path / "knowledge").save(KnowledgeEntry(
+        kind="tech", statement="s", source="https://example.com", retrieved="2026-01-01"))
+    checker = make_citation_checker(storage, "p1", knowledge_root=tmp_path / "knowledge")
+
+    issues = checker(_artifact(cited_facts=[fact_id], cited_knowledge=[entry_id]), TODAY)
+
+    assert [(i.id, i.reason, i.successor) for i in issues] == [
+        (fact_id, "stale", ""), (entry_id, "stale", "")]
+    assert [str(i) for i in issues] == [fact_id, entry_id]
+
+
+def test_citation_checker_accepts_current_citations_and_marks_invalid_id_missing(tmp_path):
+    storage = LocalJsonStorage(tmp_path / "data")
+    entry_id = KnowledgeStore(tmp_path / "knowledge").save(KnowledgeEntry(
+        kind="tech", statement="s", source="https://example.com", retrieved=TODAY.isoformat()))
+    checker = make_citation_checker(storage, "p1", knowledge_root=tmp_path / "knowledge")
+
+    assert checker(_artifact(cited_knowledge=[entry_id]), TODAY) == []
+    issues = checker(_artifact(cited_knowledge=["invalid"]), TODAY)
+    assert [(i.id, i.reason) for i in issues] == [("invalid", "missing")]

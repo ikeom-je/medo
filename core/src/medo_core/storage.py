@@ -1,5 +1,7 @@
 """ドキュメントストア抽象。パスはFirestore互換(document=偶数セグメント)。"""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from typing import Protocol
@@ -9,6 +11,7 @@ class Storage(Protocol):
     def get(self, path: str) -> dict | None: ...
     def put(self, path: str, doc: dict) -> None: ...
     def list(self, prefix: str) -> list[str]: ...
+    def list_children(self, prefix: str) -> list[str]: ...
 
 
 class LocalJsonStorage:
@@ -37,6 +40,12 @@ class LocalJsonStorage:
             return []
         return sorted(f"{prefix}/{f.stem}" for f in d.glob("*.json"))
 
+    def list_children(self, prefix: str) -> list[str]:
+        d = self._root / prefix
+        if not d.is_dir():
+            return []
+        return sorted({p.stem if p.suffix == ".json" else p.name for p in d.iterdir()})
+
 
 class FirestoreStorage:
     """google-cloud-firestore クライアントの薄いラッパー。"""
@@ -54,3 +63,6 @@ class FirestoreStorage:
     def list(self, prefix: str) -> list[str]:
         refs = self._client.collection(prefix).list_documents()
         return [f"{prefix}/{ref.id}" for ref in refs]
+
+    def list_children(self, prefix: str) -> list[str]:
+        return sorted(ref.id for ref in self._client.collection(prefix).list_documents())

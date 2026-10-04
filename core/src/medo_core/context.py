@@ -7,6 +7,7 @@ status.py が収集と提示を兼ねると、1関数が3つの責務を持ち�
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, PrivateAttr
 
@@ -58,30 +59,51 @@ class StatusContext(BaseModel):
     )
 
 
+class CitationIssue(BaseModel):
+    id: str
+    reason: Literal["missing", "stale", "superseded"]
+    successor: str = ""
+
+    def __str__(self) -> str:
+        if self.reason == "superseded":
+            return f"{self.id}(置き換え済み → {self.successor})"
+        return self.id
+
+
 def make_citation_checker(
     storage: Storage, project_id: str, knowledge_root: Path | None = None
-) -> Callable[[Artifact, date | None], list[str]]:
-    """生成物のうち、欠落またはstaleな引用IDを返す判定関数を作る。"""
+) -> Callable[[Artifact, date | None], list[CitationIssue]]:
+    """欠落・鮮度切れ・置き換え済みの引用を理由と後継ID付きで返す。"""
     facts = FactStore(storage)
     knowledge = KnowledgeStore(
         knowledge_root if knowledge_root is not None else get_knowledge_root()
     )
 
-    def citation_checker(artifact: Artifact, today: date | None) -> list[str]:
-        stale = []
+    def citation_checker(artifact: Artifact, today: date | None) -> list[CitationIssue]:
+        issues: list[CitationIssue] = []
         for fact_id in artifact.cited_facts:
             fact = facts.get(project_id, fact_id)
-            if fact is None or fact.is_stale(today=today):
-                stale.append(fact_id)
+            if fact is None:
+                issues.append(CitationIssue(id=fact_id, reason="missing"))
+            elif fact.is_stale(today=today):
+                issues.append(CitationIssue(id=fact_id, reason="stale"))
         for entry_id in artifact.cited_knowledge:
             if "-" not in entry_id:
-                stale.append(entry_id)
+                issues.append(CitationIssue(id=entry_id, reason="missing"))
                 continue
             kind, _ = entry_id.rsplit("-", 1)
             entry = knowledge.get(kind, entry_id)
-            if entry is None or entry.is_stale(today=today):
-                stale.append(entry_id)
-        return stale
+            if entry is None:
+                issues.append(CitationIssue(id=entry_id, reason="missing"))
+            elif entry.is_superseded:
+                try:
+                    successor = knowledge.terminal(kind, entry_id)
+                except ValueError:
+                    successor = entry.superseded_by
+                issues.append(CitationIssue(id=entry_id, reason="superseded", successor=successor))
+            elif entry.is_stale(today=today):
+                issues.append(CitationIssue(id=entry_id, reason="stale"))
+        return issues
 
     return citation_checker
 

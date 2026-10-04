@@ -263,7 +263,7 @@ class ArtifactStore:
             )
             if stale_citations:
                 state = "stale"
-                reasons.append(f"引用が古くなっています: {', '.join(stale_citations)}")
+                reasons.append(f"引用が古くなっています: {', '.join(str(c) for c in stale_citations)}")
 
             sections = DEPENDENT_SECTIONS.get((artifact.type, artifact.slide_kind), ())
             changed = fold_substantive_sections(

@@ -16,6 +16,7 @@ KnowledgeKind = Literal["tech", "market", "policy", "trend", "company", "practic
 _URL_KINDS = {"tech", "market", "policy", "trend"}
 _STALE_THRESHOLD_DAYS = {"tech": 30}
 _DEFAULT_STALE_THRESHOLD_DAYS = 180
+_PROVENANCE_FIELDS = ("superseded_by", "supersede_reason", "superseded_on")
 
 TrustStatus = Literal["unverified", "machine-confirmed", "human-reviewed"]
 
@@ -109,6 +110,7 @@ class KnowledgeIndex(BaseModel):
     stale_count: int | None                 # None は鮮度を数えていない層(案件固有)
     generated: str
     body: str = ""
+    warnings: list[str] = Field(default_factory=list)
 
 
 class KnowledgeEntry(BaseModel):
@@ -122,9 +124,17 @@ class KnowledgeEntry(BaseModel):
     status: TrustStatus = "unverified"
     actor: str = ""                       # 書いた主体。人間なら human:<id>
     note: str = ""
+    superseded_by: str = ""
+    supersede_reason: Literal["", "duplicate", "updates"] = ""
+    superseded_on: str = ""
+
+    @property
+    def is_superseded(self) -> bool:
+        return bool(self.superseded_by)
 
     def to_okf(self) -> dict:
         meta = self.model_dump(mode="json", exclude={"entry_id", "source", "retrieved"})
+        meta = {k: v for k, v in meta.items() if k not in _PROVENANCE_FIELDS or v}
         return {
             "type": _OKF_TYPE, "kind": meta.pop("kind"), "statement": meta.pop("statement"),
             "sources": [self.source], "generated": self.retrieved,
@@ -143,6 +153,14 @@ class KnowledgeEntry(BaseModel):
             date.fromisoformat(self.retrieved)
         except ValueError as e:
             raise ValueError(f"retrieved はISO日付(YYYY-MM-DD)である必要があります: {e}") from e
+        provenance = (self.superseded_by, self.supersede_reason, self.superseded_on)
+        if any(provenance) and not all(provenance):
+            raise ValueError(
+                "superseded_by / supersede_reason / superseded_on はすべて指定するか、すべて空にする"
+            )
+        if self.superseded_on:
+            if date.fromisoformat(self.superseded_on).isoformat() != self.superseded_on:
+                raise ValueError("superseded_on はISO日付(YYYY-MM-DD)である必要があります")
         return self
 
     def is_stale(self, today: date | None = None) -> bool:
@@ -154,7 +172,12 @@ class KnowledgeEntry(BaseModel):
 def _write_frontmatter(path: Path, meta: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     front = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False)
-    path.write_text(f"---\n{front}---\n", encoding="utf-8")
+    tmp = path.with_suffix(".md.tmp")
+    try:
+        tmp.write_text(f"---\n{front}---\n", encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def _read_frontmatter(path: Path) -> dict:
@@ -183,24 +206,94 @@ class KnowledgeStore:
                         nums.append(int(m.group(1)))
             entry = entry.model_copy(update={"entry_id": f"{entry.kind}-{max(nums, default=0) + 1}"})
         path = self._dir(entry.kind) / f"{entry.entry_id}.md"
+        if path.exists():
+            raise ValueError(f"既存のエントリは上書きできません: {entry.entry_id}")
+        if entry.is_superseded:
+            raise ValueError("来歴は supersede でのみ保存できます")
         _write_frontmatter(path, entry.to_okf())
         self.rebuild_index(entry.kind)
         return entry.entry_id
 
-    def _entries(self, kind: str) -> list[KnowledgeEntry]:
+    def _load(self, path: Path, kind: str) -> tuple[KnowledgeEntry, str | None]:
+        meta = {**_from_okf(_read_frontmatter(path)), "entry_id": path.stem, "kind": kind}
+        try:
+            return KnowledgeEntry.model_validate(meta), None
+        except ValueError as e:
+            # 手編集の来歴だけで蓄積全体を読めなくしない。その他の検証は緩めない。
+            provenance = {key: meta.pop(key, "") for key in _PROVENANCE_FIELDS}
+            entry = KnowledgeEntry.model_validate(meta)
+            return entry, f"{path.stem}: 来歴が不正です({provenance}: {e})"
+
+    def _loaded(self, kind: str) -> list[tuple[KnowledgeEntry, str | None]]:
         d = self._dir(kind)
         if not d.is_dir():
             return []
         return [
-            KnowledgeEntry.model_validate(
-                {**_from_okf(_read_frontmatter(path)), "entry_id": path.stem, "kind": kind}
-            )
+            self._load(path, kind)
             for path in sorted(d.glob(f"{kind}-*.md"), key=_entry_number)
         ]
 
+    def _entries(self, kind: str) -> list[KnowledgeEntry]:
+        return [e for e, _ in self._loaded(kind)]
+
+    def supersede(
+        self, kind: str, old_id: str, by_id: str,
+        reason: Literal["duplicate", "updates"], today: date | None = None,
+    ) -> KnowledgeEntry:
+        def check() -> KnowledgeEntry:
+            if old_id == by_id:
+                raise ValueError("旧エントリと後継が同じです")
+            old, new = self.get(kind, old_id), self.get(kind, by_id)
+            if old is None or new is None:
+                missing = old_id if old is None else by_id
+                raise ValueError(f"エントリが見つかりません: {missing}")
+            if old.is_superseded:
+                raise ValueError(f"{old_id} は置き換え済みです(→ {old.superseded_by})")
+            if new.is_superseded:
+                raise ValueError(f"後継 {by_id} 自身が置き換え済みです(→ {new.superseded_by})")
+            return old
+
+        old = check()
+        updates = {
+            "superseded_by": by_id, "supersede_reason": reason,
+            "superseded_on": (today or date.today()).isoformat(),
+        }
+        updated = KnowledgeEntry.model_validate({**old.model_dump(), **updates})
+        # 同時実行を想定しない個人用CLIなのでロックは入れない(spec §4.1)。
+        old = check()
+        updated = KnowledgeEntry.model_validate({**old.model_dump(), **updates})
+        _write_frontmatter(self._dir(kind) / f"{old_id}.md", updated.to_okf())
+        self.rebuild_index(kind)
+        return updated
+
+    def terminal(self, kind: str, entry_id: str) -> str:
+        seen: set[str] = set()
+        current = entry_id
+        while True:
+            if current in seen:
+                raise ValueError(f"置き換えが循環しています: {entry_id}")
+            seen.add(current)
+            entry = self.get(kind, current)
+            if entry is None:
+                raise ValueError(f"置き換え先が見つかりません: {current}")
+            if not entry.is_superseded:
+                return current
+            current = entry.superseded_by
+
+    def provenance_warnings(self, kind: str) -> list[str]:
+        loaded = self._loaded(kind)
+        warnings = [w for _, w in loaded if w]
+        for entry, _ in loaded:
+            if entry.is_superseded:
+                try:
+                    self.terminal(kind, entry.entry_id)
+                except ValueError as e:
+                    warnings.append(f"{entry.entry_id}: {e}")
+        return warnings
+
     def rebuild_index(self, kind: str, today: date | None = None) -> None:
         """索引を作り直す。stale件数は書かない(読み出し時に数える)。"""
-        entries = self._entries(kind)
+        entries = [e for e in self._entries(kind) if not e.is_superseded]
         body = body_of(entries)
         path = self._dir(kind) / "index.md"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,15 +304,19 @@ class KnowledgeStore:
         )
         path.write_text(f"---\n{front}---\n\n## このkindに何があるか\n\n{body}\n", encoding="utf-8")
 
-    def index(self, kind: str, today: date | None = None) -> KnowledgeIndex | None:
+    def index(
+        self, kind: str, today: date | None = None, include_superseded: bool = False,
+    ) -> KnowledgeIndex | None:
         path = self._dir(kind) / "index.md"
         if not path.exists():
             return None
         meta = _index_meta(path)
+        entries = [e for e in self._entries(kind) if include_superseded or not e.is_superseded]
         return KnowledgeIndex(
-            scope=kind, entry_count=meta.get("entry_count", 0),
-            stale_count=sum(1 for e in self._entries(kind) if e.is_stale(today=today)),
-            generated=meta.get("generated", ""), body=body_of(self._entries(kind)),
+            scope=kind, entry_count=len(entries) if "entry_count" in meta else 0,
+            stale_count=sum(1 for e in entries if e.is_stale(today=today)),
+            generated=meta.get("generated", ""), body=body_of(entries),
+            warnings=self.provenance_warnings(kind),
         )
 
     def kinds(self) -> list[str]:
@@ -231,12 +328,12 @@ class KnowledgeStore:
         path = self._dir(kind) / f"{entry_id}.md"
         if not path.exists():
             return None
-        meta = _read_frontmatter(path)
-        return KnowledgeEntry.model_validate({**_from_okf(meta), "entry_id": entry_id, "kind": kind})
+        return self._load(path, kind)[0]
 
     def search(
         self, query: str = "", kind: str | None = None, limit: int = 10,
         char_budget: int = DEFAULT_CHAR_BUDGET,
+        include_superseded: bool = False,
     ) -> SearchResult:
         """エントリの実体を走査する。索引は経由しない。
 
@@ -247,6 +344,8 @@ class KnowledgeStore:
         hits: list[KnowledgeEntry] = []
         for k in [kind] if kind else self.kinds():
             for entry in self._entries(k):
+                if entry.is_superseded and not include_superseded:
+                    continue
                 if q and q not in " ".join([entry.statement, entry.note]).lower():
                     continue
                 hits.append(entry)

@@ -48,3 +48,35 @@ def test_firestore_get_missing_returns_none():
     snap.exists = False
     client.document.return_value.get.return_value = snap
     assert FirestoreStorage(client).get("catalog/none") is None
+
+
+def test_list_children_returns_project_dirs_without_json(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    storage.put("projects/p1/facts/fact-1", {"x": 1})
+    storage.put("projects/p2/requirements/v1", {"x": 1})
+
+    assert storage.list("projects") == []
+    assert storage.list_children("projects") == ["p1", "p2"]
+
+
+def test_list_children_of_missing_prefix_is_empty(tmp_path):
+    assert LocalJsonStorage(tmp_path).list_children("projects") == []
+
+
+def test_list_children_returns_sorted_unique_file_and_directory_names(tmp_path):
+    storage = LocalJsonStorage(tmp_path)
+    storage.put("projects/p2", {"x": 1})
+    storage.put("projects/p1/facts/fact-1", {"x": 1})
+    storage.put("projects/p1", {"x": 1})
+
+    assert storage.list_children("projects") == ["p1", "p2"]
+
+
+def test_firestore_list_children_includes_parents_without_document_bodies():
+    client = MagicMock()
+    client.collection.return_value.list_documents.return_value = [
+        MagicMock(id="p2"), MagicMock(id="p1"),
+    ]
+
+    assert FirestoreStorage(client).list_children("projects") == ["p1", "p2"]
+    client.collection.assert_called_once_with("projects")
