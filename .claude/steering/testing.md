@@ -32,14 +32,14 @@ CI はフェーズ1では構築しない。ローカルで `uv run pytest` を�
 - `typer.testing.CliRunner` + autouse fixture で `MEDO_BACKEND=local` / `MEDO_HOME=tmp_path` を設定
 - 正常系の出力形式(`saved: v1` 等)と、失敗系(存在しないプロジェクト→exit code 1 + `error:`)の両方を必ず書く
 
-### LLMを使う処理の外部依存の切り方(フェーズ2 knowledge-digest 等)
+### 外部の判定(Jev)の切り方
 
 | 依存 | テストでの扱い |
 |---|---|
-| LLMによる構造化・圧縮 | `generate: Callable[[str], str]` を注入。fakeがJSONを返す |
-| **LLMの実呼び出し** | **テストに含めない**(コスト・非決定性のため) |
+| Jev(TypeSafe System One) | `cli/src/medo_cli/jev.py` の `urlopen`、または呼び出し側の関数(`judge_pairs` 等)を差し替える。core は Jev を呼ばないので差し替え不要 |
+| **Jevの実呼び出し** | **テストに含めない**(コスト・非決定性のため)。閾値や質問文の良し悪しは `scripts/eval/` の正解付き評価セットで実呼び出しして測る |
 
-LLM出力の検証ロジック(pydantic検証・不正JSON・スキーマ違反)は fake generate で必ずカバーする。
+鍵が無いとき(`unavailable`)、呼び出し・応答の解析が失敗したとき(非ゼロ終了)、応答の欠けや型違いは、差し替えた偽物で必ずカバーする。
 
 ### Skill evalケース
 
@@ -56,7 +56,7 @@ LLM出力の検証ロジック(pydantic検証・不正JSON・スキーマ違反)
 
 | 対象 | 方法 |
 |---|---|
-| knowledge-digest | LLM構造化の出力スキーマ検証(fake generate注入。重複検知・統合結果の決定論部分をテスト) |
+| knowledge-digest | 候補の組・振り分け・案どうしの検査は core の決定論のユニットテスト。Jev は `urlopen` / `judge_pairs` を差し替え、鍵なし(unavailable)・呼び出し失敗(非ゼロ終了)・聞き直し1回・取得失敗で held を検証する。閾値は正解付きの評価セット(`scripts/eval/run_dedupe_eval.py`、Jev実呼び出し)で決める |
 | ナリッジ品質 | 出典URL生存チェック(リンク切れ検出) |
 | pricing計算機(着手する場合) | 取得日付きの代表見積りをゴールデンデータとして固定して突合する。**ライブ料金APIをテストに含めない**(クラウド非依存のため単一の公式Calculatorを正解に置けない) |
 

@@ -105,7 +105,6 @@ medo status --project <id> --include-scope secondary   # 診断範囲を広げ�
 | 振り返る・次へ進む | `medo-decide` | `requirements save` / `checkpoint answer` / `requirements diff` |
 | 打ち手の提案 | `medo-propose-options` | `facts save` / `fermi calc` / `knowledge search` / `artifacts save --type mini-prfaq` |
 | PRFAQ育成と最終提案 | `medo-grow-prfaq` | `artifacts save --type prfaq --rejected` / `artifacts outline --slide-kind final` / `artifacts save --type slides --slide-kind final` / `respond add --purpose phase_signoff` |
-
 | ナレッジの保守(標準周回の外) | `medo-knowledge-digest` | `knowledge dedupe` / `knowledge get` / `knowledge supersede` |
 
 `medo-hearing` は `medo-investigate` に統合済み(移行期間中のポインタとして残している)。

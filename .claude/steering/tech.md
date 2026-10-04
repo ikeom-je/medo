@@ -65,7 +65,7 @@ Firestoreを選ぶ場合の認証はADC(`gcloud auth application-default login`)
 | `MEDO_BACKEND` | `local`(既定) / `firestore` | ストレージバックエンド切替 |
 | `MEDO_HOME` | 既定 `~/.medo` | localバックエンドのルートディレクトリ(knowledge/もこの配下、既定で別gitリポジトリ) |
 | `GOOGLE_CLOUD_PROJECT` | プロジェクトID | Firestoreを使う場合のみ |
-| `TYPESAFE_API_KEY` | TypeSafe のAPIキー | Jev(research triage・出典の補助判定・knowledge-digest)。無ければ各機能は `unavailable` を返して判定を飛ばす |
+| `TYPESAFE_API_KEY` | TypeSafe のAPIキー | Jev。無いとき: research triage と knowledge dedupe は `judge: unavailable`、facts save の補助判定は警告を出して `support: unjudged` |
 
 ---
 
