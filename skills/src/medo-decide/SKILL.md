@@ -13,11 +13,13 @@ description: 顧客の反応とレビュー所見を要件ドキュメントに�
 
        medo status --project <project-id> --view summary
        medo status --project <project-id> --view workflow
+       medo status --project <project-id> --view uncertainty
 
    `workflow.loop.round_delta` が今回新たに分かったこと。`progress_count` が
    0 でなければ前進している。`divergence_warning` が真なら2周続けて成果ゼロで
    あり、論点の立て方をユーザーと見直す。
-   `workflow.responses.effective` が有効な反応の一覧。
+   `workflow.responses.effective` が有効な反応の一覧。`uncertainty` の最上位の `ask` が
+   次に確かめると策が決まる問いで、次の焦点の候補として示す(`items` が空なら候補なしと伝える)。
 
 2. 反応と所見を要件に反映する。現在の要件を取得して編集する:
 
@@ -45,9 +47,9 @@ description: 顧客の反応とレビュー所見を要件ドキュメントに�
          --answer <generate|defer> --focus <hyp-N>
 
    `--focus` はその周回で検証したい仮説を1つ選ぶ。**これが無いと蓄積した課題と
-   GAPすべてに一律で向き合うことになり、周回が発散する**。候補は
-   `medo status --project <id> --view uncertainty` の最上位の `ask` を返答の中で示し、
-   焦点にするかを尋ねる。最上位が `oq-N` なら、まず仮説にして要件に保存してから焦点にする。
+   GAPすべてに一律で向き合うことになり、周回が発散する**。手順1の候補を焦点にするかを尋ねる。
+   候補が `oq-N` なら仮説にしてIDを空で保存し、`requirements get` で採番された `hyp-N` を使う。
+   候補が無ければ `--focus` を省く。
 
 5. 差分と陳腐化した生成物を確認する:
 

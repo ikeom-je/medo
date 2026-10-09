@@ -51,7 +51,7 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
    - 効果の桁感(フェルミ推定の生成物IDと結果を引用)
    - Howの目処(ナレッジ根拠の要点。kind・statementと引用エントリID)
    - 主要リスク・open_questions
-   - 策ごとの効果のフェルミ推定。モデルYAMLに `unit`(全策で同じ単位)を書き、策ごとに `medo fermi calc` で作る
+   - 策ごとの効果のフェルミ推定。モデルYAMLに `unit` を書き、策ごとに `medo fermi calc` で作る。**全策で同じ評価指標・期間・単位にし、大きいほど良い形で書く**(費用は効果から差し引く)。各 `assume` には根拠と尺度を `note` に書く
    - **策を分けるパラメタ**(結果しだいでどの策を取るかが変わる値。例: 利用率)。各策の推定でそれに当たる仮定の変数を決める。**変数はすべての策で同じ単位・尺度で書く**(0.3 と 30 を混ぜない)
 
 6. **現在地を読み直す**。`actions` に `proceed_to_propose_options`、または
@@ -68,6 +68,7 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
          --cites <entry-id,...> --cites-facts <fact-id,...> \
          --generated-by <claude|codex|gemini> --requirements-version <n>
 
+   策の効き目を左右する仮説には、要件の `hypotheses[].fermi_ref` に `artifact_id`(その策の fermi)と `variable_name`(パラメタの変数)を書いて保存する(切り替え点がその仮説の問いになる)。
    `--tier` / `--option-fermi` / `--pivot-var` は打ち手ごとに繰り返す。意味のある範囲があれば `--pivot-range <下限>,<上限>`(利用率なら `0,1`)。保存後に `medo status --project <project-id> --view uncertainty` で切り替え点(どの値を境にどの策が上になるか)と確かめるべき問いを読み、ユーザーに示す。
 
 7. 終了時、対話から得たノウハウを追記する。**固有名詞を消して文が成り立つなら案件横断、
