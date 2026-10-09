@@ -1551,3 +1551,432 @@ def test_dedupe_default_threshold_uses_evaluation_result(medo_home, monkeypatch)
     result = runner.invoke(app, ["knowledge", "dedupe", "--kind", "practice", "--format", "json"])
     assert result.exit_code == 0, result.output
     assert len(json.loads(result.stdout)["proposals"]) == 1
+
+
+def _uncertainty_items():
+    return [
+        {"id": "hyp-1", "text": "a", "kind": "hyp", "needs_relevance": False},
+        {"id": "hyp-2", "text": "b", "kind": "hyp", "needs_relevance": False},
+        {"id": "oq-1", "text": "c", "kind": "oq", "needs_relevance": True},
+    ]
+
+
+def test_judge_uncertainty_asks_three_kinds(monkeypatch):
+    import medo_cli.jev as jev
+
+    sent = {}
+
+    def fake(request, timeout):
+        body = json.loads(request.data)
+        sent.update(body)
+        answers = {
+            qid: ({"choice": "determines", "confidence": 0.9} if "implies" in qid
+                  else {"choice": "ask", "confidence": 0.8} if "effort" in qid
+                  else {"noul": 0.7}) for qid in body["questions"]
+        }
+        return _FakeResponse({"answers": answers})
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", fake)
+    out = jev.judge_uncertainty(_uncertainty_items(), [("hyp-1", "hyp-2")], {"options": []})
+    assert out["implies"][("hyp-1", "hyp-2")] == {"choice": "determines", "confidence": 0.9}
+    assert out["decision_relevant"] == {"oq-1": 0.7}
+    assert out["effort"] == {"hyp-1": "ask", "hyp-2": "ask", "oq-1": "ask"}
+    assert len(sent["questions"]) == 1 + 1 + 3
+    assert sent["state"]["pairs"] == [{"a": "a", "b": "b"}]
+    assert set(sent["questions"]["i0_implies"]["criteria"]) == {"determines", "narrows", "none"}
+    assert "pairs[0].a" in sent["questions"]["i0_implies"]["instructions"]
+
+
+def test_judge_uncertainty_without_key(monkeypatch):
+    import medo_cli.jev as jev
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with pytest.raises(jev.JevUnavailable):
+        jev.judge_uncertainty([], [], {})
+
+
+@pytest.mark.parametrize("answer", [
+    {}, {"choice": "other", "confidence": 0.9}, {"choice": [], "confidence": 0.9},
+    {"choice": "determines", "confidence": True},
+    {"choice": "determines", "confidence": 1.1},
+])
+def test_judge_uncertainty_invalid_implies_is_reportable(monkeypatch, answer):
+    import medo_cli.jev as jev
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", lambda *_a, **_k: _FakeResponse({
+        "answers": {"i0_implies": answer},
+    }))
+    with pytest.raises(RuntimeError, match="応答が不正"):
+        jev.judge_uncertainty(_uncertainty_items(), [("hyp-1", "hyp-2")], {})
+
+
+@pytest.mark.parametrize("field,answer", [
+    ("r2_relevant", {"noul": "0.7"}), ("r2_relevant", {"noul": False}),
+    ("r2_relevant", {"noul": -1}), ("e0_effort", {"choice": "other", "confidence": 0.9}),
+])
+def test_judge_uncertainty_invalid_item_answer_is_reportable(monkeypatch, field, answer):
+    import medo_cli.jev as jev
+
+    answers = {"r2_relevant": {"noul": 0.7}, **{
+        f"e{n}_effort": {"choice": "ask", "confidence": 0.9} for n in range(3)
+    }}
+    answers[field] = answer
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", lambda *_a, **_k: _FakeResponse({"answers": answers}))
+    with pytest.raises(RuntimeError, match="応答が不正"):
+        jev.judge_uncertainty(_uncertainty_items(), [], {})
+
+
+def test_judge_uncertainty_transport_failure_is_reportable(monkeypatch):
+    import medo_cli.jev as jev
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(jev, "urlopen", lambda *_a, **_k: (_ for _ in ()).throw(
+        TimeoutError("timed out")))
+    with pytest.raises(RuntimeError, match="timed out"):
+        jev.judge_uncertainty(_uncertainty_items(), [], {})
+
+
+def _fermi_file(tmp_path, name, formula, x, unit="万円/年"):
+    import yaml
+
+    path = tmp_path / f"{name}.yaml"
+    path.write_text(yaml.safe_dump({
+        "name": name, "unit": unit, "formula": formula,
+        "variables": {"rate": {"assume": x}, "base": {"assume": 100}},
+    }), encoding="utf-8")
+    return path
+
+
+def _save_uncertainty_mini(tmp_path, *args, options="A:x,B:y", version=1):
+    content = tmp_path / "uncertainty.md"
+    content.write_text("候補", encoding="utf-8")
+    return runner.invoke(app, [
+        "artifacts", "save", "--project", "yoyaku", "--type", "mini-prfaq",
+        "--file", str(content), "--requirements-version", str(version),
+        "--generated-by", "claude", "--options", options, *args,
+    ])
+
+
+def _uncertainty_report(*args):
+    result = runner.invoke(app, ["status", "--project", "yoyaku", "--view", "uncertainty", *args])
+    assert result.exit_code == 0, result.output
+    return json.loads(result.stdout)
+
+
+def _save_uncertainty_strategies(tmp_path):
+    for name, formula in (("matsu", "rate * base * 3 - 120"), ("take", "rate * base * 2 - 60")):
+        result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--file",
+                                     str(_fermi_file(tmp_path, name, formula, 0.5))])
+        assert result.exit_code == 0, result.output
+    result = _save_uncertainty_mini(
+        tmp_path, "--tier", "松案=matsu", "--tier", "竹案=take",
+        "--option-fermi", "松案=fermi-v1", "--option-fermi", "竹案=fermi-v2",
+        "--pivot", "利用率", "--pivot-unit", "比率", "--pivot-var", "松案=rate",
+        "--pivot-var", "竹案=rate", "--pivot-range", "0,1", options="松案:x,竹案:y",
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_options_with_colon_in_approach_unchanged(medo_home, tmp_path):
+    _save_requirements(tmp_path)
+    result = _save_uncertainty_mini(tmp_path, "--tier", "A=main", options="A:業務改革:段階導入")
+    assert result.exit_code == 0, result.output
+    saved = runner.invoke(app, ["artifacts", "get", "--project", "yoyaku", "--id", "mini-prfaq-v1"])
+    option = json.loads(saved.stdout)["options"][0]
+    assert option["approach_type"] == "業務改革:段階導入" and option["tier"] == "main"
+
+
+def test_view_without_pivot_reports_reason(medo_home, tmp_path, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _save_requirements(tmp_path)
+    assert _save_uncertainty_mini(tmp_path).exit_code == 0
+    out = _uncertainty_report()
+    assert out["judge"] == "unavailable" and "pivot" in out["switch"]["error"]
+    assert out["mini_prfaq"] == "mini-prfaq-v1"
+    assert all(item["reach"] == "not_applicable" for item in out["items"])
+    assert all(item["effort"] is None for item in out["items"])
+
+
+def test_view_computes_switch_point(medo_home, tmp_path, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _save_requirements(tmp_path)
+    _save_uncertainty_strategies(tmp_path)
+    out = _uncertainty_report()
+    points = out["switch"]["points"]
+    assert len(points) == 1 and points[0]["at"] == pytest.approx(0.6, rel=1e-2)
+    assert (points[0]["from"], points[0]["to"]) == ("竹案", "松案")
+    assert [s["unit"] for s in out["strategies"]] == ["万円/年", "万円/年"]
+    assert out["fixed_assumptions"] == {"松案": {"base": 100}, "竹案": {"base": 100}}
+    assert out["pivot"] == {"name": "利用率", "unit": "比率", "range": [0, 1], "grid": "linear"}
+    assert out["approximate"] is True
+
+
+def test_fermi_calc_preserves_unit_per_model(medo_home, tmp_path):
+    _save_requirements(tmp_path)
+    for n, unit in enumerate(("万円/年", "時間/年"), 1):
+        result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--file",
+                                     str(_fermi_file(tmp_path, f"m{n}", "rate * base", 0.5, unit))])
+        assert result.exit_code == 0, result.output
+        saved = runner.invoke(app, ["artifacts", "get", "--project", "yoyaku", "--id", f"fermi-v{n}"])
+        model = json.loads(json.loads(saved.stdout)["content"])["model"]
+        assert model["unit"] == unit
+
+
+def test_view_jev_failure_exits_nonzero(medo_home, tmp_path, monkeypatch):
+    from medo_cli.commands import uncertainty as u
+
+    _save_requirements(tmp_path)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "dummy")
+    monkeypatch.setattr(u, "judge_uncertainty", lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("HTTP 500")))
+    result = runner.invoke(app, ["status", "--project", "yoyaku", "--view", "uncertainty"])
+    assert result.exit_code != 0 and "error:" in result.output
+
+
+def _save_uncertainty_hypotheses(tmp_path, *, with_pivot=False):
+    import yaml
+
+    saved = runner.invoke(app, ["requirements", "get", "--project", "yoyaku"])
+    doc = json.loads(saved.stdout)
+    doc["goal"] += "と需要予測"
+    doc["hypotheses"] = [
+        {"kind": "cause", "statement": "顧客が月次で発注する", "challenge_ids": ["ch-1"]},
+        {"kind": "solution", "statement": "月次予測で欠品が減る", "challenge_ids": ["ch-1"]},
+        {"kind": "impact", "statement": "検証済み", "status": "validated"},
+    ]
+    if with_pivot:
+        doc["hypotheses"][0]["fermi_ref"] = {"artifact_id": "fermi-v1", "variable_name": "rate"}
+    path = tmp_path / "hypotheses.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    result = runner.invoke(app, ["requirements", "save", "--project", "yoyaku", "--file", str(path)])
+    assert result.exit_code == 0, result.output
+
+
+def test_view_ranks_hypotheses_by_determines_reach(medo_home, tmp_path, monkeypatch):
+    from medo_cli.commands import uncertainty as u
+
+    _save_requirements(tmp_path)
+    _save_uncertainty_hypotheses(tmp_path)
+    seen = {}
+
+    def judge(items, pairs, context):
+        seen.update(context)
+        assert set(pairs) == {("hyp-1", "hyp-2"), ("hyp-2", "hyp-1")}
+        assert all(item["needs_relevance"] for item in items)
+        assert all("swing" not in item and "ask" not in item for item in items)
+        return {"implies": {p: {"choice": "determines" if p[0] == "hyp-1" else "none",
+                                "confidence": 0.95} for p in pairs},
+                "decision_relevant": {i["id"]: 0.7 for i in items},
+                "effort": {i["id"]: "ask" for i in items}}
+
+    monkeypatch.setattr(u, "judge_uncertainty", judge)
+    out = _uncertainty_report()
+    assert [i["id"] for i in out["items"]] == ["hyp-1", "hyp-2", "oq-1", "oq-2"]
+    assert out["items"][0]["reach"] == 1
+    assert out["items"][0]["keystone"]["edges"][0]["to"] == "hyp-2"
+    assert seen["challenges"][0]["id"] == "ch-1"
+
+
+def test_view_pivot_question_and_digest(medo_home, tmp_path, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _save_requirements(tmp_path)
+    _save_uncertainty_strategies(tmp_path)
+    _save_uncertainty_hypotheses(tmp_path, with_pivot=True)
+    out = _uncertainty_report()
+    first = out["items"][0]
+    assert first["id"] == "hyp-1" and first["switch"] is True
+    assert first["reach"] == "unknown" and first["decision_relevant"] is None
+    assert first["swing_ratio"] > 0
+    assert "他の仮定が今のままなら、利用率 は" in first["ask"]
+    result = runner.invoke(app, ["status", "--project", "yoyaku", "--view", "uncertainty", "--format", "digest"])
+    assert result.exit_code == 0, result.output
+    assert "hyp-1 switch=True reach=unknown ask:" in result.stdout
+    assert "近似" in result.stdout
+
+
+@pytest.mark.parametrize("args,options", [
+    (["--tier", "C=main"], "A:x,B:y"), (["--tier", "A"], "A:x,B:y"),
+    (["--tier", "A=main", "--tier", "A=sub"], "A:x,B:y"),
+    (["--option-fermi", "A=fermi-v1", "--option-fermi", "A=fermi-v2"], "A:x,B:y"),
+    (["--pivot-var", "A=x", "--pivot-var", "A=y"], "A:x,B:y"),
+    (["--tier", "A=main"], "A:x,A:y"), (["--tier", "A=bad"], "A:x,B:y"),
+    (["--tier", "A=main", "--tier", "B=matsu"], "A:x,B:y"),
+    (["--pivot-range", "1,1"], "A:x,B:y"), (["--pivot-range", "nan,1"], "A:x,B:y"),
+    (["--pivot-range", "0,1,2"], "A:x,B:y"), (["--pivot-range", "oops,1"], "A:x,B:y"),
+    (["--pivot", "利用率", "--option-fermi", "A=fermi-v1"], "A:x,B:y"),
+    ([], "A:x,B:y,C:z,D:w"),
+])
+def test_uncertainty_options_invalid_exits_with_error(medo_home, tmp_path, args, options):
+    _save_requirements(tmp_path)
+    result = _save_uncertainty_mini(tmp_path, *args, options=options)
+    assert result.exit_code != 0 and "error:" in result.output
+
+
+def test_view_single_option_reports_cannot_compare(medo_home, tmp_path, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _save_requirements(tmp_path)
+    result = _save_uncertainty_mini(tmp_path, "--tier", "A=main", options="A:x")
+    assert result.exit_code == 0, result.output
+    assert "策が1つで比べられない" in _uncertainty_report()["switch"]["error"]
+    status = json.loads(runner.invoke(app, ["status", "--project", "yoyaku"]).stdout)
+    assert any(a["code"] == "add_alternative_option" for a in status["actions"])
+
+
+def test_view_missing_project_reports_error(medo_home):
+    result = runner.invoke(app, ["status", "--project", "missing", "--view", "uncertainty"])
+    assert result.exit_code != 0 and "error:" in result.output
+
+
+def test_view_uses_current_mini_and_does_not_save_artifact(medo_home, tmp_path, monkeypatch):
+    from medo_core.artifacts import ArtifactStore
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _save_requirements(tmp_path)
+    assert _save_uncertainty_mini(tmp_path).exit_code == 0
+    assert _save_uncertainty_mini(tmp_path, options="C:x,D:y").exit_code == 0
+    store = ArtifactStore(LocalJsonStorage(medo_home))
+    before = store._load_all("yoyaku")
+    out = _uncertainty_report()
+    assert out["mini_prfaq"] == "mini-prfaq-v2"
+    assert [s["name"] for s in out["strategies"]] == ["C", "D"]
+    assert store._load_all("yoyaku") == before
+
+
+def test_view_recalculates_current_facts_and_reports_verification_and_stale(medo_home, tmp_path, monkeypatch):
+    from medo_core.artifacts import ArtifactStore
+    from medo_cli.commands import uncertainty as u
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setattr(u, "date", type("FixedDate", (), {"today": staticmethod(lambda: date(2026, 10, 5))}))
+    _save_requirements(tmp_path)
+    storage = LocalJsonStorage(medo_home)
+    facts = FactStore(storage)
+    for n, verification in enumerate((Verification(status="unverified"),
+                                     Verification(status="verified", support="doubtful")), 1):
+        facts.save("yoyaku", Fact(fact_id=f"fact-{n}", kind="market", statement="入力",
+                                  value=100, source="https://example.com/report", retrieved="2020-01-01",
+                                  quote="入力100", verification=verification))
+    _save_uncertainty_strategies(tmp_path)
+    for n in (1, 2):
+        path = f"projects/yoyaku/artifacts/fermi-v{n}"
+        raw = storage.get(path)
+        content = json.loads(raw["content"])
+        content["model"]["variables"]["base"] = {"fact": f"fact-{n}"}
+        content["result"]["value"] = -999
+        raw["cited_facts"] = [f"fact-{n}"]
+        raw["content"] = json.dumps(content)
+        storage.put(path, raw)
+    _save_uncertainty_hypotheses(tmp_path)
+    out = _uncertainty_report()
+    assert [s["value"] for s in out["strategies"]] == [30, 40]
+    assert out["unverified_facts"] == ["fact-1"]
+    assert out["doubtful_facts"] == ["fact-2"]
+    assert set(out["stale"]) == {"fermi-v1", "fermi-v2", "mini-prfaq-v1"}
+    assert out["freshness"]["fermi-v1"]["reasons"]
+    assert out["fixed_assumptions"] == {"松案": {}, "竹案": {}}
+    assert ArtifactStore(storage).get("yoyaku", "fermi-v1").content == storage.get(
+        "projects/yoyaku/artifacts/fermi-v1")["content"]
+
+
+@pytest.mark.parametrize("failure", ["missing", "wrong_type", "invalid_content", "invalid_model",
+                                      "missing_variable", "fact_variable", "calculation", "unit"])
+def test_view_invalid_strategy_blocks_all_comparison(medo_home, tmp_path, monkeypatch, failure):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _save_requirements(tmp_path)
+    _save_uncertainty_strategies(tmp_path)
+    storage = LocalJsonStorage(medo_home)
+    path = "projects/yoyaku/artifacts/fermi-v1"
+    raw = storage.get(path)
+    content = json.loads(raw["content"])
+    if failure == "missing":
+        mini_path = "projects/yoyaku/artifacts/mini-prfaq-v1"
+        mini = storage.get(mini_path)
+        mini["options"][0]["fermi"] = "fermi-v999"
+        storage.put(mini_path, mini)
+    elif failure == "wrong_type":
+        raw.update(type="comparison", generated_by="claude")
+    elif failure == "invalid_content":
+        raw["content"] = "not json"
+    elif failure == "invalid_model":
+        content["model"] = []
+    elif failure == "missing_variable":
+        del content["model"]["variables"]["rate"]
+    elif failure == "fact_variable":
+        content["model"]["variables"]["rate"] = {"fact": "fact-1"}
+    elif failure == "calculation":
+        content["model"]["formula"] = "1 / (rate - 0.5)"
+    elif failure == "unit":
+        content["model"]["unit"] = ""
+    if failure not in ("invalid_content", "missing"):
+        raw["content"] = json.dumps(content)
+    storage.put(path, raw)
+    out = _uncertainty_report()
+    assert out["switch"]["error"] and out["switch"]["points"] == []
+    if failure != "unit":
+        assert out["strategies"][0]["error"]["code"]
+    assert all(not item["switch"] for item in out["items"])
+
+
+def test_view_no_switch_pivot_hypothesis_still_needs_relevance(medo_home, tmp_path, monkeypatch):
+    from medo_cli.commands import uncertainty as u
+
+    _save_requirements(tmp_path)
+    _save_uncertainty_strategies(tmp_path)
+    _save_uncertainty_hypotheses(tmp_path, with_pivot=True)
+    storage = LocalJsonStorage(medo_home)
+    path = "projects/yoyaku/artifacts/mini-prfaq-v1"
+    raw = storage.get(path)
+    raw["pivot_range"] = [0.8, 1.0]
+    storage.put(path, raw)
+
+    def judge(items, pairs, context):
+        assert next(i for i in items if i["id"] == "hyp-1")["needs_relevance"] is True
+        return {"implies": {}, "decision_relevant": {i["id"]: 0.7 for i in items},
+                "effort": {i["id"]: "ask" for i in items}}
+
+    monkeypatch.setattr(u, "judge_uncertainty", judge)
+    out = _uncertainty_report()
+    assert out["switch"]["always_top"] == "松案"
+    assert not out["switch"]["points"]
+    assert next(i for i in out["items"] if i["id"] == "hyp-1")["decision_relevant"] == 0.7
+
+
+@pytest.mark.parametrize("confidence,expected_reach", [(0.49, 0), (0.5, 1)])
+def test_view_uses_implies_evaluated_threshold(medo_home, tmp_path, monkeypatch, confidence, expected_reach):
+    from medo_cli.commands import uncertainty as u
+
+    _save_requirements(tmp_path)
+    _save_uncertainty_hypotheses(tmp_path)
+
+    def judge(items, pairs, context):
+        return {"implies": {p: {"choice": "determines" if p[0] == "hyp-1" else "none",
+                                "confidence": confidence if p[0] == "hyp-1" else 1.0}
+                            for p in pairs},
+                "decision_relevant": {i["id"]: 0.7 for i in items},
+                "effort": {i["id"]: "ask" for i in items}}
+
+    monkeypatch.setattr(u, "judge_uncertainty", judge)
+    out = _uncertainty_report()
+    assert next(i for i in out["items"] if i["id"] == "hyp-1")["reach"] == expected_reach
+    assert next(i for i in out["items"] if i["id"] == "hyp-2")["reach"] == 0
+
+
+def test_view_unit_mismatch_keeps_sensitivity_without_switch(medo_home, tmp_path, monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    _save_requirements(tmp_path)
+    _save_uncertainty_strategies(tmp_path)
+    _save_uncertainty_hypotheses(tmp_path, with_pivot=True)
+    storage = LocalJsonStorage(medo_home)
+    path = "projects/yoyaku/artifacts/fermi-v1"
+    raw = storage.get(path)
+    content = json.loads(raw["content"])
+    content["model"]["unit"] = ""
+    raw["content"] = json.dumps(content)
+    storage.put(path, raw)
+    out = _uncertainty_report()
+    assert "unit" in out["switch"]["error"] and not out["switch"]["points"]
+    item = next(i for i in out["items"] if i["id"] == "hyp-1")
+    assert item["swing_ratio"] > 0 and item["switch"] is False

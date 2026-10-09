@@ -252,3 +252,76 @@ def _normalized_score(answer: dict) -> float:
     if levels < 2:
         raise ValueError(f"score の水準数が不正です: {levels}")
     return min(1.0, max(0.0, answer["score"] / (levels - 1)))
+
+
+def judge_uncertainty(items: list[dict], pairs: list[tuple[str, str]], context: dict) -> dict:
+    """仮説の含意、策の選択への影響、検証の手間を分類する。"""
+    api_key = os.environ.get("TYPESAFE_API_KEY")
+    if not api_key:
+        raise JevUnavailable("TYPESAFE_API_KEY が設定されていません")
+    texts = {item["id"]: item["text"] for item in items}
+    questions = {}
+    for n, _ in enumerate(pairs):
+        questions[f"i{n}_implies"] = {
+            "type": "choice",
+            "instructions": (
+                f"`pairs[{n}].a` の仮説が確定すると、`pairs[{n}].b` の仮説も決まるか。"
+                "`context` の明示された前提と確認済みの条件を使い、AからBへの向きを判定する。"
+                "他の条件が確認済みで残る条件がAだけなら、Aの確定でBも決まる。"
+                "未確認の条件が別に残る必要条件だけなら、Bは絞られるだけ。"
+                "同じ課題に属するだけでは依存関係とはしない。数値の計算や一致は判定しない。"
+            ),
+            "criteria": {
+                "determines": "Aが確定するとBの成立・不成立も決まる。直接の含意、または"
+                              "contextで他の条件が確認済みでAが唯一残る条件となる依存関係",
+                "narrows": "Aが確定するとBの可能性が大きく絞られるが、未確認の条件が別に"
+                           "残るためBの成立・不成立はまだ決まらない",
+                "none": "Aが確定してもBは決まらず、可能性も大きく絞られない。共通の課題・"
+                        "目的があるだけの独立した仮説を含む",
+            },
+        }
+    for n, item in enumerate(items):
+        if item["needs_relevance"]:
+            questions[f"r{n}_relevant"] = {
+                "type": "noul",
+                "instructions": (
+                    f"`items[{n}].text` が解消したら、`context.options` のどの策を取るかが"
+                    "変わり得るか。結びつく課題も踏まえて判定する。"
+                ),
+                "criteria": {
+                    "true": "解消した結果によって策の選択が変わり得る",
+                    "false": "解消しても策の選択は変わらない",
+                },
+            }
+        questions[f"e{n}_effort"] = {
+            "type": "choice",
+            "instructions": f"`items[{n}].text` を確かめるのに必要な手間を選ぶ。",
+            "criteria": {
+                "ask": "関係者にすぐ聞けば確かめられる",
+                "research": "資料や現状の調査が要る",
+                "experiment": "実証実験が要る",
+            },
+        }
+    out = {"implies": {}, "decision_relevant": {}, "effort": {}}
+    if not questions:
+        return out
+    answers = _post({
+        "model": "jev-latest",
+        "state": {"items": items, "pairs": [{"a": texts[a], "b": texts[b]} for a, b in pairs],
+                  "context": context},
+        "questions": questions,
+    }, api_key, timeout=60)
+    try:
+        for n, pair in enumerate(pairs):
+            choice, confidence = _choice(answers[f"i{n}_implies"], questions[f"i{n}_implies"])
+            out["implies"][pair] = {"choice": choice, "confidence": confidence}
+        for n, item in enumerate(items):
+            if item["needs_relevance"]:
+                out["decision_relevant"][item["id"]] = _probability(
+                    answers[f"r{n}_relevant"]["noul"]
+                )
+            effort, _ = _choice(answers[f"e{n}_effort"], questions[f"e{n}_effort"])
+            out["effort"][item["id"]] = effort
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"Jevの応答が不正です: {exc}") from exc
+    return out
