@@ -45,12 +45,14 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
        medo knowledge index
        medo knowledge search "<キーワード>" --format json
 
-5. 打ち手候補を2〜3案作る。切り口: **既存の解決 / 破壊的業務改革 / 新規市場開拓** × **スコープ / 立ち位置 / 根本治療vs対症療法**。各案のミニPRFAQに必ず含めること:
+5. 打ち手候補を**最低2つ・最大3つ**作る(1案に絞らない。決め手の仮説が外れたときの代わりになる)。メインとサブ(3つなら松・竹・梅)の役割を決める。切り口: **既存の解決 / 破壊的業務改革 / 新規市場開拓** × **スコープ / 立ち位置 / 根本治療vs対症療法**。各案のミニPRFAQに必ず含めること:
    - 打ち手の宣言(顧客に届いた未来のプレスリリース1段落)
    - 価値仮説(What/Why)。**principles(理念・方針)との整合を明記**
    - 効果の桁感(フェルミ推定の生成物IDと結果を引用)
    - Howの目処(ナレッジ根拠の要点。kind・statementと引用エントリID)
    - 主要リスク・open_questions
+   - 策ごとの効果のフェルミ推定。モデルYAMLに `unit`(全策で同じ単位)を書き、策ごとに `medo fermi calc` で作る
+   - **策を分けるパラメタ**(結果しだいでどの策を取るかが変わる値。例: 利用率)。各策の推定でそれに当たる仮定の変数を決める。**変数はすべての策で同じ単位・尺度で書く**(0.3 と 30 を混ぜない)
 
 6. **現在地を読み直す**。`actions` に `proceed_to_propose_options`、または
    `refs` に `mini-prfaq` を含む `regenerate_stale_artifacts` があれば保存する。
@@ -61,8 +63,12 @@ description: 要件ドキュメント(課題・方針)を起点に、市場・�
        medo artifacts save --project <project-id> --type mini-prfaq \
          --file /tmp/options.md \
          --options "<打ち手名>:<切り口>,<打ち手名>:<切り口>" \
+         --tier "<打ち手名>=<main|sub|matsu|take|ume>" --option-fermi "<打ち手名>=fermi-vN" \
+         --pivot "<パラメタ名>" --pivot-unit "<単位>" --pivot-var "<打ち手名>=<変数名>" \
          --cites <entry-id,...> --cites-facts <fact-id,...> \
          --generated-by <claude|codex|gemini> --requirements-version <n>
+
+   `--tier` / `--option-fermi` / `--pivot-var` は打ち手ごとに繰り返す。意味のある範囲があれば `--pivot-range <下限>,<上限>`(利用率なら `0,1`)。保存後に `medo status --project <project-id> --view uncertainty` で切り替え点(どの値を境にどの策が上になるか)と確かめるべき問いを読み、ユーザーに示す。
 
 7. 終了時、対話から得たノウハウを追記する。**固有名詞を消して文が成り立つなら案件横断、
    成り立たないなら案件固有**に置く:

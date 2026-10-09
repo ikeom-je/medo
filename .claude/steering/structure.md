@@ -42,6 +42,7 @@ core/
 │   ├── requirements.py  # RequirementsDoc(背景・方針/理念・課題・要件)+ Store(自動バージョン採番・diff)
 │   ├── facts.py         # Fact + FactStore(kind: market/policy/trend/company。案件スコープ・出典必須・180日stale判定)
 │   ├── fermi.py         # フェルミ推定の決定論計算(ファクト参照+明示的仮定×式。ast制限の四則演算+累乗。モデル込み保存で再計算可能)
+│   ├── uncertainty.py   # 次に潰すべき不確実性: 探索範囲・感度・切り替え点・決め手の波及範囲・並べ方(Jevの判定を受け取る純関数)
 │   ├── knowledge_dedupe.py  # 重複の候補の組・振り分け・案どうしの検査・影響する生成物の列挙(Jevの判定を受け取る純関数)
 │   ├── knowledge.py     # KnowledgeEntry + KnowledgeStore(案件横断・出典必須・OKF形式で保存・置き換えの来歴。kind: tech/market/policy/trend/company/practice) + ProjectKnowledgeEntry + KnowledgeBackend(markdown/sqlite。案件固有・単一案件スコープ)
 │   ├── artifacts.py     # Artifact + ArtifactStore(要件バージョン・引用ファクト/ナリッジ紐づけ・陳腐化検出)
@@ -59,7 +60,8 @@ core/
 cli/
 ├── pyproject.toml       # console_script: medo
 ├── src/medo_cli/
-│   └── main.py          # typer app: requirements / facts / fermi / knowledge / artifacts / status
+│   ├── main.py          # typer app: requirements / facts / fermi / knowledge / artifacts / status
+│   └── commands/        # 肥大化したサブコマンド(research / templates / uncertainty = status --view uncertainty の組み立て)
 └── tests/
 ```
 
