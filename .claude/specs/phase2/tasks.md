@@ -50,4 +50,5 @@
 | 6 | 最終提案スライド + `phase_signoff` ゲート | 完了(計画 #109 / 実装 #115〜#118)。計画: [medo-phase2-final.md](../../../docs/superpowers/plans/medo-phase2-final.md)。実案件(`medo-ops`)でのSkill eval実施済み(結果は `docs/setup.md` §7.5、検出した不具合は #120) |
 | 並行 | 出典検証の強化(URLフェッチ + 数値突合) | 完了(設計 #145 / 実装 #147 #148)。設計: [phase2-source-verification.md](../../../docs/superpowers/specs/phase2-source-verification.md) |
 | 後続 | ナレッジ来歴 / `knowledge-digest` | 完了(設計 #175 / 計画 #176 / 実装 #180 #181 #182)。設計: [phase2-knowledge-digest.md](../../../docs/superpowers/specs/phase2-knowledge-digest.md) |
-| 後続 | `decision-roadmap` / `build-mock` / `propose-architecture` / pricing / 簡易Webアプリ | 詳細設計が未了 |
+| 後続 | `decision-roadmap` | 完了(設計 #183 / 計画 #184 / 実装 #188 #189 #193)。設計: [phase2-decision-roadmap.md](../../../docs/superpowers/specs/phase2-decision-roadmap.md) |
+| 後続 | `build-mock` / `propose-architecture` / pricing / 簡易Webアプリ | 詳細設計が未了 |
