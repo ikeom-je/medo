@@ -55,6 +55,7 @@ medo status --project <id>                  # 既定は summary(actions が先�
 
 ```bash
 medo status --project <id> --view workflow
+medo status --project <id> --view uncertainty  # 次に潰すべき不確実性(策の切り替え点・決め手の仮説・確かめるべき問い)
 medo status --project <id> --include-scope secondary   # 診断範囲を広げる
 ```
 

@@ -331,3 +331,14 @@ def test_knowledge_digest_skill_confirms_each_proposal_before_superseding(tmp_pa
     assert "1組ずつ" in text and "judge: unavailable" in text
     body = text.partition("## 契約")[2]
     assert len([line for line in body.splitlines() if line.startswith("- ")]) == 3
+
+
+def test_propose_options_creates_two_to_three_strategies_with_pivot(tmp_path):
+    """1案に絞ると決め手の仮説が外れたときに代わりが無い(decision-roadmap 設計 §1)。"""
+    text = _built(tmp_path, "medo-propose-options")
+    assert "--tier" in text and "--option-fermi" in text and "--pivot-var" in text
+    assert "最低2つ・最大3つ" in text and "--view uncertainty" in text
+
+
+def test_decide_offers_top_uncertainty_as_focus(tmp_path):
+    assert "--view uncertainty" in _built(tmp_path, "medo-decide")
