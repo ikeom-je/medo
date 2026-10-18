@@ -233,12 +233,20 @@ def reach(nodes: list[str], edges: list[tuple[str, str, str]]) -> dict[str, dict
 
 
 _EFFORT = {"ask": 0, "research": 1, "experiment": 2}
+_DECISION_RELEVANT_HIGH_THRESHOLD = 0.6
+_DECISION_RELEVANT_MIDDLE_THRESHOLD = 0.4
 
 
 def _rank_key(item: dict) -> tuple:
     known_reach = item["reach"] if isinstance(item["reach"], int) else -1
     ratio = item["swing_ratio"] if item["swing_ratio"] is not None else -1.0
-    relevant = 0 if (item["decision_relevant"] or 0) >= 0.5 else 1
+    probability = item["decision_relevant"]
+    if probability is not None and probability >= _DECISION_RELEVANT_HIGH_THRESHOLD:
+        relevant = 0
+    elif probability is not None and probability >= _DECISION_RELEVANT_MIDDLE_THRESHOLD:
+        relevant = 1
+    else:
+        relevant = 2
     effort = _EFFORT.get(item["effort"], 3)
     kind = 0 if item["kind"] == "hyp" else 1
     number = int(item["id"].rsplit("-", 1)[1])
