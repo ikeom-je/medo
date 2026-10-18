@@ -1725,6 +1725,25 @@ def test_fermi_calc_preserves_unit_per_model(medo_home, tmp_path):
         assert model["unit"] == unit
 
 
+@pytest.mark.parametrize("unit", ["万円/年", "時間/年", ""])
+def test_fermi_calc_displays_unit_when_present(medo_home, tmp_path, unit):
+    _save_requirements(tmp_path)
+    model = _fermi_file(tmp_path, "年間効果", "rate * base", 0.5, unit)
+    expected = "年間効果 = 50.0" + (f" {unit}" if unit else "")
+
+    result = runner.invoke(app, ["fermi", "calc", "--project", "yoyaku", "--file", str(model)])
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == ["saved: fermi-v1", expected]
+
+    recalculated = runner.invoke(
+        app, ["fermi", "calc", "--project", "yoyaku", "--from-artifact", "fermi-v1"]
+    )
+
+    assert recalculated.exit_code == 0, recalculated.output
+    assert recalculated.stdout.splitlines() == ["saved: fermi-v2", expected]
+
+
 def test_view_jev_failure_exits_nonzero(medo_home, tmp_path, monkeypatch):
     from medo_cli.commands import uncertainty as u
 

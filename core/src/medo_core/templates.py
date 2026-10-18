@@ -166,6 +166,8 @@ attempts: []
 #     gap_ids: []
 
 # 未検証の見立て。kind: cause | solution | impact
+# fermi_ref は任意。紐づけない場合は省略または null にする。
+# 紐づける場合は保存済み fermi 生成物のIDと、そのモデルの変数名を指定する。
 hypotheses: []
 # hypotheses:
 #   - statement: ''
@@ -174,6 +176,9 @@ hypotheses: []
 #     validation_method: ''
 #     challenge_ids: []
 #     evidence_refs: []
+#     fermi_ref:
+#       artifact_id: fermi-v1
+#       variable_name: rate
 
 # 既に見えているシステム要件があれば(薄くてよい)。
 functional: []
