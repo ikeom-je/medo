@@ -244,7 +244,7 @@ def test_reach_cycles_with_shared_descendants_exclude_self():
     ({"reach": 0}, {"reach": "not_applicable", "swing_ratio": 100.0}),
     ({"swing_ratio": 1.0}, {"decision_relevant": 1.0}),
     ({"swing_ratio": 0.0}, {"swing_ratio": None, "decision_relevant": 1.0}),
-    ({"decision_relevant": 0.5, "effort": "experiment"}, {"decision_relevant": 0.49}),
+    ({"decision_relevant": 0.6, "effort": "experiment"}, {"decision_relevant": 0.59}),
     ({"effort": "ask"}, {"effort": "research"}),
     ({"effort": "research"}, {"effort": "experiment"}),
     ({"effort": "experiment"}, {"effort": None}),
@@ -254,6 +254,38 @@ def test_rank_respects_each_priority_before_later_fields(first, second):
             "decision_relevant": None, "effort": "ask"}
     items = [{**base, "id": "hyp-2", **first}, {**base, "id": "hyp-1", **second}]
     assert [i["id"] for i in rank(items)] == ["hyp-2", "hyp-1"]
+
+
+@pytest.mark.parametrize("higher, lower", [
+    (0.6, 0.599999),
+    (0.4, 0.399999),
+    (0.4, None),
+])
+def test_rank_decision_relevance_boundaries_outrank_lower_band(higher, lower):
+    base = {"kind": "hyp", "switch": False, "reach": 0, "swing_ratio": None}
+    items = [
+        {**base, "id": "hyp-1", "decision_relevant": lower, "effort": "ask"},
+        {**base, "id": "hyp-2", "decision_relevant": higher, "effort": "experiment"},
+    ]
+    assert [i["id"] for i in rank(items)] == ["hyp-2", "hyp-1"]
+
+
+@pytest.mark.parametrize("first, second", [
+    (0.48, 0.52),
+    (0.52, 0.48),
+    (0.6, 1.0),
+    (0.4, 0.599999),
+    (0.399999, None),
+    (None, 0.0),
+])
+def test_rank_within_decision_relevance_band_uses_effort_then_numeric_id(first, second):
+    base = {"kind": "hyp", "switch": False, "reach": 0, "swing_ratio": None}
+    items = [
+        {**base, "id": "hyp-10", "decision_relevant": second, "effort": "research"},
+        {**base, "id": "hyp-2", "decision_relevant": first, "effort": "research"},
+        {**base, "id": "hyp-20", "decision_relevant": first, "effort": "ask"},
+    ]
+    assert [i["id"] for i in rank(items)] == ["hyp-20", "hyp-2", "hyp-10"]
 
 
 def test_rank_ties_use_kind_and_numeric_id_without_changing_unknown_reach():
