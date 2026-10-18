@@ -826,7 +826,8 @@ def fermi_calc(
     )
     artifact_id = ArtifactStore(storage).save(project, artifact)
     typer.echo(f"saved: {artifact_id}")
-    typer.echo(f"{result.name} = {result.value}")
+    unit_suffix = f" {model.unit}" if model.unit else ""
+    typer.echo(f"{result.name} = {result.value}{unit_suffix}")
     if result.unverified_facts or result.doubtful_facts:
         typer.echo(
             "warning: 出典の検証状態を確認してください "

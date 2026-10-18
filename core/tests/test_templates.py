@@ -88,6 +88,18 @@ def test_every_example_saves_through_the_store(tmp_path):
     assert RequirementsStore(LocalJsonStorage(tmp_path)).save("p1", doc) == 1
 
 
+def test_hypothesis_example_includes_optional_fermi_reference():
+    example = _example_of("hypotheses")
+    model = NODE_EXAMPLES["hypotheses"]
+
+    assert example["fermi_ref"] == {"artifact_id": "fermi-v1", "variable_name": "rate"}
+    assert model.model_validate(example).fermi_ref is not None
+    assert model.model_validate({**example, "fermi_ref": None}).fermi_ref is None
+    without_reference = {k: v for k, v in example.items() if k != "fermi_ref"}
+    assert model.model_validate(without_reference).fermi_ref is None
+    assert "fermi_ref は任意。紐づけない場合は省略または null" in REQUIREMENTS_TEMPLATE
+
+
 def test_outline_opens_with_the_verification_theme():
     """いきなり耳の痛い実態認識から入ると顧客が防衛的になる。章0を先頭に置く。"""
     assert DISCUSSION_SLIDES_OUTLINE.index("本日の検証テーマ") < DISCUSSION_SLIDES_OUTLINE.index(
