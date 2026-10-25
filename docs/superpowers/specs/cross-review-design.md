@@ -25,7 +25,7 @@
 |---|---|---|---|
 | スペック(`docs/superpowers/specs/`) | Claude | **Codex + agy(両方)** | Codex MCP と `antigravity:delegate` で観点指定レビュー(設計原則との整合・見落とし・曖昧さ)。両者の重大指摘ゼロで通過 |
 | 実装計画(`docs/superpowers/plans/`) | Claude | **Codex + agy(両方)** | 同上(Taskの抜け・依存関係・テスト戦略) |
-| 実装Taskのdiff | agy / Codex | Claude | Claude自身がdiffレビューし、pytest/ruffを自分の環境で実行して検証 |
+| 実装Taskのdiff | agy / Codex | **Claude**(最終)。標準では Codex(gpt-6.1-sol medium)と agy(Gemini 4 Argon medium と Gemini 3.8 Flash high の両方)も先にレビューする。agy 作の diff は agy にレビューさせない | Codex・agy の指摘を Claude が裁定し、diffを自分でレビューし、pytest/ruffを自分の環境で実行して検証。Codex 作の diff への Codex のレビューは同じモデルのため独立レビューに数えない。モデルの使い分け(標準・軽量)は workflow.md Section 3 |
 | Claudeが直接書いたdiff(コード・ドキュメント) | Claude | **Codex + agy(両方)** | Codex MCP と `antigravity:review`(観点を細かく指定する場合は `antigravity:delegate` 可)の両方でdiffレビュー。両者の重大指摘ゼロで通過 |
 
 ## 4. ラウンドと終了条件
