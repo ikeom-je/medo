@@ -65,11 +65,23 @@ Medo の開発では実行主体を作業領域ごとに分担する。**Claude�
 
 なお、本Section下部の運用注記(Codexサンドボックスのネットワーク遮断・Codex/agyのモデル方針・クラウド環境調査ガード等)は**「全員揃う」プロファイルにおける、現在の担当構成に固有の制約**であり、担当表を変更した場合は合わせて見直す。単体プロファイルでは、以下の「Claude」をそのプロファイルのオーケストレータに読み替える。
 
-- **レビューは「全員揃う」プロファイルでは3者が担う**(組み合わせは相互レビュープロトコルのマトリクスに従う: Claude作→Codex+agy両方、Codex/agy作→Claude。単体プロファイルでの扱いは上記「エージェント可用性プロファイル」表を参照)
+- **レビューは「全員揃う」プロファイルでは3者が担う**(組み合わせは相互レビュープロトコルのマトリクスに従う: Claude作→Codex+agy両方、Codex/agy作→Claude(標準では他モデルも先に補助レビューする。上の使い分けの表)。単体プロファイルでの扱いは上記「エージェント可用性プロファイル」表を参照)
 - 判断の最終権限と結果検証は常にClaudeが持つ。Codex/agyの出力を無検証で正としない。**Codexサンドボックスはネットワーク遮断のため、依存解決とテスト実行の最終確認(`uv run pytest` / `uv run ruff check .`)は必ずClaudeが自環境で行う**
-- **Codexのモデル方針**: Codexへ委譲するとき(実装・テスト作成・レビューのいずれも)は **`gpt-6.1-sol`・reasoning effort `high`** を指定する(例: `codex exec -m gpt-6.1-sol -c model_reasoning_effort=high "<task>" </dev/null`。標準入力を閉じないとバックグラウンド実行で入力待ちのまま止まる)。ユーザー設定の既定値に頼らず呼び出し側で明示する — 既定値が変わっても委譲先のモデルがぶれないようにするため
+- **モデルと推論レベルの使い分け**: 作業の重さで「標準」と「軽量」を選び、委譲するときは呼び出し側でモデルと推論レベルを明示する(ユーザー設定の既定値に頼らない — 既定値が変わっても委譲先のモデルがぶれないようにするため)。どちらでも**最終レビューと判断は Claude Opus 5.5** が行う
+
+  | 役割 | 標準(計画・設計・複雑な実装) | 軽量修正 |
+  |---|---|---|
+  | 計画・オーケストレータ・最終判断 | Claude Opus 5.5(medium) | Claude Opus 5.5(medium) |
+  | 実装・テスト設計 | Codex `gpt-6.1-sol`(high) | Codex `gpt-6-luna`(medium) |
+  | テスト・レビュー(Codex 作の diff) | Codex `gpt-6.1-sol`(medium)+ agy Gemini 4 Argon(medium)+ agy Gemini 3.8 Flash(high)。すべて実行する | agy Gemini 3.8 Flash(medium) |
+  | レビュー(Claude 作の生成物) | Codex `gpt-6.1-sol`(medium)+ agy Gemini 4 Argon(medium)+ agy Gemini 3.8 Flash(high) | Codex `gpt-6-luna`(medium)+ agy Gemini 3.8 Flash(medium) |
+
+  - 呼び出し例: `codex exec -m gpt-6.1-sol -c model_reasoning_effort=high "<task>" </dev/null`(標準入力を閉じないとバックグラウンド実行で入力待ちのまま止まる)/ `agy-delegate -m gemini-4-argon-medium --dir <repo> "<task>"` / `agy-delegate -m gemini-3.8-flash-high ...`。Claude 自身の推論レベルは Claude Code 側の設定(`/effort`)で、ユーザーが決める
+  - **軽量修正**の条件(すべて満たすとき): スキーマ・CLI出力・Skill契約・設計を変えない / 差分が目安 50行・3ファイル以下 / 誤字・文言・テストの追加・1関数内のバグ修正などで、何をするかが Issue で決まっている / クラウド課金・認証に触れない(git.md step 7 の人間レビュー基準に当たるものは軽量にしない)。迷ったら標準にする。実装して条件を超えた、またはレビューで重大指摘が出たら標準に戻してやり直す
+  - **相互レビューの数え方**: Codex が実装した diff を Codex(medium)がレビューしても、同じモデルなので「作ったモデル ≠ レビューするモデル」には数えない(補助の指摘として扱う)。独立したレビュアーは agy(Gemini)と Claude。Claude 作の生成物は軽量でも Codex と agy の両方がレビュアーになる。agy 作の生成物は agy にレビューさせず、Codex と Claude がレビューする(`cross-review-design.md` §3)
+  - 使ったモデルと推論レベルは、コミット本文と PR 本文の `review:` 行に書く(例: `review: codex(gpt-6.1-sol:medium)+agy(gemini-4-argon-medium,gemini-3.8-flash-high) 1R / 重大0件 / 未解決0`)
 - **Jevによる判断の補助**: 細かい判断は `python scripts/jev_judge.py` で項目ごとの質問を1リクエストに並べ、Jevに並列で判定させてから、オーケストレータが最終判断する。(1) `route`: 作業をサブタスクに分けたとき、各サブタスクの振り先(claude / codex / agy)と、ユーザー判断が要るか (2) `triage`: 相互レビューの指摘ごとに evidence を渡して重大度と妥当性を判定する(採否の裁定の前に) (3) `merge`: 自動マージの可否(git.md Section 1 step 7)。Jevの判定は確率であり決定ではない — オーケストレータと食い違ったときは、ルーティングは担当表、採否は根拠を確かめた側、マージは人間レビュー側に倒す。数値・事実の通り道には使わない(product.md 原則1)。**Codexがオーケストレータのとき(Codex単体プロファイル)**: 既定のサンドボックスはネットワークを遮断し、Jevは名前解決で失敗する。Codexのセッション(または `codex exec`)を workspace-write サンドボックスで `-c sandbox_workspace_write.network_access=true` を付けて起動し、その中で `jev_judge.py` を実行する。名前解決に失敗したら、まずこの設定を確かめ、設定済みでも失敗するなら git.md step 7 の失敗時規約に従う
-- **agyのモデル方針**: 基本は Gemini 3.5 Flash。深い設計レビュー・複雑な調査ではClaudeの判断で Gemini Pro に引き上げてよい(引き上げた場合はコミット本文の `review:` 行に使用モデルを明記し、PRへは既存ルール通り転記)。Gemini quotaが切れた場合はagy経由の Claude Sonnet 系(現状4.6。Sonnet 5がagyで利用可能になり次第そちら)に切り替えて**調査を継続する**。ただし別モデル原則により: **Claude系代替モデルはClaude作生成物のレビュアーとして数えず**(Codex単独レビュー+記録)、**Claude系代替モデルで作成したagy生成物の相互レビューはCodexが担う**。**Geminiホストとしての Skill 実行・eval・`generated_by: gemini` 比較はGeminiモデル稼働時のみ**とし、quota切れ中はClaude単独実行で開発を進行してよい(Gemini側のeval・比較はフェーズ完了までに復旧後追実施)。agy自体が利用不可の場合、調査はClaudeが自身の検索ツールで代替し、**レビューは実施可能なレビュアー(Codex単独)で行う**。いずれもコミット本文・PR本文にその旨を記録する
+- **agyのモデル方針**: 使うモデルは上の使い分けの表に従う。調査は Gemini 3.8 Flash(medium)を基本にし、深い調査は Claudeの判断で Gemini 4 Argon に引き上げてよい。Gemini quotaが切れた場合はagy経由の Claude Sonnet 5.5 に切り替えて**調査を継続する**。ただし別モデル原則により: **Claude系代替モデルはClaude作生成物のレビュアーとして数えず**(Codex単独レビュー+記録)、**Claude系代替モデルで作成したagy生成物の相互レビューはCodexが担う**。**Geminiホストとしての Skill 実行・eval・`generated_by: gemini` 比較はGeminiモデル稼働時のみ**とし、quota切れ中はClaude単独実行で開発を進行してよい(Gemini側のeval・比較はフェーズ完了までに復旧後追実施)。agy自体が利用不可の場合、調査はClaudeが自身の検索ツールで代替し、**レビューは実施可能なレビュアー(Codex単独)で行う**。いずれもコミット本文・PR本文にその旨を記録する
 - **クラウド環境調査のガード**: agyのCloud Logging等の調査は読み取り専用・対象プロジェクト明示で行う。ログに含まれ得る機密・PIIは伏字・プレースホルダーにマスクした上で技術情報(エラーメッセージ・スタックトレース)のみを転記するか、ログURI参照のみを成果物・Issue・PRに記録する
 - 振り分けの基準に迷ったら: 作業を「意思決定・検証・裁定 / 手順が決まっているコード作成 / デバッグ / 外部情報の収集・大量読み込み / ドキュメント執筆 / 資料生成」のどの作業領域かで捉え、担当表の該当行に従う。どの行にも該当しなければ担当表に新しい行を足す判断をユーザーに確認する
 - 詳細な委譲手順は `antigravity` プラグインの steering/skill を参照(本ファイルは役割分担の方針のみを定める)
@@ -79,7 +91,7 @@ Medo の開発では実行主体を作業領域ごとに分担する。**Claude�
 中間生成物(スペック・実装計画・実装diff)は最小単位で相互レビューする。
 **正本: `docs/superpowers/specs/cross-review-design.md`**(詳細な手段・裁定ルールはそちらを参照)。
 
-- 原則(「全員揃う」プロファイル): **作ったモデル ≠ レビューするモデル**。Claude作の生成物(スペック・計画・diff)は Codex + agy の両方が、agy/Codex作のdiffは Claude がレビューする。Claudeが最終裁定者で、指摘も無検証で採用しない。単体プロファイルでは自己レビューに緩和する(Section 3「エージェント可用性プロファイル」参照)
+- 原則(「全員揃う」プロファイル): **作ったモデル ≠ レビューするモデル**。Claude作の生成物(スペック・計画・diff)は Codex + agy の両方が、agy/Codex作のdiffは Claude が(標準では他モデルの補助レビューの後に)レビューする。Claudeが最終裁定者で、指摘も無検証で採用しない。単体プロファイルでは自己レビューに緩和する(Section 3「エージェント可用性プロファイル」参照)
 - **上限2ラウンド**(指摘往復のみに適用)。早期終了は重大指摘ゼロ+コードは pytest/ruff パス。テスト・リントパスは裁定でも免除されない絶対条件
 - **記録**: コミット本文に `review: <レビュアー(+区切り)> <n>R / 重大<n>件解消 / 未解決<n>` を1行残す。PRを経由する変更(git.mdセクション1)は同じ記録をPR本文にも転記する
 
