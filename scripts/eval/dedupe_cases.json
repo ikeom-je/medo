@@ -1,0 +1,502 @@
+[
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "tech-1",
+      "kind": "tech",
+      "statement": "2017年のAttention Is All You Need論文は、Transformerが再帰を使わず注意機構で系列変換を行うと報告した。",
+      "source": "https://arxiv.org/abs/1706.03762",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-20",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "tech-2",
+      "kind": "tech",
+      "statement": "2017年のAttention Is All You NeedのTransformerは、再帰を使わず注意機構で系列変換を行う。原著の構成節ではエンコーダとデコーダをそれぞれ6層とし、その系列変換モデルの構成を明示している。",
+      "source": "https://arxiv.org/pdf/1706.03762.pdf",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "duplicate",
+    "keep": "b"
+  },
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "tech-3",
+      "kind": "tech",
+      "statement": "PostgreSQL 16の公式文書: トランザクション内の変更はCOMMITで一括確定され、ROLLBACKで全変更を取り消せる。これは複数処理を一つの不可分な単位として扱う機能である。",
+      "source": "https://www.postgresql.org/docs/16/tutorial-transactions.html",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "tech-4",
+      "kind": "tech",
+      "statement": "PostgreSQL 16ではトランザクションをまとめて確定したり取り消したりできる。",
+      "source": "https://dev.classmethod.jp/articles/postgresql16-transactions/",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-20",
+      "note": ""
+    },
+    "label": "duplicate",
+    "keep": "a"
+  },
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "trend-5",
+      "kind": "trend",
+      "statement": "2023年の日本の製造業企業におけるクラウド利用率は62%だった。",
+      "source": "https://www.soumu.go.jp/johotsusintokei/statistics/2023.html",
+      "value": 62,
+      "unit": "%",
+      "retrieved": "2026-09-25",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "trend-6",
+      "kind": "trend",
+      "statement": "日本の製造業企業のクラウド利用率は2025年調査で74%となった。",
+      "source": "https://www.soumu.go.jp/johotsusintokei/statistics/2025.html",
+      "value": 74,
+      "unit": "%",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "updates",
+    "keep": "b"
+  },
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "market-7",
+      "kind": "market",
+      "statement": "2025年の欧州産業用ロボット市場売上は180億ユーロである。",
+      "source": "https://ifr.org/reports/europe-market-2025",
+      "value": 180,
+      "unit": "億ユーロ",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "market-8",
+      "kind": "market",
+      "statement": "欧州産業用ロボット市場の年間売上額は2023年時点で150億ユーロだった。",
+      "source": "https://ifr.org/reports/europe-market-2023",
+      "value": 150,
+      "unit": "億ユーロ",
+      "retrieved": "2026-09-25",
+      "note": ""
+    },
+    "label": "updates",
+    "keep": "a"
+  },
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "market-9",
+      "kind": "market",
+      "statement": "日本の産業用ドローン市場規模は2025年に3000億円だった。",
+      "source": "https://www.meti.go.jp/statistics/drone/2025.html",
+      "value": 3000,
+      "unit": "億円",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "market-10",
+      "kind": "market",
+      "statement": "2025年、国内で事業用の無人航空機に投じられた市場の総額は4200億円と推計される。",
+      "source": "https://www.yano.co.jp/market_reports/drone2025.html",
+      "value": 4200,
+      "unit": "億円",
+      "retrieved": "2026-09-02",
+      "note": ""
+    },
+    "label": "conflicting",
+    "keep": null
+  },
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "trend-11",
+      "kind": "trend",
+      "statement": "2024年の日本の大企業の生成AI導入率は46%だった。",
+      "source": "https://www.soumu.go.jp/statistics/genai2024.html",
+      "value": 46,
+      "unit": "%",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "trend-12",
+      "kind": "trend",
+      "statement": "国内の大規模事業者を対象とした2024年調査では、文章や画像を自動生成するAIの採用割合は71%である。",
+      "source": "https://www.nri.com/jp/knowledge/report/genai2024.html",
+      "value": 71,
+      "unit": "%",
+      "retrieved": "2026-09-02",
+      "note": ""
+    },
+    "label": "conflicting",
+    "keep": null
+  },
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "tech-13",
+      "kind": "tech",
+      "statement": "2025年版Amazon S3 Standardは米国東部で最初の50TBの保存料金が1GB月あたり0.023ドルである。",
+      "source": "https://aws.amazon.com/s3/pricing/",
+      "value": 0.023,
+      "unit": "ドル/GB月",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "tech-14",
+      "kind": "tech",
+      "statement": "2025年版Amazon S3 Standardは東京と大阪のリージョンで利用できる。",
+      "source": "https://aws.amazon.com/s3/faqs/",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "complementary",
+    "keep": null
+  },
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "tech-15",
+      "kind": "tech",
+      "statement": "2025年版Cloud Runはリクエストベース課金で利用できる。",
+      "source": "https://cloud.google.com/run/docs/overview",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "tech-16",
+      "kind": "tech",
+      "statement": "2025年版Cloud Runは東京リージョンでサービスを実行できる。",
+      "source": "https://cloud.google.com/run/docs/overview?section=locations",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "complementary",
+    "keep": null
+  },
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "market-17",
+      "kind": "market",
+      "statement": "2024年の日本の冷凍食品市場の売上は8000億円だった。",
+      "source": "https://www.reishokukyo.or.jp/statistic/2024/",
+      "value": 8000,
+      "unit": "億円",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "market-18",
+      "kind": "market",
+      "statement": "2024年のドイツの産業用センサー市場の売上は4000億円だった。",
+      "source": "https://www.zvei.org/statistics/sensors2024",
+      "value": 4000,
+      "unit": "億円",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "unrelated",
+    "keep": null
+  },
+  {
+    "split": "tune",
+    "a": {
+      "entry_id": "tech-19",
+      "kind": "tech",
+      "statement": "SQLite 3.46はデータベースを単一のファイルに保存する。",
+      "source": "https://sqlite.org/onefile.html",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "tech-20",
+      "kind": "tech",
+      "statement": "Kubernetes 1.30ではPodを複数のノードへ配置して運用する。",
+      "source": "https://kubernetes.io/docs/concepts/workloads/pods/",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "unrelated",
+    "keep": null
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "tech-21",
+      "kind": "tech",
+      "statement": "2018年のBERT論文は事前学習モデルをファインチューニングして質問応答に適用できると示した。",
+      "source": "https://arxiv.org/abs/1810.04805",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-25",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "tech-22",
+      "kind": "tech",
+      "statement": "2018年のBERT論文は、事前学習モデルをファインチューニングして質問応答に適用できると示した。原著のSQuAD節は開始位置と終了位置のベクトルを学習する方式を明示し、質問応答への適用手順を説明している。",
+      "source": "https://arxiv.org/pdf/1810.04805.pdf",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "duplicate",
+    "keep": "b"
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "tech-23",
+      "kind": "tech",
+      "statement": "Redis 7の公式文書では、RDBスナップショットを指定した間隔でディスクへ保存できる。設定のsaveパラメータで時間と変更回数を指定して定期保存を制御する。",
+      "source": "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "tech-24",
+      "kind": "tech",
+      "statement": "Redis 7ではRDBで定期的にスナップショットを保存できる。",
+      "source": "https://zenn.dev/articles/redis7-rdb-snapshot",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-25",
+      "note": ""
+    },
+    "label": "duplicate",
+    "keep": "a"
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "market-25",
+      "kind": "market",
+      "statement": "2023年の福岡県の年間観光客数は1850万人だった。",
+      "source": "https://www.pref.fukuoka.lg.jp/contents/tourism2023.html",
+      "value": 1850,
+      "unit": "万人",
+      "retrieved": "2026-09-25",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "market-26",
+      "kind": "market",
+      "statement": "福岡県を訪れた観光客は2025年の年間集計で2130万人となった。",
+      "source": "https://www.pref.fukuoka.lg.jp/contents/tourism2025.html",
+      "value": 2130,
+      "unit": "万人",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "updates",
+    "keep": "b"
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "trend-27",
+      "kind": "trend",
+      "statement": "2025年のEU域内製造業企業のクラウド利用率は55%である。",
+      "source": "https://ec.europa.eu/eurostat/cloud2025",
+      "value": 55,
+      "unit": "%",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "trend-28",
+      "kind": "trend",
+      "statement": "EU域内の製造業企業でクラウドを利用する割合は2023年調査で45%だった。",
+      "source": "https://ec.europa.eu/eurostat/cloud2023",
+      "value": 45,
+      "unit": "%",
+      "retrieved": "2026-09-25",
+      "note": ""
+    },
+    "label": "updates",
+    "keep": "a"
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "market-29",
+      "kind": "market",
+      "statement": "2024年の日本の介護ロボット市場規模は950億円だった。",
+      "source": "https://www.meti.go.jp/statistics/care-robots2024.html",
+      "value": 950,
+      "unit": "億円",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "market-30",
+      "kind": "market",
+      "statement": "国内で高齢者介助に使うロボットの販売市場は、2024年の総額で1300億円に達した。",
+      "source": "https://www.fuji-keizai.co.jp/report/care2024.html",
+      "value": 1300,
+      "unit": "億円",
+      "retrieved": "2026-09-02",
+      "note": ""
+    },
+    "label": "conflicting",
+    "keep": null
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "trend-31",
+      "kind": "trend",
+      "statement": "2025年の日本の中小企業の電子契約導入率は38%だった。",
+      "source": "https://www.chusho.meti.go.jp/statistics/contract2025.html",
+      "value": 38,
+      "unit": "%",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "trend-32",
+      "kind": "trend",
+      "statement": "国内の中小規模の会社における契約書の電子署名システムの採用割合は2025年調査で64%とされた。",
+      "source": "https://www.itmedia.co.jp/business/articles/2025-contract.html",
+      "value": 64,
+      "unit": "%",
+      "retrieved": "2026-09-02",
+      "note": ""
+    },
+    "label": "conflicting",
+    "keep": null
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "tech-33",
+      "kind": "tech",
+      "statement": "2025年版Azure Blob StorageのHot層は従量料金でストレージを利用できる。",
+      "source": "https://azure.microsoft.com/pricing/details/storage/blobs/",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "tech-34",
+      "kind": "tech",
+      "statement": "2025年版Azure Blob StorageのHot層は東日本と西日本のリージョンに対応している。",
+      "source": "https://azure.microsoft.com/pricing/details/storage/blobs/?tab=regions",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "complementary",
+    "keep": null
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "tech-35",
+      "kind": "tech",
+      "statement": "2025年版Google Cloud Spannerは従量料金が処理容量と保存容量に基づく。",
+      "source": "https://cloud.google.com/spanner/overview",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "tech-36",
+      "kind": "tech",
+      "statement": "2025年版Google Cloud Spannerは東京リージョンで利用できる。",
+      "source": "https://cloud.google.com/spanner/overview?tab=regions",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "complementary",
+    "keep": null
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "trend-37",
+      "kind": "trend",
+      "statement": "2024年の英国の在宅勤務実施率は28%だった。",
+      "source": "https://www.ons.gov.uk/employment/homeworking2024",
+      "value": 28,
+      "unit": "%",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "trend-38",
+      "kind": "trend",
+      "statement": "2024年の日本の家庭における太陽光発電設備の普及率は12%だった。",
+      "source": "https://www.enecho.meti.go.jp/statistics/solar2024.html",
+      "value": 12,
+      "unit": "%",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "unrelated",
+    "keep": null
+  },
+  {
+    "split": "validate",
+    "a": {
+      "entry_id": "practice-39",
+      "kind": "practice",
+      "statement": "設計レビューでは変更の影響範囲を確認してから承認を記録する。",
+      "source": "engineering-handbook",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "b": {
+      "entry_id": "practice-40",
+      "kind": "practice",
+      "statement": "倉庫の棚卸しではバーコードを読み取って在庫数を確認する。",
+      "source": "warehouse-manual",
+      "value": null,
+      "unit": "",
+      "retrieved": "2026-09-01",
+      "note": ""
+    },
+    "label": "unrelated",
+    "keep": null
+  }
+]
